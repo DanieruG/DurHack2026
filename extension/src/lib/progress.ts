@@ -1,5 +1,6 @@
 import { SseEventSchemas, type SseEventData, type SseEventName } from "@/schemas/api";
-import type { CaseDiff, CheckName, CheckResult, Lead, NextMove, Verdict } from "@/schemas/domain";
+import { NewOffersSchema, type CaseDiff, type CheckName, type CheckResult, type Lead, type NewOffers, type NextMove, type Verdict } from "@/schemas/domain";
+import { openableOffers } from "./offers";
 import { checkTags, stepTags } from "./tags";
 
 export type LogLine = {
@@ -25,6 +26,10 @@ export type Investigation = {
   leadsSkipped: string | null;
   verdict: Verdict | null;
   nextMoves: NextMove[];
+  /** New-price offers: from new_offers as soon as the Shopping lookup finishes, then from the price check itself. */
+  newOffers: NewOffers | null;
+  /** The price check has started and not reported yet: the offers slot is reserved. */
+  priceRunning: boolean;
   diff: CaseDiff | null;
   done: boolean;
   fatal: string | null;
@@ -47,6 +52,8 @@ export function newInvestigation(revision: number, at: number): Investigation {
     leadsSkipped: null,
     verdict: null,
     nextMoves: [],
+    newOffers: null,
+    priceRunning: false,
     diff: null,
     done: false,
     fatal: null,
@@ -170,6 +177,7 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       const expected = (ALL_CHECKS as string[]).includes(stage) && !s.expected.includes(stage as CheckName)
         ? [...s.expected, stage as CheckName]
         : s.expected;
+      if (stage === "price") s = { ...s, priceRunning: true };
       if (!text || s.checks[stage as CheckName]) return { ...s, expected };
       return { ...s, expected, log: upsert(s.log, { key: stage, text, state: "active", kind: "step", at: e.at }) };
     }
@@ -183,6 +191,11 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
     }
     case "check_done": {
       const c = e.data as CheckResult;
+      if (c.check === "price") {
+        // The finished price check is the word on its offers (none at all if, say, the version turned out unclear).
+        const offers = NewOffersSchema.safeParse((c.details as { newOffers?: unknown } | undefined)?.newOffers);
+        s = { ...s, priceRunning: false, newOffers: offers.success ? offers.data : null };
+      }
       const checks = { ...s.checks, [c.check]: c };
       const expected = s.expected.includes(c.check) ? s.expected : [...s.expected, c.check];
       return { ...s, checks, expected, log: upsert(s.log, { key: c.check, ...checkLine(c), kind: "step", at: e.at, tags: checkTags(c) }) };
@@ -225,7 +238,7 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       return { ...s, log: upsert(s.log, { key: `error:${stage}`, text: message, state: "problem", kind: "warning", at: e.at }) };
     }
     case "new_offers":
-      return s; // shown by the panel's offer cards (next commit)
+      return { ...s, newOffers: e.data as NewOffers };
     case "verdict":
       return { ...s, verdict: e.data as Verdict };
     case "next_moves":
@@ -237,6 +250,12 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       return { ...s, done: true, log: settle(s.log), totals: { durationMs: d.durationMs, geminiCalls: d.geminiCalls, cachedCalls: d.cachedCalls } };
     }
   }
+}
+
+/** The live offers slot: reserved while the price check runs, filled once offers that can be opened arrive. */
+export function offersSlot(s: Investigation): { show: boolean; data: NewOffers | null } {
+  const data = s.newOffers && openableOffers(s.newOffers).length ? s.newOffers : null;
+  return { show: !!data || s.priceRunning, data };
 }
 
 /** Progress strip: one segment per expected check, filled when it reports. */

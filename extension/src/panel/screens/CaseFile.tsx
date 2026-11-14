@@ -6,6 +6,8 @@ import { caseLabel } from "../../lib/history";
 import { conditionView, evidenceLines, leadsView, priceView, sourceRefs, type ConditionView, type SourceRef } from "../../lib/evidence";
 import { Button, CopyButton, Label, Notice, StatusMark, Tags, Verdict } from "../ui";
 import { checkTags, runTotals } from "../../lib/tags";
+import { BUY_NEW_MOVE_ID } from "../../lib/offers";
+import { OfferCards } from "../offers";
 
 const ORDER: CheckName[] = ["condition", "fit", "comfort", "price"];
 
@@ -42,7 +44,8 @@ export function CaseFile(props: {
   const identify = byName.get("identify");
   const rows = [...(identify && identify.status !== "pass" ? [identify] : []), ...ORDER.map((n) => byName.get(n)).filter((c): c is CheckResult => !!c)];
   const questions = detail.nextMoves.filter((m) => m.kind === "ask_seller");
-  const beforePay = detail.nextMoves.filter((m) => m.kind === "before_you_pay");
+  const buyNew = detail.nextMoves.find((m) => m.id === BUY_NEW_MOVE_ID);
+  const beforePay = detail.nextMoves.filter((m) => m.kind === "before_you_pay" && m !== buyNew);
   const leads = leadsView(detail);
   const price = props.listing.priceGBP ?? detail.listingFacts?.priceGBP ?? null;
   const title = detail.listingFacts?.title || props.listing.title;
@@ -97,7 +100,7 @@ export function CaseFile(props: {
         </section>
       )}
 
-      {(questions.length > 0 || beforePay.length > 0) && (
+      {(questions.length > 0 || beforePay.length > 0 || buyNew) && (
         <section className="block next">
           <h2 className="h2">Your next move</h2>
           {questions.map((q) => (
@@ -116,6 +119,13 @@ export function CaseFile(props: {
               </ul>
             </>
           )}
+          {buyNew && (
+            <div className="buy-new">
+              <Label>Consider buying new</Label>
+              <p className="buy-new-text">{buyNewText(buyNew.text)}</p>
+              {detail.newOffers && <OfferCards data={detail.newOffers} />}
+            </div>
+          )}
         </section>
       )}
 
@@ -132,6 +142,12 @@ export function CaseFile(props: {
       {detail.run && <p className="totals mono dim">{runTotals(detail.run)}</p>}
     </div>
   );
+}
+
+/** The move's text without its "Consider buying new:" lead-in (the label above says it). */
+function buyNewText(text: string): string {
+  const rest = text.replace(/^Consider buying new:\s*/i, "");
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
 function EvidenceRow(props: { check: CheckResult; open: boolean; onToggle: () => void; refs?: SourceRef[]; children: ReactNode }) {
@@ -192,6 +208,7 @@ function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }
               {l}
             </p>
           ))}
+          {detail.newOffers && <OfferCards data={detail.newOffers} />}
           {sourceRefs(check).length > 0 && <SourceList refs={sourceRefs(check)} />}
         </>
       );

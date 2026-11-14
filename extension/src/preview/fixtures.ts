@@ -1,5 +1,5 @@
 import type { CaseDetail } from "@/schemas/api";
-import type { CaseDiff, CheckResult, Profile } from "@/schemas/domain";
+import type { CaseDiff, CheckResult, NewOffers, Profile } from "@/schemas/domain";
 import type { ListingPreview } from "../lib/capture";
 import { applyEvent, newInvestigation, type IncomingEvent, type Investigation } from "../lib/progress";
 
@@ -85,6 +85,18 @@ const comfort: CheckResult = {
   geminiFeatures: ["search_grounding"],
 };
 
+/** Retailer offers as the server sends them (cheapest first, one isLowest). Thumbnails left out: the preview is offline. */
+export const NEW_OFFERS: NewOffers = {
+  checkedOn: "2026-11-14",
+  enoughForComparison: true,
+  offers: [
+    { retailer: "Decathlon UK", title: "Nike Air Zoom Pegasus 40 Men's Road Running Shoes", priceGBP: 75.23, url: "https://www.decathlon.co.uk/", differenceGBP: 33.23, isLowest: true },
+    { retailer: "Sports Direct", title: "Nike Pegasus 40 Running Shoes Mens", priceGBP: 79.99, url: "https://www.sportsdirect.com/", differenceGBP: 37.99, isLowest: false },
+    { retailer: "JD Sports", title: "Nike Air Zoom Pegasus 40", priceGBP: 89.99, url: "https://www.jdsports.co.uk/", differenceGBP: 47.99, isLowest: false },
+    { retailer: "FARFETCH", title: "Nike Air Zoom Pegasus 40 low-top sneakers", priceGBP: 104, url: "https://www.farfetch.com/uk/", differenceGBP: 62, isLowest: false },
+  ],
+};
+
 const price: CheckResult = {
   check: "price",
   status: "pass",
@@ -100,6 +112,7 @@ const price: CheckResult = {
     sample: { n: 12, excluded: 1, median: 50, p10: 36, p25: 44, p75: 55, p90: 60, collectedOn: { from: "2026-11-10", to: "2026-11-10" }, ruleIds: ["R-newest-N"], placeholder: false },
     newPrice: { gbp: 75, sources: 3 },
     position: "below",
+    newOffers: NEW_OFFERS,
   },
 };
 
@@ -128,7 +141,7 @@ export const CASE_FILE: CaseDetail = {
     { id: "lead_2", type: "flag_for_seller", reason: "The inside lining isn't shown.", status: "done", outcome: "Added a question for the seller about condition.", relatesTo: "condition" },
   ],
   leadsReport: { considered: true },
-  newOffers: null,
+  newOffers: NEW_OFFERS,
   run: { durationMs: 11400, geminiCalls: 7, cachedCalls: 0 },
   verdict: {
     label: "proceed_with_caution",
@@ -161,6 +174,8 @@ export function investigationInProgress(): Investigation {
     ev("stage_started", { stage: "identify" }, 1),
     ev("check_done", identify, 3),
     ev("check_done", fit, 4),
+    ev("stage_started", { stage: "price" }, 4),
+    ev("new_offers", NEW_OFFERS, 5),
     ev("check_done", { ...price, status: "warn", details: { ...price.details, position: "suspiciously_low" } }, 6),
     ev("check_done", { ...comfort, evidence: [...comfort.evidence, { ...comfort.evidence[0], id: "ev_m4", url: "https://example.org/review" }] }, 9),
     ev("stage_started", { stage: "condition" }, 9),

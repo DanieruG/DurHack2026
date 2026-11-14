@@ -1,6 +1,7 @@
 import { CHECK_NAMES, elapsed } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
-import { segments, type Investigation } from "../../lib/progress";
+import { offersSlot, segments, type Investigation } from "../../lib/progress";
+import { OffersSlot } from "../offers";
 import { Button, Notice, Tags } from "../ui";
 
 export function Investigating(props: {
@@ -14,6 +15,7 @@ export function Investigating(props: {
   const segs = segments(inv);
   const doneCount = segs.filter((s) => s.done).length;
   const status = inv.revision > 1 ? "Reopened" : "Investigating";
+  const offers = offersSlot(inv);
 
   return (
     <div className="screen">
@@ -45,6 +47,8 @@ export function Investigating(props: {
           </li>
         ))}
       </ol>
+
+      {offers.show && <OffersSlot data={offers.data} />}
 
       {(inv.fatal || props.lost) && (
         <div className="foot">
