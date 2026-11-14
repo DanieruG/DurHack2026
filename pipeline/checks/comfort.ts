@@ -12,7 +12,7 @@ import { functionTool, runToolLoop, type ToolExecutor } from "@/gemini/tools";
 import { containsBanned } from "../verdict/validate";
 import { allPriorities } from "../needs";
 import type { SizingAdvice } from "./fit";
-import { evidenceIds, round2, unknownCheck } from "../util";
+import { evidenceIds, round2, unknownCheck, withSearchBudget } from "../util";
 
 export const FALLBACK_CONFIDENCE_CAP = 0.6;
 const DEFAULT_PRIORITIES = ["all-day comfort", "durability"];
@@ -195,36 +195,45 @@ export async function checkComfort(args: {
   combinedTools: boolean;
   executors: Partial<Record<string, ToolExecutor>>;
   snippets: ReviewSnippet[];
+  /** SEARCH_TIMEOUT_MS: past this, the saved review snippets are used instead. */
+  searchTimeoutMs?: number;
 }): Promise<CheckResult> {
   const priorities = (allPriorities(args.needs).length ? allPriorities(args.needs) : DEFAULT_PRIORITIES).slice(0, 5);
   const contents = [{ role: "user" as const, parts: [{ text: comfortPrompt(args.model, priorities) }] }];
   try {
-    let text: string;
-    let meta;
-    const features: GeminiFeature[] = ["search_grounding"];
-    if (args.combinedTools) {
-      const res = await runToolLoop(args.gemini, {
-        stage: "comfort",
-        tier: "fast",
-        contents,
-        config: { temperature: 0.2, tools: [{ googleSearch: {} }, functionTool(["convertSize"])], toolConfig: { includeServerSideToolInvocations: true } },
-        executors: args.executors,
-      });
-      text = res.response.text;
-      meta = res.response.groundingMetadata;
-      if (res.calledFunctions.length) features.push("function_calling");
-    } else {
-      const res = await args.gemini.generate({ stage: "comfort", tier: "fast", contents, config: { temperature: 0.2, tools: [{ googleSearch: {} }] } });
-      text = res.text;
-      meta = res.groundingMetadata;
-    }
-    const parsed = parseComfort(text, meta);
-    if (parsed.sources.length === 0) throw new Error("no grounding sources");
-    return comfortResult(parsed, { today: args.today, features });
+    return await withSearchBudget(args.searchTimeoutMs, () => searchComfort(args, contents));
   } catch (err) {
     if ((err as Error)?.name === "StageTimeoutError") throw err;
     return comfortFromSnippets(args.snippets, args.needs, args.today);
   }
+}
+
+async function searchComfort(
+  args: Parameters<typeof checkComfort>[0],
+  contents: { role: "user"; parts: { text: string }[] }[],
+): Promise<CheckResult> {
+  let text: string;
+  let meta;
+  const features: GeminiFeature[] = ["search_grounding"];
+  if (args.combinedTools) {
+    const res = await runToolLoop(args.gemini, {
+      stage: "comfort",
+      tier: "fast",
+      contents,
+      config: { temperature: 0.2, tools: [{ googleSearch: {} }, functionTool(["convertSize"])], toolConfig: { includeServerSideToolInvocations: true } },
+      executors: args.executors,
+    });
+    text = res.response.text;
+    meta = res.response.groundingMetadata;
+    if (res.calledFunctions.length) features.push("function_calling");
+  } else {
+    const res = await args.gemini.generate({ stage: "comfort", tier: "fast", contents, config: { temperature: 0.2, tools: [{ googleSearch: {} }] } });
+    text = res.text;
+    meta = res.groundingMetadata;
+  }
+  const parsed = parseComfort(text, meta);
+  if (parsed.sources.length === 0) throw new Error("no grounding sources");
+  return comfortResult(parsed, { today: args.today, features });
 }
 
 function hostOf(url: string): string {

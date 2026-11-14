@@ -19,6 +19,7 @@ const EnvSchema = z.object({
   IDENTIFY_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.75),
   MAX_LEADS: z.coerce.number().int().min(0).max(5).default(2),
   STAGE_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
+  SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   MAX_IMAGES: z.coerce.number().int().positive().max(20).default(8),
   MAX_IMAGE_BYTES: z.coerce.number().int().positive().default(8_000_000),
   PIPELINE_VERSION: z.string().default("2"),
@@ -36,6 +37,8 @@ export type Config = {
   identifyConfidenceMin: number;
   maxLeads: number;
   stageTimeoutMs: number;
+  /** Cap on each Google Search grounded step (price new-price lookup, comfort reviews); past it, saved data is used. */
+  searchTimeoutMs: number;
   maxImages: number;
   maxImageBytes: number;
   pipelineVersion: string;
@@ -56,6 +59,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     identifyConfidenceMin: e.IDENTIFY_CONFIDENCE_MIN,
     maxLeads: e.MAX_LEADS,
     stageTimeoutMs: e.STAGE_TIMEOUT_MS,
+    searchTimeoutMs: e.SEARCH_TIMEOUT_MS,
     maxImages: e.MAX_IMAGES,
     maxImageBytes: e.MAX_IMAGE_BYTES,
     pipelineVersion: e.PIPELINE_VERSION,
@@ -71,6 +75,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     identifyConfidenceMin: 0.75,
     maxLeads: 2,
     stageTimeoutMs: 2000,
+    searchTimeoutMs: 1000,
     maxImages: 8,
     maxImageBytes: 8_000_000,
     pipelineVersion: "test",

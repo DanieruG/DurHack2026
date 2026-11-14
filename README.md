@@ -22,6 +22,10 @@ Model names are never hard-coded. Set `GEMINI_MODEL_FAST` (extraction, checks, w
 with Google Search plus function calling (Gemini 3 tool combination, sent with `includeServerSideToolInvocations`). Both paths produce
 identical output shapes; a test checks this.
 
+`SEARCH_TIMEOUT_MS` (default `10000`) caps each Google Search grounded step: the price check's new-price lookup and the comfort
+check's review search. When a search runs past the cap, it's aborted and the check falls back to saved data (the resale price sample
+or the saved review snippets), so a slow search can't hold up the case. `STAGE_TIMEOUT_MS` still bounds each stage as a whole.
+
 Without `DATABASE_URL`, the app falls back to an in-memory store seeded from `/data`. This is useful for local work, but it isn't persistent.
 
 ### Neon on networks that block port 5432

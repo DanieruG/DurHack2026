@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agreeingCluster, decidePrice, parseNewPrices, shouldRunSourceB } from "@/pipeline/checks/price";
-import type { SampleStats } from "@/schemas/domain";
-import { grounded } from "./helpers";
+import { agreeingCluster, checkPrice, decidePrice, parseNewPrices, shouldRunSourceB } from "@/pipeline/checks/price";
+import { createGeminiClient } from "@/gemini/client";
+import { testConfig } from "@/lib/config";
+import type { ListingFacts, SampleStats } from "@/schemas/domain";
+import { fixtureReference, grounded } from "./helpers";
 
 const sample: SampleStats = { n: 12, excluded: 0, median: 50, p10: 30, p25: 40, p75: 60, p90: 70, collectedOn: { from: "2026-11-03", to: "2026-11-10" }, ruleIds: ["R-newest-N"], placeholder: false };
 const newPrice = { gbp: 120 };
@@ -32,6 +34,35 @@ describe("price status table", () => {
     expect(shouldRunSourceB(40, null)).toBe(true);
     expect(shouldRunSourceB(40, sample)).toBe(false);
     expect(shouldRunSourceB(60, sample)).toBe(true);
+  });
+});
+
+describe("search budget", () => {
+  it("aborts a slow Source B search at searchTimeoutMs and decides from the sample alone", async () => {
+    let aborted = false;
+    const gemini = createGeminiClient({
+      config: testConfig(),
+      logger: () => undefined,
+      transport: (req) =>
+        new Promise((_, reject) => req.abortSignal?.addEventListener("abort", () => ((aborted = true), reject(new Error("aborted"))))),
+    });
+    const ref = fixtureReference();
+    const started = Date.now();
+    const res = await checkPrice({
+      facts: { priceGBP: 58, evidence: [] } as unknown as ListingFacts,
+      needs: { sizes: [], priorities: [], wearTolerance: "light", extraPriorities: [], assumptions: [] },
+      model: ref.catalogue[0],
+      samples: ref.priceSamples,
+      today: "2026-11-14",
+      gemini,
+      combinedTools: false,
+      executors: {},
+      searchTimeoutMs: 80,
+    });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(aborted).toBe(true);
+    expect(res.newPrice).toBeNull();
+    expect(res.status).not.toBe("unknown");
   });
 });
 

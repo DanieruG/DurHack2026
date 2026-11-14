@@ -1,6 +1,6 @@
 import type { StageName } from "@/schemas/api";
 import type { CheckName, CheckResult, Evidence, GeminiFeature } from "@/schemas/domain";
-import { withStageContext } from "@/gemini/client";
+import { withDeadline, withStageContext } from "@/gemini/client";
 import type { Emit } from "./events";
 
 export class StageTimeoutError extends Error {
@@ -8,6 +8,19 @@ export class StageTimeoutError extends Error {
     super(`${stage} took longer than ${Math.round(ms / 1000)}s`);
     this.name = "StageTimeoutError";
   }
+}
+
+/** A Google Search grounded call exceeded SEARCH_TIMEOUT_MS; the check falls back to saved data. */
+export class SearchTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`search took longer than ${Math.round(ms / 1000)}s`);
+    this.name = "SearchTimeoutError";
+  }
+}
+
+/** Cap a search-grounded step at `ms` (SEARCH_TIMEOUT_MS). No cap when ms is undefined. */
+export function withSearchBudget<T>(ms: number | undefined, fn: () => Promise<T>): Promise<T> {
+  return ms ? withDeadline(ms, () => new SearchTimeoutError(ms), fn) : fn();
 }
 
 /**

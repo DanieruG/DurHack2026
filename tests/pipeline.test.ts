@@ -96,6 +96,16 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checksFrom(events).comfort).toMatchObject({ status: "unknown", summary: expect.stringMatching(/ran out of time/) });
   });
 
+  it("a slow search hits SEARCH_TIMEOUT_MS and falls back to saved reviews, well inside the stage timeout", async () => {
+    const hang: Handler = () => new Promise(() => undefined);
+    const deps = makeDeps({ config: { stageTimeoutMs: 2000, searchTimeoutMs: 100 }, handlers: { comfort: hang } });
+    const started = Date.now();
+    const { events } = await investigate(deps);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(checksFrom(events).comfort).toMatchObject({ details: { fallback: true } });
+    expect(checksFrom(events).comfort.summary).not.toMatch(/ran out of time/);
+  });
+
   it("follows at most MAX_LEADS leads; executors update checks; flag_for_seller adds a question", async () => {
     const deps = makeDeps({
       handlers: {

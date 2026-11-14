@@ -14,7 +14,7 @@ import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
 import type { GeminiClient } from "@/gemini/client";
 import { groundingSources, sourcesForLine, sourceToEvidence, type GroundedSource } from "@/gemini/grounding";
 import { functionTool, runToolLoop, type ToolExecutor } from "@/gemini/tools";
-import { evidenceIds, gbp, round2, unknownCheck } from "../util";
+import { evidenceIds, gbp, round2, unknownCheck, withSearchBudget } from "../util";
 
 export const SAMPLE_CONFIDENCE_CAP = 0.7;
 export const NEW_PRICE_AGREEMENT = 0.15;
@@ -175,6 +175,8 @@ export type PriceCheckArgs = {
   forceSourceB?: boolean;
   /** Reuse a previous Source B result instead of calling again. */
   previousNewPrice?: NewPrice | null;
+  /** SEARCH_TIMEOUT_MS: past this, Source B is skipped and the sample alone decides. */
+  searchTimeoutMs?: number;
 };
 
 export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult & { newPrice?: NewPrice | null }> {
@@ -195,7 +197,9 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult & { 
   if (!newPrice && (args.forceSourceB || shouldRunSourceB(price, sample))) {
     ranB = true;
     try {
-      newPrice = await findNewPrice(args.gemini, { model: args.model, today: args.today, combinedTools: args.combinedTools, executors: args.executors });
+      newPrice = await withSearchBudget(args.searchTimeoutMs, () =>
+        findNewPrice(args.gemini, { model: args.model, today: args.today, combinedTools: args.combinedTools, executors: args.executors }),
+      );
     } catch (err) {
       if ((err as Error)?.name === "StageTimeoutError") throw err;
       bError = true;

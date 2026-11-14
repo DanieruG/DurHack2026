@@ -90,6 +90,29 @@ export function withStageContext<T>(stage: string, signal: AbortSignal | undefin
   return callContext.run(ctx, fn);
 }
 
+/**
+ * Run fn under an extra deadline (inside the current stage): nested Gemini calls, including retries,
+ * are aborted after `ms` and the promise rejects with `makeError()`. The stage's own abort signal still applies.
+ */
+export async function withDeadline<T>(ms: number, makeError: () => Error, fn: () => Promise<T>): Promise<T> {
+  const parent = callContext.getStore();
+  const controller = new AbortController();
+  const signal = parent?.signal ? AbortSignal.any([parent.signal, controller.signal]) : controller.signal;
+  const ctx: CallContext = { caseId: parent?.caseId, stage: parent?.stage, log: parent?.log ?? [], signal };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(makeError());
+    }, ms);
+  });
+  try {
+    return await Promise.race([callContext.run(ctx, fn), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---------- client ----------
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

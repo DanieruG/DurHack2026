@@ -94,6 +94,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             condition: opts.priceCondition,
             forceSourceB: opts.forceSourceB,
             previousNewPrice: ctx.newPrice,
+            searchTimeoutMs: deps.config.searchTimeoutMs,
           });
           const { newPrice, ...check } = res;
           if (newPrice !== undefined && newPrice !== null) ctx.newPrice = newPrice;
@@ -108,6 +109,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             combinedTools: deps.config.combinedTools,
             executors: ctx.executors,
             snippets: ctx.ref.reviews.filter((r) => r.modelId === model!.id),
+            searchTimeoutMs: deps.config.searchTimeoutMs,
           });
         case "condition":
           return checkCondition({ gemini: deps.gemini, images: ctx.images, facts: ctx.facts, needs: ctx.needs });
