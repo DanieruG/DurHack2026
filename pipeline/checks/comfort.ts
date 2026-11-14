@@ -268,7 +268,7 @@ export async function checkComfort(args: {
 }): Promise<CheckResult> {
   const priorities = (allPriorities(args.needs).length ? allPriorities(args.needs) : DEFAULT_PRIORITIES).slice(0, 5);
   try {
-    return await withSearchBudget(args.searchTimeoutMs, () => searchComfort(args, priorities));
+    return await searchComfort(args, priorities);
   } catch (err) {
     if ((err as Error)?.name === "StageTimeoutError") throw err;
     const fallback = comfortFromSnippets(args.snippets, args.needs, args.today);
@@ -278,14 +278,15 @@ export async function checkComfort(args: {
 }
 
 async function searchComfort(args: Parameters<typeof checkComfort>[0], priorities: string[]): Promise<CheckResult> {
-  const answer = await groundedSearch(args.gemini, {
+  // SEARCH_TIMEOUT_MS caps the grounded search only; structuring the cited sentences is bounded by the stage timeout.
+  const answer = await withSearchBudget(args.searchTimeoutMs, () => groundedSearch(args.gemini, {
     stage: "comfort",
     prompt: comfortPrompt(args.model, priorities),
     temperature: 0.2,
     combinedTools: args.combinedTools,
     functions: ["convertSize"],
     executors: args.executors,
-  });
+  }));
   const features: GeminiFeature[] = ["search_grounding"];
   if (answer.calledFunctions.length) features.push("function_calling");
   const parsed = comfortFromPoints(await structureComfort(args.gemini, answer.segments, priorities), answer.segments, priorities);
