@@ -51,6 +51,17 @@ export function segmentList(segments: Segment[]): string {
   return segments.map((s) => `${s.id}: ${s.text} (sources: ${[...new Set(s.sources.map((x) => x.domain))].join(", ")})`).join("\n");
 }
 
+const normText = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Find the sentence a structured item points at: by id ("S3"), or by its exact text (models sometimes echo the text). */
+export function resolveSegment(segments: Segment[], ref: string): Segment | undefined {
+  const r = ref.trim();
+  const byId = segments.find((s) => s.id === r.toUpperCase());
+  if (byId) return byId;
+  const n = normText(r.replace(/^S\d+:\s*/i, "").replace(/\s*\(sources:[^)]*\)\s*$/, ""));
+  return n ? segments.find((s) => normText(s.text) === n) : undefined;
+}
+
 export class NoGroundingError extends Error {
   constructor(stage: string) {
     super(`${stage}: search returned no sources`);

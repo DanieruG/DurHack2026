@@ -95,13 +95,6 @@ export function groundingSources(
   return sources.filter((s) => s.url);
 }
 
-/** Sources supporting a given line of the response text (segment overlap by text). */
-export function sourcesForLine(sources: GroundedSource[], line: string): GroundedSource[] {
-  const l = line.trim();
-  if (!l) return [];
-  return sources.filter((s) => s.segments.some((seg) => l.includes(seg) || seg.includes(l)));
-}
-
 export function sourceToEvidence(src: GroundedSource, id: string, observedOn: string, quote?: string): Evidence {
   return {
     id,
@@ -128,18 +121,4 @@ function labelFor(t: EvidenceSourceType): string {
     default:
       return "Source";
   }
-}
-
-/** Parse "SOURCETYPES | runrepeat.com=independent_review; nike.com=manufacturer" hint lines. */
-export function parseSourceTypeHints(text: string): Record<string, EvidenceSourceType> {
-  const out: Record<string, EvidenceSourceType> = {};
-  const line = text.split("\n").find((l) => /^\s*SOURCETYPES\s*\|/i.test(l));
-  if (!line) return out;
-  for (const pair of line.split("|")[1].split(/[;,]/)) {
-    const [d, t] = pair.split("=").map((x) => x?.trim().toLowerCase());
-    if (d && (t === "independent_review" || t === "manufacturer" || t === "retailer" || t === "other")) {
-      out[d.replace(/^www\./, "")] = t;
-    }
-  }
-  return out;
 }

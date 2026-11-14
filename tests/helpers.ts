@@ -86,6 +86,21 @@ export function grounded(lines: [string, string[]][], extra = ""): GenResponse {
   return { text: lines.map(([l]) => l).join("\n") + (extra ? `\n${extra}` : ""), functionCalls: [], groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } };
 }
 
+/**
+ * Step 2 of the comfort search, as the model would do it for mock sentences written as
+ * "PRIORITY | <priority> | <assessment> | <text>" or "SIZING | <advice> | <text>" (listed as "S1: ... (sources: ...)").
+ */
+export function mockComfortPoints(prompt: string) {
+  const points: { segment: string; topic: string; assessment?: string; sizing?: string }[] = [];
+  for (const line of prompt.split("\n")) {
+    const p = /^(S\d+): PRIORITY \| (.+?) \| (positive|negative|mixed|unclear) \|/i.exec(line);
+    if (p) points.push({ segment: p[1], topic: p[2], assessment: p[3].toLowerCase() });
+    const z = /^(S\d+): SIZING \| (runs_small|runs_large|true_to_size|unclear) \|/i.exec(line);
+    if (z) points.push({ segment: z[1], topic: "sizing", sizing: z[2].toLowerCase() });
+  }
+  return { points, sourceTypes: [] };
+}
+
 export type Handler = (req: GenRequest & { model: string }) => GenResponse | Promise<GenResponse>;
 
 export function promptText(req: GenRequest): string {
@@ -117,13 +132,21 @@ export function happyHandlers(): Record<string, Handler> {
       json({ catalogueModelId: "nike-pegasus-40", confidence: 0.92, reasons: "Title and swoosh/sole pattern match.", evidence: [{ kind: "quote", label: "Title names the model", quote: "Nike Air Zoom Pegasus 40" }] }),
     price: () => grounded([["PRICE | none | none", []]]),
     comfort: () =>
-      grounded(
-        [
-          ["PRIORITY | all-day comfort | positive | Reviewers find it comfortable for long days.", ["runrepeat.com", "runnersworld.com"]],
-          ["SIZING | true_to_size | Most reviewers say it fits true to size.", ["runrepeat.com"]],
-        ],
-        "SOURCETYPES | runrepeat.com=independent_review; runnersworld.com=independent_review",
-      ),
+      grounded([
+        ["Reviewers find it comfortable for long days.", ["runrepeat.com", "runnersworld.com"]],
+        ["Most reviewers say it fits true to size.", ["runrepeat.com"]],
+      ]),
+    comfort_parse: (req) => {
+      const text = promptText(req);
+      const piped = mockComfortPoints(text);
+      if (piped.points.length) return json(piped);
+      const id = (sentence: string) => new RegExp(`^(S\\d+): ${sentence}`, "m").exec(text)?.[1];
+      const points = [
+        { segment: id("Reviewers find it comfortable"), topic: "all-day comfort", assessment: "positive" },
+        { segment: id("Most reviewers say it fits true to size"), topic: "sizing", sizing: "true_to_size" },
+      ].filter((p) => p.segment);
+      return json({ points, sourceTypes: [] });
+    },
     condition: () => json({ findings: [{ label: "upper_creasing", photoIndex: 0, box2d: [400, 300, 520, 600], severity: "minor", confidence: 0.8, note: "Light creasing at the toe box." }], notVisible: [], contradictions: [] }),
     leads: () => json({ leads: [] }),
     verdict: () =>

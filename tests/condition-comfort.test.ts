@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { conditionStatus, finaliseCondition, gradeFromClaims, wireToFindings } from "@/pipeline/checks/condition";
-import { comfortFromSnippets, comfortResult, parseComfort } from "@/pipeline/checks/comfort";
+import { comfortFromPoints, comfortFromSnippets, comfortResult } from "@/pipeline/checks/comfort";
+import { resolveSegment, supportedSegments } from "@/gemini/groundedSearch";
 import { classifySource, groundingSources, sourceDomain } from "@/gemini/grounding";
 import type { ConditionFinding, ListingFacts, UserNeeds } from "@/schemas/domain";
 import { fixtureReference, grounded } from "./helpers";
@@ -69,28 +70,37 @@ describe("grounding + comfort", () => {
     const g = grounded([["PRIORITY | comfort | positive | Very comfy.", ["runrepeat.com"]]]);
     expect(groundingSources(g.groundingMetadata)[0].segments).toEqual(["PRIORITY | comfort | positive | Very comfy."]);
   });
-  const run = (lines: [string, string[]][]) => {
-    const g = grounded(lines);
-    return comfortResult(parseComfort(g.text, g.groundingMetadata), { today: "2026-11-14", features: ["search_grounding"] });
+  type Point = { text: string; domains: string[]; topic: string; assessment?: "positive" | "negative" | "mixed" | "unclear"; sizing?: "runs_small" | "runs_large" | "true_to_size" | "unclear" };
+  const run = (ps: Point[]) => {
+    const g = grounded(ps.map((p) => [p.text, p.domains] as [string, string[]]));
+    const segs = supportedSegments(g.groundingMetadata);
+    const points = { points: ps.map((p) => ({ segment: segs.find((s) => s.text === p.text)?.id ?? "S99", topic: p.topic, assessment: p.assessment, sizing: p.sizing })), sourceTypes: [] };
+    return comfortResult(comfortFromPoints(points, segs, ["all-day comfort", "wide fit"]), { today: "2026-11-14", features: ["search_grounding"] });
   };
-  it("passes with >= 2 independent sources and positive priorities", () => {
-    const r = run([["PRIORITY | all-day comfort | positive | Comfortable all day.", ["runrepeat.com", "runnersworld.com"]]]);
+  it("passes with >= 2 independent sources and positive priorities; quotes the cited sentence", () => {
+    const r = run([{ text: "RunRepeat and Runner's World find it comfortable all day.", domains: ["runrepeat.com", "runnersworld.com"], topic: "all-day comfort", assessment: "positive" }]);
     expect(r.status).toBe("pass");
     expect(r.evidence).toHaveLength(2);
-    expect(r.evidence[0]).toMatchObject({ kind: "source", sourceType: "independent_review", observedOn: "2026-11-14", quote: "Comfortable all day." });
+    expect(r.evidence[0]).toMatchObject({ kind: "source", sourceType: "independent_review", observedOn: "2026-11-14", quote: "RunRepeat and Runner's World find it comfortable all day." });
   });
   it("warns with fewer than 2 independent sources; manufacturer claims alone never pass", () => {
-    expect(run([["PRIORITY | all-day comfort | positive | Comfortable.", ["runrepeat.com", "nike.com"]]]).status).toBe("warn");
-    expect(run([["PRIORITY | all-day comfort | positive | Comfortable.", ["nike.com"]]]).status).toBe("warn");
+    expect(run([{ text: "Comfortable.", domains: ["runrepeat.com", "nike.com"], topic: "all-day comfort", assessment: "positive" }]).status).toBe("warn");
+    expect(run([{ text: "Comfortable.", domains: ["nike.com"], topic: "all-day comfort", assessment: "positive" }]).status).toBe("warn");
   });
   it("warns on a negative priority and is unknown with no sources", () => {
-    expect(run([["PRIORITY | wide fit | negative | Narrow toe box.", ["runrepeat.com", "runnersworld.com"]]]).summary).toMatch(/wide fit/);
-    expect(run([["PRIORITY | wide fit | unclear | Not sure.", []]]).status).toBe("unknown");
+    expect(run([{ text: "The toe box is narrow.", domains: ["runrepeat.com", "runnersworld.com"], topic: "wide fit", assessment: "negative" }]).summary).toMatch(/wide fit/);
+    expect(run([{ text: "Not sure.", domains: [], topic: "wide fit", assessment: "unclear" }]).status).toBe("unknown");
+  });
+  it("drops points that cite no real sentence or an unknown topic (attribution stays exact)", () => {
+    const g = grounded([["Comfortable all day.", ["runrepeat.com", "runnersworld.com"]]]);
+    const segs = supportedSegments(g.groundingMetadata);
+    const parsed = comfortFromPoints({ points: [{ segment: "S7", topic: "all-day comfort", assessment: "positive" }, { segment: "S1", topic: "style", assessment: "positive" }], sourceTypes: [] }, segs, ["all-day comfort"]);
+    expect(parsed.priorities).toEqual([]);
   });
   it("passes review sizing advice through details", () => {
     const r = run([
-      ["PRIORITY | all-day comfort | positive | Comfortable.", ["runrepeat.com", "runnersworld.com"]],
-      ["SIZING | runs_small | Size up half.", ["runrepeat.com"]],
+      { text: "Comfortable.", domains: ["runrepeat.com", "runnersworld.com"], topic: "all-day comfort", assessment: "positive" },
+      { text: "Size up half.", domains: ["runrepeat.com"], topic: "sizing", sizing: "runs_small" },
     ]);
     expect(r.details).toMatchObject({ reviewSizing: "runs_small", reviewSizingNote: "Size up half." });
   });
@@ -100,5 +110,16 @@ describe("grounding + comfort", () => {
     expect(r.confidence).toBeLessThanOrEqual(0.6);
     expect((r.details as { fallback: boolean }).fallback).toBe(true);
     expect(comfortFromSnippets([], needs, "2026-11-14").status).toBe("unknown");
+  });
+});
+
+describe("comfort structuring: sentence references", () => {
+  it("accepts the sentence id or the sentence text echoed back", () => {
+    const g = grounded([["Comfortable all day, says RunRepeat.", ["runrepeat.com", "runnersworld.com"]], ["Runs half a size small.", ["runrepeat.com"]]]);
+    const segs = supportedSegments(g.groundingMetadata);
+    expect(resolveSegment(segs, "S2")?.text).toBe("Runs half a size small.");
+    expect(resolveSegment(segs, "Comfortable all day, says RunRepeat.")?.id).toBe("S1");
+    expect(resolveSegment(segs, "S1: Comfortable all day, says RunRepeat. (sources: runrepeat.com, runnersworld.com)")?.id).toBe("S1");
+    expect(resolveSegment(segs, "Something the search never said.")).toBeUndefined();
   });
 });
