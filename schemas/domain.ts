@@ -150,6 +150,17 @@ export const CheckResultSchema = z.object({
   confidence: z.number().min(0).max(1),
   geminiFeatures: z.array(GeminiFeatureSchema),
   details: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * What the check actually did: its Gemini calls (cachedCalls of them answered from the record/replay cache) and, for
+   * comfort (web search) and price (Google Shopping), whether the search was live or served from the cache.
+   */
+  usage: z
+    .object({
+      geminiCalls: z.number().int(),
+      cachedCalls: z.number().int(),
+      search: z.object({ kind: z.enum(["web", "shopping"]), live: z.boolean() }).optional(),
+    })
+    .optional(),
 });
 export type CheckResult = z.infer<typeof CheckResultSchema>;
 

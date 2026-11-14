@@ -1,5 +1,6 @@
 import { SseEventSchemas, type SseEventData, type SseEventName } from "@/schemas/api";
 import type { CaseDiff, CheckName, CheckResult, Lead, NextMove, Verdict } from "@/schemas/domain";
+import { checkTags, stepTags } from "./tags";
 
 export type LogLine = {
   key: string;
@@ -8,6 +9,8 @@ export type LogLine = {
   state: "active" | "done" | "problem";
   kind: "step" | "followup" | "warning";
   at: number;
+  /** What the step actually used, e.g. "Gemini vision · object detection", "Web search", "cached". */
+  tags?: string[];
 };
 
 export type Investigation = {
@@ -25,6 +28,8 @@ export type Investigation = {
   diff: CaseDiff | null;
   done: boolean;
   fatal: string | null;
+  /** From investigation_done. */
+  totals: { durationMs: number; geminiCalls: number; cachedCalls?: number } | null;
 };
 
 export type IncomingEvent = { name: SseEventName; data: unknown; revision: number; at: number };
@@ -45,6 +50,7 @@ export function newInvestigation(revision: number, at: number): Investigation {
     diff: null,
     done: false,
     fatal: null,
+    totals: null,
   };
 }
 
@@ -75,6 +81,7 @@ const STAGE_TEXT: Partial<Record<string, string>> = {
   comfort: "Reading reviews",
   condition: "Inspecting photos",
   version_check: "Checking the exact version",
+  leads: "Deciding what to follow up",
   verdict: "Weighing the evidence",
   reopen: "Reading the new evidence",
 };
@@ -167,16 +174,18 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       return { ...s, expected, log: upsert(s.log, { key: stage, text, state: "active", kind: "step", at: e.at }) };
     }
     case "stage_done": {
-      const { stage } = e.data as SseEventData<"stage_done">;
-      const line = s.log.find((l) => l.key === stage);
-      if (!line || line.state !== "active") return s;
-      return { ...s, log: upsert(s.log, { ...line, state: "done" }) };
+      const data = e.data as SseEventData<"stage_done">;
+      const line = s.log.find((l) => l.key === data.stage);
+      if (!line) return s;
+      // A check's own line keeps the check's tags; a plain step shows what the stage actually used.
+      const tags = s.checks[data.stage as CheckName] ? line.tags : stepTags(data);
+      return { ...s, log: upsert(s.log, { ...line, state: line.state === "active" ? "done" : line.state, tags }) };
     }
     case "check_done": {
       const c = e.data as CheckResult;
       const checks = { ...s.checks, [c.check]: c };
       const expected = s.expected.includes(c.check) ? s.expected : [...s.expected, c.check];
-      return { ...s, checks, expected, log: upsert(s.log, { key: c.check, ...checkLine(c), kind: "step", at: e.at }) };
+      return { ...s, checks, expected, log: upsert(s.log, { key: c.check, ...checkLine(c), kind: "step", at: e.at, tags: checkTags(c) }) };
     }
     case "lead_started":
     case "lead_done": {
@@ -221,8 +230,10 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       return { ...s, nextMoves: e.data as NextMove[] };
     case "diff":
       return { ...s, diff: e.data as CaseDiff };
-    case "investigation_done":
-      return { ...s, done: true, log: settle(s.log) };
+    case "investigation_done": {
+      const d = e.data as SseEventData<"investigation_done">;
+      return { ...s, done: true, log: settle(s.log), totals: { durationMs: d.durationMs, geminiCalls: d.geminiCalls, cachedCalls: d.cachedCalls } };
+    }
   }
 }
 

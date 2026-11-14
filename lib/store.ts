@@ -15,7 +15,9 @@ import type {
 } from "@/schemas/domain";
 import type { ReferenceData } from "./seedData";
 
-export type HistoryEntry = { revision: number; verdictLabel: VerdictLabel; at: string; leads?: LeadsReport };
+/** `run`: the investigation's totals (as in investigation_done), so a case file opened later can show them. */
+export type HistoryEntry = { revision: number; verdictLabel: VerdictLabel; at: string; leads?: LeadsReport; run?: RunTotals };
+export type RunTotals = { durationMs: number; geminiCalls: number; cachedCalls: number };
 
 export type CaseRow = {
   id: string;

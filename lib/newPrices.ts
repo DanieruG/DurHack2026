@@ -25,6 +25,8 @@ export type NewPrices = {
   available: boolean;
   query: string;
   rawResults: number;
+  /** True when served from the 24-hour cache (no SerpApi call). */
+  fromCache?: boolean;
 };
 
 /** The subset of a SerpApi google_shopping result we use (and cache). */
@@ -242,7 +244,8 @@ export function createNewPriceClient(opts: NewPriceClientOptions): NewPriceClien
           /* cache is best effort */
         }
       }
-      return summariseOffers(filterOffers(results, { brand, modelName, ...extra }), { checkedOn: fetchedOn, query, rawResults: results.length });
+      const fromCache = !!cached && (fresh || opts.mode === "replay");
+      return { ...summariseOffers(filterOffers(results, { brand, modelName, ...extra }), { checkedOn: fetchedOn, query, rawResults: results.length }), fromCache };
     },
   };
 }

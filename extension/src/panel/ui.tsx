@@ -102,6 +102,19 @@ export function CopyButton(props: { text: string }) {
   );
 }
 
+/** What a step actually used ("Gemini vision · object detection", "Web search", "cached"). */
+export function Tags(props: { tags: string[] }) {
+  return (
+    <span className="tags" aria-label={`Used: ${props.tags.join(", ")}`}>
+      {props.tags.map((t) => (
+        <span key={t} className={`tag ${t === "cached" ? "tag-cached" : ""}`}>
+          {t}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function Notice(props: { tone?: "problem" | "plain"; children: ReactNode }) {
   return <p className={`notice notice-${props.tone ?? "plain"}`}>{props.children}</p>;
 }

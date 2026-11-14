@@ -4,7 +4,8 @@ import type { CheckName, CheckResult } from "@/schemas/domain";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { conditionView, evidenceLines, leadsView, priceView, sourceRefs, type SourceRef } from "../../lib/evidence";
-import { Button, CopyButton, Label, Notice, StatusMark, Verdict } from "../ui";
+import { Button, CopyButton, Label, Notice, StatusMark, Tags, Verdict } from "../ui";
+import { checkTags, runTotals } from "../../lib/tags";
 
 const ORDER: CheckName[] = ["condition", "fit", "comfort", "price"];
 
@@ -127,6 +128,8 @@ export function CaseFile(props: {
           </Button>
         </div>
       )}
+
+      {detail.run && <p className="totals mono dim">{runTotals(detail.run)}</p>}
     </div>
   );
 }
@@ -140,6 +143,7 @@ function EvidenceRow(props: { check: CheckResult; open: boolean; onToggle: () =>
         <span className="ev-name">{CHECK_NAMES[c.check]}</span>
         <span className="ev-toggle" aria-hidden="true">{props.open ? "−" : "+"}</span>
       </button>
+      {checkTags(c).length > 0 && <Tags tags={checkTags(c)} />}
       <p className={`ev-line ${props.open ? "" : "clamp"}`}>
         {c.summary}
         {props.refs && props.refs.length > 0 && (

@@ -73,11 +73,14 @@ export type CallLogEntry = {
   latencyMs: number;
   cached: boolean;
   ok: boolean;
+  /** Function calls Gemini asked for in this response (0 when it called no tool). */
+  functionCalls: number;
   promptTokens?: number;
   outputTokens?: number;
 };
 
-type CallContext = { caseId?: string; stage?: string; log: CallLogEntry[]; signal?: AbortSignal };
+/** `sinks`: extra logs (one per enclosing stage) that also receive each call, so a stage can tell what it actually did. */
+type CallContext = { caseId?: string; stage?: string; log: CallLogEntry[]; signal?: AbortSignal; sinks?: CallLogEntry[][] };
 
 const callContext = new AsyncLocalStorage<CallContext>();
 
@@ -88,9 +91,10 @@ export function withCallLog<T>(caseId: string, fn: () => Promise<T>): { log: Cal
 }
 
 /** Set the current stage (for logging) and an abort signal (for stage timeouts) for nested calls. */
-export function withStageContext<T>(stage: string, signal: AbortSignal | undefined, fn: () => Promise<T>): Promise<T> {
+export function withStageContext<T>(stage: string, signal: AbortSignal | undefined, fn: () => Promise<T>, sink?: CallLogEntry[]): Promise<T> {
   const parent = callContext.getStore();
-  const ctx: CallContext = { caseId: parent?.caseId, stage, log: parent?.log ?? [], signal };
+  const sinks = [...(parent?.sinks ?? []), ...(sink ? [sink] : [])];
+  const ctx: CallContext = { caseId: parent?.caseId, stage, log: parent?.log ?? [], signal, sinks };
   return callContext.run(ctx, fn);
 }
 
@@ -102,7 +106,7 @@ export async function withDeadline<T>(ms: number, makeError: () => Error, fn: ()
   const parent = callContext.getStore();
   const controller = new AbortController();
   const signal = parent?.signal ? AbortSignal.any([parent.signal, controller.signal]) : controller.signal;
-  const ctx: CallContext = { caseId: parent?.caseId, stage: parent?.stage, log: parent?.log ?? [], signal };
+  const ctx: CallContext = { caseId: parent?.caseId, stage: parent?.stage, log: parent?.log ?? [], signal, sinks: parent?.sinks };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
@@ -167,10 +171,12 @@ export function createGeminiClient(opts: {
           latencyMs: Date.now() - started,
           cached,
           ok,
+          functionCalls: res?.functionCalls?.length ?? 0,
           promptTokens: res?.usage?.promptTokens,
           outputTokens: res?.usage?.outputTokens,
         };
         ctx?.log.push(entry);
+        for (const s of ctx?.sinks ?? []) s.push(entry);
         logger(entry);
       };
 

@@ -58,6 +58,8 @@ export const CaseDetailSchema = z.object({
   leads: z.array(LeadSchema),
   /** For the revision shown: were leads considered, and if skipped, why. */
   leadsReport: LeadsReportSchema.default({ considered: false }),
+  /** Totals for the revision shown (from investigation_done); null for cases run before they were recorded. */
+  run: z.object({ durationMs: z.number(), geminiCalls: z.number().int(), cachedCalls: z.number().int().optional() }).nullable().default(null),
   verdict: VerdictSchema.nullable(),
   nextMoves: z.array(NextMoveSchema),
   evidenceIndex: z.record(z.string(), EvidenceSchema),
@@ -93,7 +95,13 @@ export type StageName = z.infer<typeof StageNameSchema>;
 export const SseEventSchemas = {
   investigation_started: z.object({ caseId: z.string(), revision: z.number().int() }),
   stage_started: z.object({ stage: StageNameSchema, geminiFeatures: z.array(GeminiFeatureSchema).optional() }),
-  stage_done: z.object({ stage: StageNameSchema, geminiFeatures: z.array(GeminiFeatureSchema).optional() }),
+  /** geminiFeatures here are what the stage actually used; geminiCalls/cachedCalls count its Gemini calls (cache hits included). */
+  stage_done: z.object({
+    stage: StageNameSchema,
+    geminiFeatures: z.array(GeminiFeatureSchema).optional(),
+    geminiCalls: z.number().int().optional(),
+    cachedCalls: z.number().int().optional(),
+  }),
   capture_warning: z.object({ message: z.string() }),
   check_done: CheckResultSchema,
   lead_started: LeadSchema,
@@ -108,6 +116,8 @@ export const SseEventSchemas = {
     revision: z.number().int(),
     durationMs: z.number(),
     geminiCalls: z.number().int(),
+    /** How many of geminiCalls were answered from the record/replay cache. */
+    cachedCalls: z.number().int().optional(),
   }),
   error: z.object({ stage: z.string().optional(), message: z.string() }),
 } as const;

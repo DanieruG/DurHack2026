@@ -1,6 +1,6 @@
 import type { CheckName, CheckResult, IdentifyResult, Lead, LeadsReport, Verdict } from "@/schemas/domain";
 import { withCallLog, type CallLogEntry } from "@/gemini/client";
-import type { CaseRow } from "@/lib/store";
+import type { CaseRow, RunTotals } from "@/lib/store";
 import type { Deps } from "./deps";
 import type { Emit } from "./events";
 import { brandKnown } from "./identify";
@@ -37,8 +37,16 @@ export async function instrumented(
     await deps.store.updateCase(caseId, { status: "error" }).catch(() => undefined);
     emit("error", { message: "The investigation hit an unexpected problem and stopped. Please try again." });
   }
-  emit("investigation_done", { caseId, revision, durationMs: Date.now() - started, geminiCalls: log.length });
+  const totals = { durationMs: Date.now() - started, geminiCalls: log.length, cachedCalls: log.filter((l) => l.cached).length };
+  await saveRunTotals(deps, caseId, revision, totals).catch(() => undefined);
+  emit("investigation_done", { caseId, revision, ...totals });
   logTotals(caseId, log, Date.now() - started);
+}
+
+async function saveRunTotals(deps: Deps, caseId: string, revision: number, run: RunTotals) {
+  const c = await deps.store.getCase(caseId);
+  if (!c || !c.history.some((h) => h.revision === revision)) return;
+  await deps.store.updateCase(caseId, { history: c.history.map((h) => (h.revision === revision ? { ...h, run } : h)) });
 }
 
 function logTotals(caseId: string, log: CallLogEntry[], ms: number) {

@@ -118,11 +118,13 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   let newPrice: NewPrice | null = null;
   let ranB = false;
   let offersSeen = 0;
+  let shoppingLive: boolean | undefined;
   if (args.forceSourceB || shouldRunSourceB(price, sample)) {
     ranB = true;
     try {
       const r = await args.lookupNewPrices();
       offersSeen = r.offers.length;
+      shoppingLive = !r.fromCache;
       newPrice = toNewPrice(r);
     } catch (err) {
       if ((err as Error)?.name === "StageTimeoutError") throw err;
@@ -178,6 +180,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       retailerOffers: offersSeen,
       // Unknown only because the Shopping lookup failed or found too few retailers.
       searchFailed: decision.status === "unknown" && ranB && !newPrice,
+      ...(shoppingLive !== undefined ? { shoppingLive } : {}),
       inCatalogue,
     },
   };

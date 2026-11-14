@@ -1,7 +1,7 @@
 import { CHECK_NAMES, elapsed } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { segments, type Investigation } from "../../lib/progress";
-import { Button, Notice } from "../ui";
+import { Button, Notice, Tags } from "../ui";
 
 export function Investigating(props: {
   caseId: string;
@@ -40,6 +40,7 @@ export function Investigating(props: {
             <span className="log-text">
               {l.text}
               {l.note && <span className="log-note">{l.note}</span>}
+              {l.tags && l.tags.length > 0 && <Tags tags={l.tags} />}
             </span>
           </li>
         ))}

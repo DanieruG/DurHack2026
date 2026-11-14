@@ -26,7 +26,8 @@ async function latestChecks(deps: Deps, c: CaseRow) {
 export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promise<CaseDetail> {
   const { checks, leads, revision } = await latestChecks(deps, c);
   const images = await deps.store.getInputs(c.id, { kinds: ["image"], withData: false });
-  const report = c.history.find((h) => h.revision === revision)?.leads;
+  const entry = c.history.find((h) => h.revision === revision);
+  const report = entry?.leads;
   return {
     id: c.id,
     revision: c.revision,
@@ -39,6 +40,7 @@ export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promis
     checks,
     leads,
     leadsReport: report ?? { considered: leads.length > 0 },
+    run: entry?.run ?? null,
     verdict: c.verdict,
     nextMoves: c.nextMoves ?? [],
     evidenceIndex: indexEvidence(c.listingFacts?.evidence, c.identify?.evidence, ...checks.map((x) => x.evidence)),
@@ -84,7 +86,8 @@ export async function synthesizeEvents(deps: Deps, c: CaseRow): Promise<SseEvent
   if (c.verdict) push("verdict", c.verdict);
   push("next_moves", c.nextMoves ?? []);
   if (c.status === "error") push("error", { message: "The investigation hit an unexpected problem and stopped." });
-  push("investigation_done", { caseId: c.id, revision, durationMs: 0, geminiCalls: 0 });
+  const run = c.history.find((h) => h.revision === revision)?.run;
+  push("investigation_done", { caseId: c.id, revision, durationMs: run?.durationMs ?? 0, geminiCalls: run?.geminiCalls ?? 0, ...(run ? { cachedCalls: run.cachedCalls } : {}) });
   return out;
 }
 

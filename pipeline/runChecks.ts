@@ -12,7 +12,7 @@ import { checkPrice } from "./checks/price";
 import type { NewPrices } from "@/lib/newPrices";
 import { checkComfort } from "./checks/comfort";
 import { checkCondition } from "./checks/condition";
-import { plainError, runStage, today, unknownCheck } from "./util";
+import { plainError, runStage, today, unknownCheck, type StageStats } from "./util";
 
 export type DownstreamCheck = Exclude<CheckName, "identify">;
 export const DOWNSTREAM: DownstreamCheck[] = ["fit", "price", "comfort", "condition"];
@@ -117,8 +117,9 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     comfort: ["structured_output"],
     condition: ["vision", "object_detection", "structured_output"],
   } as const;
+  const stats: StageStats = { geminiCalls: 0, cachedCalls: 0, functionCalls: 0 };
   try {
-    return await runStage(name, { emit: ctx.emit, timeoutMs, geminiFeatures: [...features[name]] }, async () => {
+    const result = await runStage(name, { emit: ctx.emit, timeoutMs, geminiFeatures: [...features[name]], stats }, async () => {
       switch (name) {
         case "fit":
           return checkFit({ facts: ctx.facts, needs: ctx.needs, brand: subject.brand!, chart: chartFor(subject, ctx.ref.sizeCharts), charts: ctx.ref.sizeCharts });
@@ -149,11 +150,24 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
           return checkCondition({ gemini: deps.gemini, images: ctx.images, facts: ctx.facts, needs: ctx.needs });
       }
     });
+    return withUsage(result, stats);
   } catch (err) {
     ctx.emit("error", { stage: name, message: plainError(name, err) });
     const searchFailed = name === "price" || name === "comfort";
     return unknownCheck(name, plainError(name, err), searchFailed ? { details: { searchFailed: true } } : {});
   }
+}
+
+/** Record what the check actually did (Gemini calls, cache hits, a live or cached search). */
+export function withUsage(result: CheckResult, stats: StageStats): CheckResult {
+  const d = (result.details ?? {}) as { search?: { fromCache?: boolean }; shoppingLive?: boolean };
+  const search =
+    result.check === "comfort" && d.search
+      ? { kind: "web" as const, live: !d.search.fromCache }
+      : result.check === "price" && d.shoppingLive !== undefined
+        ? { kind: "shopping" as const, live: d.shoppingLive }
+        : undefined;
+  return { ...result, usage: { geminiCalls: stats.geminiCalls, cachedCalls: stats.cachedCalls, ...(search ? { search } : {}) } };
 }
 
 /** Comfort's review sizing advice can turn a fit pass into a warn. */

@@ -7,7 +7,7 @@ import { brandKnown } from "./identify";
 import { inputHashFor, intakeImages, prepareText, type CaseRequest } from "./intake";
 import { followLeads, NO_BRAND_SKIP, skipLeads } from "./leads";
 import { buildCtx, runDownstream, runIdentify, toIdentifyCheck } from "./runChecks";
-import { runStage } from "./util";
+import { runStage, type StageStats } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
 import { finalise, instrumented, loadImages, loadPageText } from "./core";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
@@ -74,8 +74,9 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     if (images.length === 0) emit("capture_warning", { message: "No photos available, so condition can't be checked" });
 
     // One Flash call reads the listing and identifies the pair (extract + identify merged).
+    const examineStats: StageStats = { geminiCalls: 0, cachedCalls: 0, functionCalls: 0 };
     const [examined, needs] = await Promise.all([
-      runStage("extract", { emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"] }, () =>
+      runStage("extract", { emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"], stats: examineStats }, () =>
         examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage }),
       ).catch(() => null),
       c.needs.caseNote
@@ -89,10 +90,10 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     let identifyCheck: CheckResult;
     if (examined) {
       ctx.identify = examined.identify;
-      identifyCheck = toIdentifyCheck(ctx, examined.identify);
+      identifyCheck = { ...toIdentifyCheck(ctx, examined.identify), usage: { geminiCalls: examineStats.geminiCalls, cachedCalls: examineStats.cachedCalls } };
       // The identification came with the merged call; mark the stage so the progress log shows it.
       emit("stage_started", { stage: "identify", geminiFeatures: ["vision", "structured_output"] });
-      emit("stage_done", { stage: "identify", geminiFeatures: ["vision", "structured_output"] });
+      emit("stage_done", { stage: "identify", geminiFeatures: ["vision", "structured_output"], geminiCalls: 0, cachedCalls: 0 });
     } else {
       // The merged call failed: identify on its own so the case still has a chance.
       const r = await runIdentify(ctx);

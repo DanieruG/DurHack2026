@@ -1,6 +1,6 @@
 import type { StageName } from "@/schemas/api";
 import type { CheckName, CheckResult, Evidence, GeminiFeature } from "@/schemas/domain";
-import { withDeadline, withStageContext } from "@/gemini/client";
+import { withDeadline, withStageContext, type CallLogEntry } from "@/gemini/client";
 import type { Emit } from "./events";
 
 export class StageTimeoutError extends Error {
@@ -27,12 +27,30 @@ export function withSearchBudget<T>(ms: number | undefined, fn: () => Promise<T>
  * Run one pipeline stage: emits stage_started / stage_done, applies STAGE_TIMEOUT_MS
  * (aborting in-flight Gemini calls), and tags Gemini calls with the stage name for the call log.
  */
+/** What a stage actually did: Gemini calls (and how many were cache hits) and whether Gemini called a function. */
+export type StageStats = { geminiCalls: number; cachedCalls: number; functionCalls: number };
+
+export function statsOf(calls: CallLogEntry[]): StageStats {
+  return { geminiCalls: calls.length, cachedCalls: calls.filter((c) => c.cached).length, functionCalls: calls.reduce((n, c) => n + (c.functionCalls ?? 0), 0) };
+}
+
+/**
+ * The features a stage really used: none without a Gemini call; function_calling only when Gemini called a tool
+ * (whether or not it was offered one). The planned list is what stage_started announces.
+ */
+export function actualFeatures(planned: GeminiFeature[] | undefined, s: StageStats): GeminiFeature[] {
+  if (!s.geminiCalls) return [];
+  const used = (planned ?? []).filter((f) => f !== "function_calling");
+  return s.functionCalls ? [...used, "function_calling"] : used;
+}
+
 export async function runStage<T>(
   stage: StageName,
-  opts: { emit: Emit; timeoutMs: number; geminiFeatures?: GeminiFeature[] },
+  opts: { emit: Emit; timeoutMs: number; geminiFeatures?: GeminiFeature[]; stats?: StageStats },
   fn: () => Promise<T>,
 ): Promise<T> {
   opts.emit("stage_started", { stage, ...(opts.geminiFeatures ? { geminiFeatures: opts.geminiFeatures } : {}) });
+  const calls: CallLogEntry[] = [];
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -42,10 +60,12 @@ export async function runStage<T>(
         reject(new StageTimeoutError(stage, opts.timeoutMs));
       }, opts.timeoutMs);
     });
-    return await Promise.race([withStageContext(stage, controller.signal, fn), timeout]);
+    return await Promise.race([withStageContext(stage, controller.signal, fn, calls), timeout]);
   } finally {
     clearTimeout(timer);
-    opts.emit("stage_done", { stage, ...(opts.geminiFeatures ? { geminiFeatures: opts.geminiFeatures } : {}) });
+    const s = statsOf(calls);
+    if (opts.stats) Object.assign(opts.stats, s);
+    opts.emit("stage_done", { stage, geminiFeatures: actualFeatures(opts.geminiFeatures, s), geminiCalls: s.geminiCalls, cachedCalls: s.cachedCalls });
   }
 }
 

@@ -128,6 +128,7 @@ export const CASE_FILE: CaseDetail = {
     { id: "lead_2", type: "flag_for_seller", reason: "The inside lining isn't shown.", status: "done", outcome: "Added a question for the seller about condition.", relatesTo: "condition" },
   ],
   leadsReport: { considered: true },
+  run: { durationMs: 11400, geminiCalls: 7, cachedCalls: 0 },
   verdict: {
     label: "proceed_with_caution",
     ruleId: "R5",
