@@ -34,6 +34,13 @@ for 24 hours, and `CACHE_MODE=replay` serves them without calling the API. Each 
 
 Without `DATABASE_URL`, the app falls back to an in-memory store seeded from `/data`. This is useful for local work, but it isn't persistent.
 
+### Test data stays off the main database
+
+Test runs use the Neon branch `test-runs` (a child of `production`), whose pooled connection string is
+`TEST_DATABASE_URL` in `.env.local`. `npm run eval`, `scripts/rerun-case.ts` and the opt-in DB integration test
+(`RUN_DB_TESTS=1`) call `useTestDatabase()` (`lib/testDb.ts`), which refuses to run without it, so they never write cases
+or cache entries to the main database. To rerun a stored case on the branch: `npx tsx scripts/rerun-case.ts <caseId>`.
+
 ### Neon on networks that block port 5432
 
 The runtime client uses the Neon serverless driver over WebSockets (port 443), so the app works anywhere. The Prisma CLI needs

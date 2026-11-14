@@ -10,6 +10,7 @@
  *                    "conditionGrade": "new_with_tags"|"like_new"|"good"|"worn", "expectedVerdict"?: VerdictLabel }
  */
 import "../lib/loadEnv";
+import { useTestDatabase } from "../lib/testDb";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -55,6 +56,7 @@ function pct(n: number, d: number): string {
 }
 
 async function main() {
+  useTestDatabase(); // never the main database
   const base = await getDeps();
   const ref = await base.store.getReference();
   const ids = fs.existsSync(DIR) ? fs.readdirSync(DIR).filter((d) => !d.startsWith("_") && fs.statSync(path.join(DIR, d)).isDirectory()).sort() : [];

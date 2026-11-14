@@ -1,7 +1,8 @@
 /**
  * Opt-in integration test against the real Neon database (PrismaStore + Neon adapter), with mocked Gemini.
  *   RUN_DB_TESTS=1 npx vitest run tests/db.integration.test.ts
- * Requires DATABASE_URL in .env.local / .env, a migrated schema and `npm run seed`. Cleans up its own case.
+ * Runs against the test-runs Neon branch (TEST_DATABASE_URL), never the main database. Needs a migrated, seeded
+ * branch. Cleans up its own case.
  */
 import fs from "node:fs";
 import { parse } from "dotenv";
@@ -14,7 +15,7 @@ import type { Db } from "@/lib/db";
 import { json, makeDeps, PAGE_TEXT, PROFILE } from "./helpers";
 
 const env = Object.assign({}, ...[".env", ".env.local"].filter((f) => fs.existsSync(f)).map((f) => parse(fs.readFileSync(f))));
-const enabled = process.env.RUN_DB_TESTS === "1" && !!env.DATABASE_URL;
+const enabled = process.env.RUN_DB_TESTS === "1" && !!env.TEST_DATABASE_URL;
 
 describe.skipIf(!enabled)("Neon integration (PrismaStore)", () => {
   let db: Db;
@@ -29,7 +30,7 @@ describe.skipIf(!enabled)("Neon integration (PrismaStore)", () => {
 
   it("runs an investigation, reopen and share end to end against Neon", async () => {
     const [{ getDb }, { PrismaStore }] = await Promise.all([import("@/lib/db"), import("@/lib/prismaStore")]);
-    db = getDb(env.DATABASE_URL);
+    db = getDb(env.TEST_DATABASE_URL);
     const store = new PrismaStore(db);
     const ref = await store.getReference();
     expect(ref.catalogue.find((m) => m.id === "nike-pegasus-40")).toBeTruthy();
