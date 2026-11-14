@@ -54,10 +54,22 @@ export function collectListing(): RawCapture {
     if (a && a.startsWith("https://") && !images.includes(a)) images.push(a);
   };
   document.querySelectorAll<HTMLMetaElement>('meta[property="og:image"], meta[property="og:image:url"]').forEach((m) => push(m.content));
+  // Cards for other listings ("Similar items", "You may also like") link to a different listing page: skip their images.
+  const listingPath = /\/(itm|items?|listing|products?|marketplace\/item)\//i;
+  const otherListing = (img: HTMLImageElement) => {
+    const href = img.closest<HTMLAnchorElement>("a[href]")?.href;
+    if (!href) return false;
+    try {
+      const u = new URL(href, location.href);
+      return u.host === location.host && listingPath.test(u.pathname) && u.pathname !== location.pathname;
+    } catch {
+      return false;
+    }
+  };
   document.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
     const r = img.getBoundingClientRect();
     const big = (img.naturalWidth >= 300 && img.naturalHeight >= 300) || (r.width >= 200 && r.height >= 200);
-    if (!big) return;
+    if (!big || otherListing(img)) return;
     push(img.srcset ? largestFromSrcset(img.srcset) : img.currentSrc || img.src);
   });
 

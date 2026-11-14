@@ -8,6 +8,7 @@ import {
 } from "@/schemas/domain";
 import { detectPlatform } from "@/lib/platform";
 import { redact } from "@/lib/redact";
+import { scopeListingText } from "@/lib/listingScope";
 import { downscaleImage, sniffImageMime, type StoredImage } from "@/lib/images";
 import { downloadImages } from "@/lib/safeFetch";
 import { computeInputHash } from "@/lib/hash";
@@ -94,8 +95,11 @@ export async function parseReopenRequest(form: FormData, maxImageBytes: number):
 
 /** Platform detection + redaction of the page text (before it is stored or sent to Gemini). */
 export function prepareText(capture: Capture): { platform: Platform; pageText: string; removedLines: number } {
+  const platform = detectPlatform(capture.pageUrl);
   const { text, removedLines } = redact(capture.pageText);
-  return { platform: detectPlatform(capture.pageUrl), pageText: text, removedLines };
+  // Only this listing's own text: drop site navigation and other listings ("Similar items", "Sponsored", ...).
+  const scoped = scopeListingText(text, platform);
+  return { platform, pageText: scoped.text, removedLines: removedLines + scoped.removedLines };
 }
 
 /**
