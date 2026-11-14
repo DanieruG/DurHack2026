@@ -4,7 +4,7 @@ import { startReopen } from "@/pipeline/reopen";
 import { IDENTIFY_SYSTEM } from "@/pipeline/identify";
 import { CaseDiffSchema, CheckResultSchema, SseEventSchemas, VerdictSchema } from "@/schemas";
 import type { CheckResult, NextMove, Verdict } from "@/schemas/domain";
-import { checksFrom, eventNames, grounded, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, type Handler } from "./helpers";
+import { checksFrom, eventNames, grounded, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, shoppingFixture, type Handler } from "./helpers";
 
 const capture = {
   pageUrl: "https://www.vinted.co.uk/items/123-nike-pegasus?referrer=x",
@@ -102,7 +102,13 @@ describe("investigation pipeline (mocked Gemini)", () => {
     const deps = makeDeps({
       handlers: {
         identify: () => json({ brand: "Nike", brandConfidence: 0.95, modelName: "Nike Pegasus 39", catalogueModelId: null, confidence: 0.9, reasons: "Tongue label reads Pegasus 39", evidence: [] }),
-        price: () => grounded([["PRICE | Nike | £100", ["nike.com"]], ["PRICE | JD Sports | £105", ["jdsports.co.uk"]]]),
+      },
+      shopping: {
+        "Nike Pegasus 39": [
+          { title: "Nike Air Zoom Pegasus 39 Men's", source: "Nike", price: "£100.00", extracted_price: 100, product_link: "https://example.test/1" },
+          { title: "Nike Pegasus 39 Running Shoes", source: "JD Sports", price: "£105.00", extracted_price: 105, product_link: "https://example.test/2" },
+          { title: "Nike Pegasus 39 Men's Road Running", source: "SportsShoes.com", price: "£95.00", extracted_price: 95, product_link: "https://example.test/3" },
+        ],
       },
     });
     const { events } = await investigate(deps);
@@ -113,9 +119,10 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checks.price).toMatchObject({ status: "pass", confidence: 0.45, details: { inCatalogue: false, position: "below", sourceBRun: true } });
     expect(checks.price.details).not.toHaveProperty("sample");
     expect(checks.comfort.status).not.toBe("unknown");
-    const prompts = deps.calls.filter((c) => c.stage === "price" || c.stage === "comfort").map(promptText);
-    expect(prompts).toHaveLength(2);
-    for (const p of prompts) expect(p).toContain("Nike Pegasus 39");
+    expect(checks.price.details).toMatchObject({ newPrice: { gbp: 100, sources: 3 } });
+    expect(deps.shoppingRequests).toEqual(["Nike Pegasus 39"]); // Shopping query "{brand} {modelName}"
+    expect(stageCalls(deps, "price")).toBe(0); // no Gemini call for price any more
+    expect(deps.calls.filter((c) => c.stage === "comfort").map(promptText).join("\n")).toContain("Nike Pegasus 39");
     expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
   });
 
@@ -154,8 +161,10 @@ describe("investigation pipeline (mocked Gemini)", () => {
     const deps = makeDeps({
       handlers: {
         comfort: () => grounded([["PRIORITY | all-day comfort | mixed | Some find it firm.", ["runrepeat.com"]]]),
-        leads: () =>
-          json({
+        leads: (req) =>
+          req.contents.length === 1
+            ? { text: "", functionCalls: [{ id: "f1", name: "getNewPrices", args: { brand: "Nike", modelName: "Pegasus 40" } }] }
+            : json({
             leads: [
               { type: "flag_for_seller", reason: "Comfort evidence is thin.", relatesTo: "comfort" },
               { type: "deeper_price_comparison", reason: "Check against like-new listings." },
@@ -163,8 +172,8 @@ describe("investigation pipeline (mocked Gemini)", () => {
               { type: "recheck_condition_photo", reason: "Creasing?", photoIndex: 0, defectLabels: ["upper_creasing"] },
             ],
           }),
-        price: () => grounded([["PRICE | SportsShoes | £119.99", ["sportsshoes.com"]], ["PRICE | Nike | £119.95", ["nike.com"]]]),
       },
+      shopping: { "Nike Pegasus 40": shoppingFixture("nike-pegasus-40") },
     });
     const { caseId, events } = await investigate(deps);
     const started = events.filter((e) => e.event === "lead_started");
@@ -174,8 +183,11 @@ describe("investigation pipeline (mocked Gemini)", () => {
     // deeper price comparison forced Source B and the updated price check was re-emitted
     const priceEvents = events.filter((e) => e.event === "check_done" && (e.data as CheckResult).check === "price");
     expect(priceEvents).toHaveLength(2);
-    expect((priceEvents[1].data as CheckResult).details).toMatchObject({ sourceBRun: true, newPrice: { gbp: 119.97, sources: 2 } });
-    expect((priceEvents[1].data as CheckResult).geminiFeatures).toContain("search_grounding");
+    expect((priceEvents[1].data as CheckResult).details).toMatchObject({ sourceBRun: true, newPrice: { gbp: 89.99, sources: 3 } });
+    // Gemini called getNewPrices while proposing leads -> function_calling; the tool and the check shared one request
+    expect((priceEvents[0].data as CheckResult).geminiFeatures).toEqual([]);
+    expect((priceEvents[1].data as CheckResult).geminiFeatures).toEqual(["function_calling"]);
+    expect(deps.shoppingRequests).toEqual(["Nike Pegasus 40"]);
     expect(stageCalls(deps, "identify")).toBe(1); // third lead not executed
     expect((await deps.store.getLeads(caseId, 1))).toHaveLength(2);
     const moves = (await deps.store.getCase(caseId))!.nextMoves as NextMove[];
@@ -240,7 +252,6 @@ describe("investigation pipeline (mocked Gemini)", () => {
 
   it("combined-tools flag produces identical output shapes", async () => {
     const shapes = async (combined: boolean) => {
-      const priceLines = grounded([["PRICE | SportsShoes | £119.99", ["sportsshoes.com"]], ["PRICE | Nike | £119.95", ["nike.com"]]]);
       const withTool = (final: Handler, fn: string, args: Record<string, unknown>): Handler => (req) => {
         const hasFns = req.config?.tools?.some((t) => "functionDeclarations" in t);
         if (hasFns && req.contents.length === 1) return { text: "", functionCalls: [{ id: "f1", name: fn, args }] };
@@ -249,9 +260,9 @@ describe("investigation pipeline (mocked Gemini)", () => {
       const base = happyHandlers();
       const deps = makeDeps({
         config: { combinedTools: combined },
+        shopping: { "Nike Pegasus 40": shoppingFixture("nike-pegasus-40") },
         handlers: {
           extract: async (req) => json({ ...JSON.parse((await base.extract(req)).text), price: 55 }),
-          price: withTool(() => priceLines, "sampleStats", { modelId: "nike-pegasus-40" }),
           comfort: withTool(base.comfort, "convertSize", { brand: "Nike", size: 9, system: "UK" }),
         },
       });
@@ -271,9 +282,9 @@ describe("investigation pipeline (mocked Gemini)", () => {
       expect(b.status).toBe(a.status);
       expect(b.evidence.map((e) => Object.keys(e).sort())).toEqual(a.evidence.map((e) => Object.keys(e).sort()));
     }
-    expect(separate.checks.price.details).toMatchObject({ newPrice: { gbp: 119.97 } });
-    expect(combined.checks.price.geminiFeatures).toEqual(["search_grounding", "function_calling"]);
-    expect(separate.checks.price.geminiFeatures).toEqual(["search_grounding"]);
-    expect(combined.deps.calls.find((c) => c.stage === "price")?.config?.toolConfig).toMatchObject({ includeServerSideToolInvocations: true });
+    expect(separate.checks.price.details).toMatchObject({ newPrice: { gbp: 89.99 } });
+    expect(combined.checks.comfort.geminiFeatures).toEqual(["search_grounding", "function_calling"]);
+    expect(separate.checks.comfort.geminiFeatures).toEqual(["search_grounding"]);
+    expect(combined.deps.calls.find((c) => c.stage === "comfort")?.config?.toolConfig).toMatchObject({ includeServerSideToolInvocations: true });
   });
 });

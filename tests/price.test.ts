@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { agreeingCluster, checkPrice, decidePrice, pricesFromSegments, shouldRunSourceB } from "@/pipeline/checks/price";
-import { supportedSegments } from "@/gemini/groundedSearch";
-import { createGeminiClient } from "@/gemini/client";
-import { testConfig } from "@/lib/config";
+import { checkPrice, decidePrice, NOT_IN_SAMPLE_NOTE, shouldRunSourceB } from "@/pipeline/checks/price";
+import { summariseOffers, type NewPrices } from "@/lib/newPrices";
 import type { ListingFacts, SampleStats } from "@/schemas/domain";
-import { fixtureReference, grounded } from "./helpers";
+import { fixtureReference } from "./helpers";
 
 const sample: SampleStats = { n: 12, excluded: 0, median: 50, p10: 30, p25: 40, p75: 60, p90: 70, collectedOn: { from: "2026-11-03", to: "2026-11-10" }, ruleIds: ["R-newest-N"], placeholder: false };
 const newPrice = { gbp: 120 };
@@ -38,64 +36,64 @@ describe("price status table", () => {
   });
 });
 
-describe("search budget", () => {
-  it("aborts a slow Source B search at searchTimeoutMs and decides from the sample alone", async () => {
-    let aborted = false;
-    const gemini = createGeminiClient({
-      config: testConfig(),
-      logger: () => undefined,
-      transport: (req) =>
-        new Promise((_, reject) => req.abortSignal?.addEventListener("abort", () => ((aborted = true), reject(new Error("aborted"))))),
+const needs = { sizes: [], priorities: [], wearTolerance: "light" as const, extraPriorities: [], assumptions: [] };
+const facts = (priceGBP: number) => ({ platform: "ebay", photoCount: 1, conditionClaims: [], priceGBP, evidence: [] }) as ListingFacts;
+const offer = (retailer: string, priceGBP: number) => ({ retailer, priceGBP, url: `https://example.test/${retailer}`, title: `adidas Dropset 3 (${retailer})` });
+const prices = (offers: ReturnType<typeof offer>[]): NewPrices => summariseOffers(offers, { checkedOn: "2026-11-14", query: "Adidas Dropset 3", rawResults: 40 });
+const notInCatalogue = { id: null, brand: "Adidas", name: "Dropset 3" };
+
+describe("price Source B: Google Shopping new price", () => {
+  it("uses the median of the retailer offers as the new price, with a summary data point and one source per offer", async () => {
+    const r = await checkPrice({
+      facts: facts(40),
+      needs,
+      model: notInCatalogue,
+      samples: [],
+      lookupNewPrices: async () => prices([offer("MandM", 70), offer("Next", 75), offer("JD", 80), offer("Schuh", 90)]),
     });
+    expect(r.status).toBe("pass");
+    expect(r.details).toMatchObject({ position: "below", newPrice: { gbp: 77.5, lowestGBP: 70, sources: 4, observedOn: "2026-11-14" }, inCatalogue: false });
+    expect(r.evidence[0]).toMatchObject({ kind: "data_point", label: "New price £77.50, median of 4 UK retailers, checked 14 Nov", sourceType: "retailer" });
+    expect(r.evidence.slice(1)).toHaveLength(4);
+    for (const e of r.evidence.slice(1)) expect(e).toMatchObject({ kind: "source", sourceType: "retailer", observedOn: "2026-11-14", url: expect.stringMatching(/^https:/), title: expect.any(String) });
+    expect(r.summary.startsWith(NOT_IN_SAMPLE_NOTE)).toBe(true);
+    expect(r.confidence).toBe(0.45); // outside the catalogue: capped
+    expect(r.geminiFeatures).toEqual([]);
+  });
+
+  it("confidence 0.7 with 5+ offers, 0.6 with 3-4 (catalogue model without a sample)", async () => {
+    const run = (n: number) =>
+      checkPrice({ facts: facts(40), needs, model: { id: "nike-pegasus-40", brand: "Nike", name: "Pegasus 40" }, samples: [], lookupNewPrices: async () => prices(Array.from({ length: n }, (_, i) => offer(`R${i}`, 100 + i))) });
+    expect((await run(5)).confidence).toBe(0.7);
+    expect((await run(3)).confidence).toBe(0.6);
+  });
+
+  it("fewer than 3 offers: new price unavailable, plain summary", async () => {
+    const r = await checkPrice({ facts: facts(40), needs, model: { id: "nike-pegasus-40", brand: "Nike", name: "Pegasus 40" }, samples: [], lookupNewPrices: async () => prices([offer("MandM", 45), offer("u-buy", 66)]) });
+    expect(r).toMatchObject({ status: "unknown", summary: "I couldn't find enough current UK retailer prices for this model.", confidence: 0 });
+    expect(r.details).toMatchObject({ retailerOffers: 2, sourceBRun: true });
+    expect(r.details).not.toHaveProperty("newPrice");
+  });
+
+  it("at or above the median new price fails (spec 7.6 rules unchanged)", async () => {
+    const r = await checkPrice({ facts: facts(90), needs, model: notInCatalogue, samples: [], lookupNewPrices: async () => prices([offer("A", 80), offer("B", 85), offer("C", 90)]) });
+    expect(r).toMatchObject({ status: "fail", details: { position: "at_or_above_new" } });
+  });
+
+  it("a failed lookup leaves the sample to decide; function_calling only when Gemini called the tool", async () => {
     const ref = fixtureReference();
-    const started = Date.now();
-    const res = await checkPrice({
-      facts: { priceGBP: 58, evidence: [] } as unknown as ListingFacts,
-      needs: { sizes: [], priorities: [], wearTolerance: "light", extraPriorities: [], assumptions: [] },
+    const r = await checkPrice({
+      facts: facts(58),
+      needs,
       model: ref.catalogue[0],
       samples: ref.priceSamples,
-      today: "2026-11-14",
-      gemini,
-      combinedTools: false,
-      executors: {},
-      searchTimeoutMs: 80,
+      lookupNewPrices: async () => {
+        throw new Error("HTTP 500");
+      },
+      calledViaTool: () => true,
     });
-    expect(Date.now() - started).toBeLessThan(1000);
-    expect(aborted).toBe(true);
-    expect(res.newPrice).toBeNull();
-    expect(res.status).not.toBe("unknown");
-  });
-});
-
-describe("Source B parsing", () => {
-  it("needs 2 sources agreeing within 15%", () => {
-    expect(agreeingCluster([{ priceGBP: 100 }, { priceGBP: 112 }])).toEqual([0, 1]);
-    expect(agreeingCluster([{ priceGBP: 100 }, { priceGBP: 130 }])).toBeNull();
-    expect(agreeingCluster([{ priceGBP: 100 }])).toBeNull();
-    expect(agreeingCluster([{ priceGBP: 60 }, { priceGBP: 120 }, { priceGBP: 125 }, { priceGBP: 119 }])?.length).toBe(3);
-  });
-  it("attributes prices only to grounded sentences, drops resale sites and prices the sentence doesn't contain", () => {
-    const res = grounded([
-      ["SportsShoes sells them new for £119.99.", ["sportsshoes.com"]],
-      ["Nike's UK site lists them at £119.95.", ["nike.com"]],
-      ["Used pairs go for £60 on eBay.", ["ebay.co.uk"]],
-      ["Unsupported claim of £99.", []],
-    ]);
-    const segments = supportedSegments(res.groundingMetadata);
-    expect(segments.map((s) => s.id)).toEqual(["S1", "S2", "S3"]);
-    const prices = pricesFromSegments(
-      [
-        { segment: "S1", retailer: "SportsShoes", priceGBP: 119.99, brandNew: true },
-        { segment: "S2", retailer: "Nike", priceGBP: 119.95, brandNew: true },
-        { segment: "S3", retailer: "eBay", priceGBP: 60, brandNew: false },
-        { segment: "S2", retailer: "Nike", priceGBP: 89, brandNew: true }, // not in the sentence: invented
-        { segment: "S9", retailer: "Nowhere", priceGBP: 99, brandNew: true }, // no such sentence
-      ],
-      segments,
-    );
-    expect(prices.map((p) => [p.domain, p.priceGBP])).toEqual([
-      ["sportsshoes.com", 119.99],
-      ["nike.com", 119.95],
-    ]);
+    expect(r.status).not.toBe("unknown");
+    expect(r.details).not.toHaveProperty("newPrice");
+    expect(r.geminiFeatures).toEqual(["function_calling"]);
   });
 });

@@ -1,4 +1,8 @@
+import fs from "node:fs";
+import path from "node:path";
 import { testConfig, type Config } from "@/lib/config";
+import type { CacheMode } from "@/lib/cache";
+import { createNewPriceClient, type RawShoppingResult } from "@/lib/newPrices";
 import { MemoryStore } from "@/lib/store";
 import { RateLimiter } from "@/lib/rateLimit";
 import type { ReferenceData } from "@/lib/seedData";
@@ -112,16 +116,6 @@ export function happyHandlers(): Record<string, Handler> {
     identify: () =>
       json({ catalogueModelId: "nike-pegasus-40", confidence: 0.92, reasons: "Title and swoosh/sole pattern match.", evidence: [{ kind: "quote", label: "Title names the model", quote: "Nike Air Zoom Pegasus 40" }] }),
     price: () => grounded([["PRICE | none | none", []]]),
-    // Step 2 of the grounded price search: structure "S1: <sentence> (sources: ...)" lines. Mocks state prices as
-    // "PRICE | <retailer> | £<n>" sentences; this parses them the way the model would.
-    price_parse: (req) => {
-      const prices = promptText(req)
-        .split("\n")
-        .map((l) => /^(S\d+): PRICE \| (.+?) \| £([\d.]+)/.exec(l))
-        .filter((m): m is RegExpExecArray => !!m)
-        .map((m) => ({ segment: m[1], retailer: m[2], priceGBP: Number(m[3]), brandNew: true }));
-      return json({ prices });
-    },
     comfort: () =>
       grounded(
         [
@@ -143,9 +137,39 @@ export function happyHandlers(): Record<string, Handler> {
   };
 }
 
-export type Recorded = { calls: GenRequest[] };
+export type Recorded = { calls: GenRequest[]; shoppingRequests: string[] };
 
-export function makeDeps(opts: { handlers?: Record<string, Handler>; config?: Partial<Config>; reference?: ReferenceData; images?: Record<string, Uint8Array> } = {}): Deps & Recorded {
+/** Saved SerpApi google_shopping results (tests/fixtures/shopping/<name>.json). */
+export function shoppingFixture(name: string): RawShoppingResult[] {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "shopping", `${name}.json`), "utf8"));
+}
+
+/**
+ * A real NewPriceClient whose network is a stub: responses come from `byQuery` (default: no results), every
+ * request is recorded (query only; there is no key in tests), and nothing ever leaves the process.
+ */
+export function fakeNewPrices(byQuery: Record<string, RawShoppingResult[]> = {}, opts: { mode?: CacheMode; store?: MemoryStore; now?: () => Date } = {}) {
+  const requests: string[] = [];
+  const client = createNewPriceClient({
+    apiKey: "test-key",
+    mode: opts.mode ?? "off",
+    store: opts.store ?? new MemoryStore(fixtureReference()),
+    now: opts.now ?? (() => new Date("2026-11-14T12:00:00Z")),
+    logger: () => undefined,
+    retryBackoffMs: 1,
+    fetch: async (url) => {
+      const q = new URL(url).searchParams.get("q") ?? "";
+      requests.push(q);
+      return { ok: true, status: 200, json: async () => ({ shopping_results: byQuery[q] ?? [] }) };
+    },
+  });
+  return { client, requests };
+}
+
+export function makeDeps(
+  opts: { handlers?: Record<string, Handler>; config?: Partial<Config>; reference?: ReferenceData; images?: Record<string, Uint8Array>; shopping?: Record<string, RawShoppingResult[]> } = {},
+): Deps & Recorded {
+  const shopping = fakeNewPrices(opts.shopping);
   const handlers = { ...happyHandlers(), ...(opts.handlers ?? {}) };
   const calls: GenRequest[] = [];
   const config = testConfig(opts.config);
@@ -171,6 +195,8 @@ export function makeDeps(opts: { handlers?: Record<string, Handler>; config?: Pa
     config,
     store: new MemoryStore(opts.reference ?? fixtureReference()),
     gemini,
+    newPrices: shopping.client,
+    shoppingRequests: shopping.requests,
     hub: new EventHub(),
     fetchImage,
     readReferenceImage: async () => null,

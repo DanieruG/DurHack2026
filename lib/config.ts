@@ -13,6 +13,7 @@ const csv = z
 const EnvSchema = z.object({
   DATABASE_URL: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
+  SHOPPING_API_KEY: z.string().optional(),
   GEMINI_MODEL_FAST: z.string().optional(),
   GEMINI_MODEL_STRONG: z.string().optional(),
   GEMINI_COMBINED_TOOLS: bool,
@@ -31,13 +32,15 @@ const EnvSchema = z.object({
 export type Config = {
   databaseUrl?: string;
   geminiApiKey?: string;
+  /** SerpApi key for Google Shopping new prices (never logged). */
+  shoppingApiKey?: string;
   /** Model names come from env only; never hard-coded. */
   models: { fast?: string; strong?: string };
   combinedTools: boolean;
   identifyConfidenceMin: number;
   maxLeads: number;
   stageTimeoutMs: number;
-  /** Cap on each Google Search grounded step (price new-price lookup, comfort reviews); past it, saved data is used. */
+  /** Cap on the comfort check's Google Search grounded step; past it, saved review snippets are used. */
   searchTimeoutMs: number;
   maxImages: number;
   maxImageBytes: number;
@@ -54,6 +57,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return {
     databaseUrl: blank(e.DATABASE_URL),
     geminiApiKey: blank(e.GEMINI_API_KEY),
+    shoppingApiKey: blank(e.SHOPPING_API_KEY),
     models: { fast: blank(e.GEMINI_MODEL_FAST), strong: blank(e.GEMINI_MODEL_STRONG) },
     combinedTools: e.GEMINI_COMBINED_TOOLS,
     identifyConfidenceMin: e.IDENTIFY_CONFIDENCE_MIN,

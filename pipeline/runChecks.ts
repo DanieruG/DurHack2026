@@ -7,7 +7,8 @@ import type { Emit } from "./events";
 import type { CaseImage } from "./intake";
 import { identifyCheck, identifyProduct, subjectOf, type Subject } from "./identify";
 import { applyReviewSizingNote, checkFit, type SizingAdvice } from "./checks/fit";
-import { checkPrice, type NewPrice } from "./checks/price";
+import { checkPrice } from "./checks/price";
+import type { NewPrices } from "@/lib/newPrices";
 import { checkComfort } from "./checks/comfort";
 import { checkCondition } from "./checks/condition";
 import { plainError, runStage, today, unknownCheck } from "./util";
@@ -29,12 +30,32 @@ export type RunCtx = {
   identify: IdentifyResult | null;
   executors: Partial<Record<string, ToolExecutor>>;
   today: string;
-  /** Source B result cached within the investigation (avoids repeat grounding calls). */
-  newPrice?: NewPrice | null;
+  /** Google Shopping new prices for a model, memoised per case (the price check and the Gemini tool share one request). */
+  newPrices: (modelName: string, brand: string) => Promise<NewPrices>;
+  /** Models ("brand model", lower case) whose new prices Gemini fetched via the getNewPrices tool. */
+  newPricesViaTool: Set<string>;
 };
 
-export function buildCtx(base: Omit<RunCtx, "executors" | "today">): RunCtx {
-  return { ...base, executors: makeToolExecutors(base.ref), today: today(base.deps.now()) };
+const priceKey = (modelName: string, brand: string) => `${brand} ${modelName}`.toLowerCase().replace(/\s+/g, " ").trim();
+
+export function buildCtx(base: Omit<RunCtx, "executors" | "today" | "newPrices" | "newPricesViaTool">): RunCtx {
+  const memo = new Map<string, Promise<NewPrices>>();
+  const newPrices = (modelName: string, brand: string) => {
+    const k = priceKey(modelName, brand);
+    let p = memo.get(k);
+    if (!p) {
+      p = base.deps.newPrices.getNewPrices(modelName, brand);
+      p.catch(() => memo.delete(k)); // a failed lookup may be retried by a later lead
+      memo.set(k, p);
+    }
+    return p;
+  };
+  const newPricesViaTool = new Set<string>();
+  const executors = makeToolExecutors(base.ref, (modelName, brand) => {
+    newPricesViaTool.add(priceKey(modelName, brand));
+    return newPrices(modelName, brand);
+  });
+  return { ...base, executors, newPrices, newPricesViaTool, today: today(base.deps.now()) };
 }
 
 /** What identify established, by tier (brand / model name / catalogue match). */
@@ -77,7 +98,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
   const timeoutMs = deps.config.stageTimeoutMs;
   const features = {
     fit: [],
-    price: ["search_grounding"],
+    price: [],
     comfort: ["search_grounding"],
     condition: ["vision", "object_detection", "structured_output"],
   } as const;
@@ -86,25 +107,17 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
       switch (name) {
         case "fit":
           return checkFit({ facts: ctx.facts, needs: ctx.needs, brand: subject.brand!, chart: chartFor(subject, ctx.ref.sizeCharts), charts: ctx.ref.sizeCharts });
-        case "price": {
-          const res = await checkPrice({
+        case "price":
+          return checkPrice({
             facts: ctx.facts,
             needs: ctx.needs,
             model: { id: subject.catalogue?.id ?? null, brand: subject.brand!, name: subject.modelName! },
             samples: ctx.ref.priceSamples,
-            today: ctx.today,
-            gemini: deps.gemini,
-            combinedTools: deps.config.combinedTools,
-            executors: ctx.executors,
+            lookupNewPrices: () => ctx.newPrices(subject.modelName!, subject.brand!),
+            calledViaTool: () => ctx.newPricesViaTool.has(priceKey(subject.modelName!, subject.brand!)),
             condition: opts.priceCondition,
             forceSourceB: opts.forceSourceB,
-            previousNewPrice: ctx.newPrice,
-            searchTimeoutMs: deps.config.searchTimeoutMs,
           });
-          const { newPrice, ...check } = res;
-          if (newPrice !== undefined && newPrice !== null) ctx.newPrice = newPrice;
-          return check;
-        }
         case "comfort":
           return checkComfort({
             gemini: deps.gemini,

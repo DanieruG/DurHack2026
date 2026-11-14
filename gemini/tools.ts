@@ -4,6 +4,7 @@ import { convertSize } from "@/lib/sizes";
 import { sampleStats } from "@/lib/priceSample";
 import { getCatalogueCandidates, MAX_CANDIDATES } from "@/lib/catalogue";
 import type { ReferenceData } from "@/lib/seedData";
+import type { NewPrices } from "@/lib/newPrices";
 import type { Content, GeminiClient, GenConfig, GenResponse, Part, Tier } from "./client";
 
 // ---------- declarations (spec 7.8) ----------
@@ -37,6 +38,19 @@ export const FUNCTION_DECLARATIONS = [
     },
   },
   {
+    name: "getNewPrices",
+    description:
+      "Current NEW retail prices in GBP from UK retailers (Google Shopping), filtered to exactly this brand and model; second-hand marketplaces, other versions and accessories are excluded. Returns the kept offers, their median and lowest price, or available=false when fewer than 3 retailers match.",
+    parametersJsonSchema: {
+      type: "object",
+      properties: {
+        brand: { type: "string", description: "Brand, e.g. adidas" },
+        modelName: { type: "string", description: "Model name without the brand, e.g. Dropset 3" },
+      },
+      required: ["brand", "modelName"],
+    },
+  },
+  {
     name: "getCatalogueCandidates",
     description: "Shortlist catalogue trainer models matching brand / model text. Returns ids and names.",
     parametersJsonSchema: {
@@ -60,10 +74,29 @@ const ConvertArgs = z.object({ brand: z.string(), size: z.coerce.number(), syste
 const StatsArgs = z.object({ modelId: z.string(), condition: ConditionGradeSchema.optional() });
 const CandidateArgs = z.object({ brandText: z.string().optional(), modelText: z.string().optional() });
 
-export type ToolExecutor = (args: Record<string, unknown>) => Record<string, unknown>;
+export type ToolExecutor = (args: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>;
 
-export function makeToolExecutors(ref: ReferenceData): Record<ToolName, ToolExecutor> {
+const NewPriceArgs = z.object({ brand: z.string().min(1), modelName: z.string().min(1) });
+
+/** `newPrices` is the case's Shopping lookup (memoised per case, so a tool call and the price check share one request). */
+export function makeToolExecutors(
+  ref: ReferenceData,
+  newPrices?: (modelName: string, brand: string) => Promise<NewPrices>,
+): Record<ToolName, ToolExecutor> {
   return {
+    async getNewPrices(args) {
+      const a = NewPriceArgs.safeParse(args);
+      if (!a.success) return { error: "invalid arguments" };
+      if (!newPrices) return { error: "new prices are not available" };
+      try {
+        const r = await newPrices(a.data.modelName, a.data.brand);
+        return r.available
+          ? { available: true, medianGBP: r.medianGBP, lowestGBP: r.lowestGBP, checkedOn: r.checkedOn, offers: r.offers.map((o) => ({ retailer: o.retailer, priceGBP: o.priceGBP })) }
+          : { available: false, reason: `only ${r.offers.length} UK retailer offer(s) matched; at least 3 are needed`, checkedOn: r.checkedOn };
+      } catch {
+        return { available: false, reason: "the price lookup failed" };
+      }
+    },
     convertSize(args) {
       const a = ConvertArgs.safeParse(args);
       if (!a.success) return { error: "invalid arguments" };
@@ -124,17 +157,17 @@ export async function runToolLoop(
         parts: res.functionCalls.map((c) => ({ functionCall: { id: c.id, name: c.name, args: c.args } }) as Part),
       },
     );
-    const responses: Part[] = res.functionCalls.map((c) => {
+    const responses: Part[] = await Promise.all(res.functionCalls.map(async (c) => {
       const exec = args.executors[c.name];
       called.push(c.name);
       let response: Record<string, unknown>;
       try {
-        response = exec ? exec(c.args) : { error: `unknown function ${c.name}` };
+        response = exec ? await exec(c.args) : { error: `unknown function ${c.name}` };
       } catch (err) {
         response = { error: err instanceof Error ? err.message : "execution failed" };
       }
       return { functionResponse: { id: c.id, name: c.name, response } } as Part;
-    });
+    }));
     contents.push({ role: "user", parts: responses });
   }
   /* c8 ignore next */

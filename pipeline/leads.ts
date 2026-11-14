@@ -32,7 +32,8 @@ export type LeadWire = z.infer<typeof LeadWireSchema>["leads"][number];
 const LEADS_SYSTEM = `You are Sleuth's lead investigator. Given check results for a second-hand trainer listing, decide whether
 anything looks off enough to follow up. You may call the functions to check exact facts first.
 Allowed lead types:
-- deeper_price_comparison: price looks odd; recompute sampled prices for the listing's condition grade and fetch the current new price.
+- deeper_price_comparison: price looks odd; recompute sampled prices for the listing's condition grade and fetch the current new price
+  (you may call getNewPrices first to see current UK retailer prices).
 - recheck_identification: the identified model may be wrong (e.g. close variant); give photoIndex of the clearest photo.
 - recheck_condition_photo: a condition finding is uncertain; give photoIndex and the defectLabels to look for.
 - flag_for_seller: a gap only the seller can fill; set relatesTo to the check it concerns.
@@ -175,7 +176,6 @@ async function executeLead(
       // Adopt the recheck only when it names a model confidently and differs from what we had.
       if (after.modelName && changed) {
         ctx.identify = result;
-        ctx.newPrice = null;
         const downstream = await runDownstream(ctx, ["fit", "price", "comfort"], checks.filter((c) => c.check !== "identify"));
         const next = [check, ...downstream];
         return { checks: next, updated: [check], status: "done", outcome: `Model changed to ${after.displayName}; reran fit, price and comfort.` };

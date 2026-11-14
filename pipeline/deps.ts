@@ -9,12 +9,15 @@ import { safeFetchImage, type FetchedImage, type ImageFetcher, type ImageMime } 
 import { RateLimiter } from "@/lib/rateLimit";
 import { sniffImageMime, type StoredImage } from "@/lib/images";
 import { createGeminiClient, createLiveTransport, type GeminiClient } from "@/gemini/client";
+import { createNewPriceClient, type NewPriceClient } from "@/lib/newPrices";
 import { EventHub } from "./events";
 
 export type Deps = {
   config: Config;
   store: Store;
   gemini: GeminiClient;
+  /** Google Shopping new prices (price Source B), cached in CacheEntry. */
+  newPrices: NewPriceClient;
   hub: EventHub;
   fetchImage: ImageFetcher;
   /** Catalogue reference images (data/images/catalogue/<file>). */
@@ -67,6 +70,7 @@ async function buildDefaultDeps(): Promise<Deps> {
     config,
     store,
     gemini: createGeminiClient({ config, transport: createLiveTransport(config.geminiApiKey), cache }),
+    newPrices: createNewPriceClient({ apiKey: config.shoppingApiKey, mode: config.cacheMode, store }),
     hub: new EventHub(),
     fetchImage: cachedFetcher((url) => safeFetchImage(url, { maxBytes: config.maxImageBytes }), cache),
     readReferenceImage: readReferenceImageFromDisk,

@@ -1,0 +1,11 @@
+[
+ { "title": "Nike Pegasus 40 Men's Road Running Shoes", "source": "JD Sports", "price": "£110.00", "extracted_price": 110, "product_link": "https://example.test/jd-1" },
+ { "title": "Nike Pegasus 40 Men's Road Running Shoes", "source": "JD Sports", "price": "£95.00", "extracted_price": 95, "product_link": "https://example.test/jd-2" },
+ { "title": "Nike Pegasus 40 Replacement Insoles", "source": "Insole Shop", "price": "£19.99", "extracted_price": 19.99, "product_link": "https://example.test/insoles" },
+ { "title": "Nike Pegasus 40 Laces 2 Pack", "source": "Lace Co", "price": "£6.00", "extracted_price": 6, "product_link": "https://example.test/laces" },
+ { "title": "Nike Pegasus 40 Older Kids' Road Running Shoes", "source": "Schuh", "price": "£64.99", "extracted_price": 64.99, "product_link": "https://example.test/kids" },
+ { "title": "Nike Pegasus 40 Men's Running Shoes", "source": "Runner Outlet", "price": "£70.00", "extracted_price": 70, "second_hand_condition": "refurbished", "product_link": "https://example.test/refurb" },
+ { "title": "Nike Pegasus 40 Men's Running Shoes", "source": "US Store", "price": "$120.00", "extracted_price": 120, "product_link": "https://example.test/usd" },
+ { "title": "Nike Pegasus 40 Men's Running Shoes", "source": "Vinted", "price": "£40.00", "extracted_price": 40, "product_link": "https://example.test/vinted" },
+ { "title": "Nike Pegasus 40 Men's Running Shoes", "source": "Gumtree", "price": "£35.00", "extracted_price": 35, "product_link": "https://example.test/gumtree" }
+]

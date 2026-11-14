@@ -22,9 +22,15 @@ Model names are never hard-coded. Set `GEMINI_MODEL_FAST` (extraction, checks, w
 with Google Search plus function calling (Gemini 3 tool combination, sent with `includeServerSideToolInvocations`). Both paths produce
 identical output shapes; a test checks this.
 
-`SEARCH_TIMEOUT_MS` (default `10000`) caps each Google Search grounded step: the price check's new-price lookup and the comfort
-check's review search. When a search runs past the cap, it's aborted and the check falls back to saved data (the resale price sample
-or the saved review snippets), so a slow search can't hold up the case. `STAGE_TIMEOUT_MS` still bounds each stage as a whole.
+`SEARCH_TIMEOUT_MS` (default `10000`) caps the comfort check's Google Search grounded step. Past the cap the search is
+aborted and comfort falls back to the saved review snippets. `STAGE_TIMEOUT_MS` still bounds each stage as a whole.
+
+The price check's current new price (Source B) comes from Google Shopping via SerpApi (`SHOPPING_API_KEY`), not from
+grounding. `lib/newPrices.ts` queries `"{brand} {model}"` with UK results, then filters in code: retailers only (no
+eBay, Vinted, Depop, StockX, GOAT and similar), the exact model and version, no accessories or kids' versions, GBP prices,
+one offer per retailer. It needs at least 3 offers, and the new price is their median. Responses are cached in `CacheEntry`
+for 24 hours, and `CACHE_MODE=replay` serves them without calling the API. Each live call is logged as
+`[shopping] q=... raw=N kept=M` (the key is never logged) so the free quota can be tracked.
 
 Without `DATABASE_URL`, the app falls back to an in-memory store seeded from `/data`. This is useful for local work, but it isn't persistent.
 

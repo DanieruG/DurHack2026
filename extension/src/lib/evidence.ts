@@ -95,7 +95,7 @@ export function priceView(check: CheckResult): PriceView {
     lines.push(`Compared with ${d.sample.n} listings sampled ${when}.${d.sample.placeholder ? " Placeholder data, not real listings." : ""}`);
   }
   if (d.newPrice) {
-    lines.push(`New price ${gbp(d.newPrice.gbp)} at ${d.newPrice.sources} retailer${d.newPrice.sources === 1 ? "" : "s"}${d.newPrice.observedOn ? `, checked ${shortDate(d.newPrice.observedOn)}` : ""}.`);
+    lines.push(`New price ${gbp(d.newPrice.gbp)}, median of ${d.newPrice.sources} UK retailers${d.newPrice.observedOn ? `, checked ${shortDate(d.newPrice.observedOn)}` : ""}.`);
   }
   let strip: PriceView["strip"];
   if (d.sample && d.listingPriceGBP !== undefined) {
