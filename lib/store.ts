@@ -41,7 +41,8 @@ export type CaseRow = {
 export type NewCase = Pick<CaseRow, "status" | "platform" | "pageUrl" | "inputHash" | "needs">;
 export type CasePatch = Partial<Omit<CaseRow, "id" | "createdAt" | "updatedAt">>;
 
-export type InputKind = "image" | "screenshot" | "page_text" | "seller_reply";
+/** observed_listings: the matched subset of the user's search survey (JSON in `text`; see lib/observed.ts StoredSurvey). */
+export type InputKind = "image" | "screenshot" | "page_text" | "seller_reply" | "observed_listings";
 
 export type CaseInputRow = {
   id: string;

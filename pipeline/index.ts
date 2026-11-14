@@ -1,4 +1,4 @@
-import type { CheckResult, ListingFacts, UserNeeds } from "@/schemas/domain";
+import type { CheckResult, IdentifyResult, ListingFacts, UserNeeds } from "@/schemas/domain";
 import type { Deps } from "./deps";
 import { emptyFacts } from "./extract";
 import { examineListing } from "./examine";
@@ -9,7 +9,9 @@ import { followLeads, NO_BRAND_SKIP, skipLeads } from "./leads";
 import { buildCtx, runDownstream, runIdentify, toIdentifyCheck } from "./runChecks";
 import { runStage, type StageStats } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
-import { finalise, instrumented, loadImages, loadPageText } from "./core";
+import { finalise, instrumented, loadImages, loadPageText, saveSurvey } from "./core";
+import { guardSearchHint } from "./identify";
+import { prepareSurvey, sanitiseQuery, type Survey } from "@/lib/observed";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
 
 export { reopenCase, startReopen, ReopenConflictError } from "./reopen";
@@ -47,8 +49,14 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
     ...req.screenshots.map((s, i) => ({ revision: 1, kind: "screenshot" as const, mimeType: s.mimeType, data: s.bytes, position: i })),
   ]);
   deps.hub.startRevision(row.id, 1);
+  // The survey is held in memory for the run; only its matched subset is stored, once the model is known.
+  const survey = prepareSurvey(req.capture.observedListings, { platform, pageUrl: req.capture.pageUrl, searchQuery: req.capture.searchQuery });
   // Only this listing's own photos: drop other listings' thumbnails and size variants of the same photo.
-  const done = runInvestigation(deps, row.id, { imageUrls: scopeListingImages(req.capture.imageUrls ?? [], platform) });
+  const done = runInvestigation(deps, row.id, {
+    imageUrls: scopeListingImages(req.capture.imageUrls ?? [], platform),
+    survey,
+    searchQuery: sanitiseQuery(req.capture.searchQuery),
+  });
   return { caseId: row.id, done };
 }
 
@@ -57,7 +65,11 @@ function profileFromNeeds(needs: UserNeeds) {
 }
 
 /** The investigation pipeline (spec 7.2). Always reaches a verdict unless something unexpected throws. */
-export async function runInvestigation(deps: Deps, caseId: string, opts: { imageUrls: string[] }): Promise<void> {
+export async function runInvestigation(
+  deps: Deps,
+  caseId: string,
+  opts: { imageUrls: string[]; survey?: Survey | null; searchQuery?: string | null },
+): Promise<void> {
   const c = await deps.store.getCase(caseId);
   if (!c) throw new Error(`Case ${caseId} not found`);
   if (!deps.hub.has(caseId)) deps.hub.startRevision(caseId, c.revision);
@@ -77,7 +89,7 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     const examineStats: StageStats = { geminiCalls: 0, cachedCalls: 0, functionCalls: 0 };
     const [examined, needs] = await Promise.all([
       runStage("extract", { emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"], stats: examineStats }, () =>
-        examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage }),
+        examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage, searchQuery: opts.searchQuery }),
       ).catch(() => null),
       c.needs.caseNote
         ? runStage("needs", { emit, timeoutMs: config.stageTimeoutMs }, () => buildNeeds(profileFromNeeds(c.needs), c.needs.caseNote, deps.gemini)).catch(() => c.needs)
@@ -86,19 +98,22 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     if (!examined) emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
     const facts: ListingFacts = examined?.facts ?? emptyFacts(c.platform, images.length);
 
-    const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null });
+    const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null, survey: opts.survey ?? null, searchQuery: opts.searchQuery ?? null });
+    // The search hint never decides on its own: a model only the search names (no text, no photo) stays below the gate.
+    const hintGuard = (r: IdentifyResult) =>
+      guardSearchHint(r, { searchQuery: opts.searchQuery, listingText: [facts.title, facts.modelText, pageText].filter(Boolean).join("\n"), catalogue: ref.catalogue, min: config.identifyConfidenceMin });
     let identifyCheck: CheckResult;
     if (examined) {
-      ctx.identify = examined.identify;
-      identifyCheck = { ...toIdentifyCheck(ctx, examined.identify), usage: { geminiCalls: examineStats.geminiCalls, cachedCalls: examineStats.cachedCalls } };
+      ctx.identify = hintGuard(examined.identify);
+      identifyCheck = { ...toIdentifyCheck(ctx, ctx.identify), usage: { geminiCalls: examineStats.geminiCalls, cachedCalls: examineStats.cachedCalls } };
       // The identification came with the merged call; mark the stage so the progress log shows it.
       emit("stage_started", { stage: "identify", geminiFeatures: ["vision", "structured_output"] });
       emit("stage_done", { stage: "identify", geminiFeatures: ["vision", "structured_output"], geminiCalls: 0, cachedCalls: 0 });
     } else {
       // The merged call failed: identify on its own so the case still has a chance.
       const r = await runIdentify(ctx);
-      ctx.identify = r.result;
-      identifyCheck = r.check;
+      ctx.identify = hintGuard(r.result);
+      identifyCheck = ctx.identify === r.result ? r.check : toIdentifyCheck(ctx, ctx.identify);
     }
     const identify = ctx.identify!;
     emit("check_done", identifyCheck);
@@ -111,6 +126,7 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     if (versionCheck) all = await applyVersionCheck(ctx, await versionCheck, all);
     // Without a brand the verdict is R1 whatever the leads find, so don't spend calls on them.
     const { checks, leads, report } = brandKnown(identify, config.identifyConfidenceMin, ref.catalogue) ? await followLeads(ctx, all) : skipLeads(ctx, all, NO_BRAND_SKIP);
+    await saveSurvey(ctx);
     await finalise(ctx, { checks, leads, leadsReport: report, row: c, inputHashImages: images });
   });
 }

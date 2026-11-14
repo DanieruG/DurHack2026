@@ -1,5 +1,5 @@
 import type { CaseDetail } from "@/schemas/api";
-import type { CaseDiff, CheckResult, NewOffers, Profile } from "@/schemas/domain";
+import type { CaseDiff, CheckResult, NewOffers, ObservedComparison, Profile } from "@/schemas/domain";
 import type { ListingPreview } from "../lib/capture";
 import { applyEvent, newInvestigation, type IncomingEvent, type Investigation } from "../lib/progress";
 
@@ -97,6 +97,23 @@ export const NEW_OFFERS: NewOffers = {
   ],
 };
 
+/** A comparison with the user's own search survey: too few exact matches for Source C, so context and suggestions only. */
+export const OBSERVED: ObservedComparison = {
+  searchQuery: "nike pegasus 40",
+  surveyedOn: "2026-11-14",
+  platform: "vinted",
+  priceBasis: "excl_buyer_protection",
+  counts: { exact: 4, version_unknown: 2, different_version: 6, none: 9, surveyed: 21, auctionsExcluded: 0, unpricedExcluded: 0 },
+  source: "price_sample",
+  stats: null,
+  context: { n: 6, minGBP: 28, maxGBP: 55, exact: 4, versionUnknown: 2, familyLevel: false, line: "6 similar listings seen, £28 to £55 (4 exact, 2 not stating the version)" },
+  note: null,
+  suggestions: [
+    { id: "4410001", title: "Nike Air Zoom Pegasus 40 UK 9 grey", priceGBP: 28, url: "https://www.vinted.co.uk/items/4410001-nike-pegasus-40", thumbnailUrl: TRAINER_URL, platform: "vinted", sizeLabel: "UK 9", sizeNotStated: false, sponsored: false, savingGBP: 14 },
+    { id: "4410002", title: "Pegasus 40 running shoes Nike", priceGBP: 34, url: "https://www.vinted.co.uk/items/4410002-pegasus-40", platform: "vinted", sizeLabel: null, sizeNotStated: true, sponsored: true, savingGBP: 8 },
+  ],
+};
+
 const price: CheckResult = {
   check: "price",
   status: "pass",
@@ -113,6 +130,7 @@ const price: CheckResult = {
     newPrice: { gbp: 75, sources: 3 },
     position: "below",
     newOffers: NEW_OFFERS,
+    observedComparison: OBSERVED,
   },
 };
 
@@ -142,6 +160,7 @@ export const CASE_FILE: CaseDetail = {
   ],
   leadsReport: { considered: true },
   newOffers: NEW_OFFERS,
+  observedComparison: OBSERVED,
   run: { durationMs: 11400, geminiCalls: 7, cachedCalls: 0 },
   verdict: {
     label: "proceed_with_caution",

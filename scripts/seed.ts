@@ -28,7 +28,7 @@ async function main() {
     await db.sizeChart.upsert({ where: { id: c.id }, create: c, update: { brand: c.brand, rows: c.rows } });
   }
   for (const m of seed.catalogue) {
-    const data = { brand: m.brand, name: m.name, aliases: m.aliases, retailGBP: m.retailGBP ?? null, referenceImg: m.referenceImg ?? null, sizeChartId: m.sizeChartId };
+    const data = { brand: m.brand, name: m.name, aliases: m.aliases, retailGBP: m.retailGBP ?? null, referenceImg: m.referenceImg ?? null, sizeChartId: m.sizeChartId, matchTokens: m.matchTokens ?? undefined };
     await db.catalogueModel.upsert({ where: { id: m.id }, create: { id: m.id, ...data }, update: data });
   }
 

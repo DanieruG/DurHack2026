@@ -163,7 +163,7 @@ export class PrismaStore implements Store {
       this.db.reviewSnippet.findMany(),
     ]);
     const data: ReferenceData = {
-      catalogue: catalogue.map((m: AnyJson) => ({ ...m, aliases: m.aliases as string[] })),
+      catalogue: catalogue.map((m: AnyJson) => ({ ...m, aliases: m.aliases as string[], matchTokens: m.matchTokens ?? null })),
       sizeCharts: sizeCharts.map((c: AnyJson) => ({ id: c.id, brand: c.brand, rows: c.rows })),
       priceSamples: priceSamples.map((s: AnyJson) => ({
         modelId: s.modelId,

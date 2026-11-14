@@ -5,7 +5,7 @@ import type { StoredImage } from "@/lib/images";
 import { generateStructured } from "@/gemini/structured";
 import type { GeminiClient } from "@/gemini/client";
 import { EXTRACT_SYSTEM, ExtractWireSchema, extractParts, toListingFacts } from "./extract";
-import { candidateList, IDENTIFY_SYSTEM, identifyShortlist, identifyWireSchema, referenceParts, toIdentifyResult } from "./identify";
+import { candidateList, IDENTIFY_SYSTEM, identifyShortlist, identifyWireSchema, referenceParts, searchHintPart, toIdentifyResult } from "./identify";
 import type { CaseImage } from "./intake";
 
 /**
@@ -29,12 +29,14 @@ export async function examineListing(
     platform: Platform;
     catalogue: CatalogueModel[];
     readReferenceImage: (p: string) => Promise<StoredImage | null>;
+    /** The user's marketplace search (a hint, never a fact about this listing). */
+    searchQuery?: string | null;
   },
 ): Promise<{ facts: ListingFacts; identify: IdentifyResult }> {
   // Nothing is extracted yet, so shortlist the catalogue from the top of the (already scoped) page text.
   const shortlist = identifyShortlist({ title: args.pageText.slice(0, 2000) }, args.catalogue);
   const parts = extractParts(args.pageText, args.images, args.platform);
-  parts.push({ text: candidateList(shortlist) }, ...(await referenceParts(shortlist, args.readReferenceImage)));
+  parts.push({ text: candidateList(shortlist) }, ...(await referenceParts(shortlist, args.readReferenceImage)), ...searchHintPart(args.searchQuery));
   const { data } = await generateStructured(gemini, examineWireSchema(shortlist.map((m) => m.id)), {
     stage: "extract",
     tier: "fast",

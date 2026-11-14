@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { CaseDetail } from "@/schemas/api";
-import { NewOffersSchema, type CaseSummary, type CheckResult, type NewOffers, type SizeSystem } from "@/schemas/domain";
+import { NewOffersSchema, ObservedComparisonSchema, type CaseSummary, type CheckResult, type NewOffers, type ObservedComparison, type SizeSystem } from "@/schemas/domain";
 import { FeedSeedItemSchema, type FeedItem, type FeedSeedItem, type SizeChart } from "@/schemas/seed";
 import { convertSize, parseSizeText } from "@/lib/sizes";
 import type { CaseRow } from "@/lib/store";
@@ -30,6 +30,13 @@ export function newOffersOf(checks: CheckResult[]): NewOffers | null {
   return parsed?.success ? parsed.data : null;
 }
 
+/** The price check's comparison with the user's search survey (details.observedComparison), or null. */
+export function observedComparisonOf(checks: CheckResult[]): ObservedComparison | null {
+  const raw = (checks.find((c) => c.check === "price")?.details as { observedComparison?: unknown } | undefined)?.observedComparison;
+  const parsed = raw === undefined ? null : ObservedComparisonSchema.safeParse(raw);
+  return parsed?.success ? parsed.data : null;
+}
+
 export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promise<CaseDetail> {
   const { checks, leads, revision } = await latestChecks(deps, c);
   const images = await deps.store.getInputs(c.id, { kinds: ["image"], withData: false });
@@ -51,6 +58,7 @@ export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promis
     verdict: c.verdict,
     nextMoves: c.nextMoves ?? [],
     newOffers: newOffersOf(checks),
+    observedComparison: observedComparisonOf(checks),
     evidenceIndex: indexEvidence(c.listingFacts?.evidence, c.identify?.evidence, ...checks.map((x) => x.evidence)),
     imageUrls: images.map((_, i) => imageUrl(origin, c.id, i)),
     history: c.history,

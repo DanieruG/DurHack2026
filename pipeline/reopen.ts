@@ -16,7 +16,7 @@ import { subjectOf } from "./identify";
 import { scopeListingImages } from "@/lib/listingScope";
 import { intakeImages, type CaseImage, type ReopenRequest } from "./intake";
 import { buildCtx, DOWNSTREAM, runDownstream, runIdentify, type DownstreamCheck } from "./runChecks";
-import { finalise, instrumented, loadImages } from "./core";
+import { finalise, instrumented, loadImages, loadSurvey } from "./core";
 import { runStage, textContains } from "./util";
 
 // ---------- seller reply extraction ----------
@@ -224,7 +224,7 @@ export async function reopenCase(deps: Deps, caseId: string, args: { imageUrls: 
     const affected = affectedChecks({ newImages: newImages.length > 0, imageShowsLabel: labelled.length > 0, labelHasSize: !!labelSize, reply });
     const answered = new Set<CheckName>([...c.answered, ...(reply?.answers ?? []), ...affected]);
 
-    const ctx = buildCtx({ deps, caseId, revision, emit, ref, images, pageText, facts, needs: c.needs, identify: c.identify });
+    const ctx = buildCtx({ deps, caseId, revision, emit, ref, images, pageText, facts, needs: c.needs, identify: c.identify, survey: await loadSurvey(deps, caseId) });
     const rerun = new Set<CheckName>();
     let checks = before;
 

@@ -7,6 +7,7 @@ import { generateStructured } from "@/gemini/structured";
 import { imagePart, type GeminiClient, type Part, type Tier } from "@/gemini/client";
 import type { CaseImage } from "./intake";
 import { clamp01, evidenceIds, textContains } from "./util";
+import { titleMatchesModel } from "@/lib/newPrices";
 
 export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listing, sceptically, in tiers: brand, then model, then catalogue match.
 - Use ONLY this listing's own title, item details, description and photos. Ignore everything about other listings on the page:
@@ -20,6 +21,53 @@ export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listi
 - confidence: your probability (0-1) that modelName (and catalogueModelId, if set) is exactly right; 0 when modelName is null.
 - evidence: what you relied on: kind "quote" with exact text from this listing, or kind "photo_region" with photoIndex and box2d
   [ymin, xmin, ymax, xmax] normalised 0-1000 (e.g. tongue label, logo, sole pattern).`;
+
+/**
+ * The user's marketplace search, sent as a hint (Feature A4). It says what the user was looking for, not what this pair
+ * is: the listing's own title, details and photos decide. guardSearchHint enforces that in code.
+ */
+export function searchHintPart(searchQuery: string | null | undefined): Part[] {
+  const q = searchQuery?.replace(/[\u0000-\u001f"“”]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+  if (!q) return [];
+  return [
+    {
+      text:
+        `HINT, the user's own search (NOT a fact about this listing): the user found this listing by searching "${q}".\n` +
+        "Never identify the pair from this search: a search returns many different models. Use only this listing's own title, " +
+        "details and photos. If they don't show the model clearly, leave modelName null even if the search names one, and " +
+        "don't raise your confidence because the search agrees.",
+    },
+  ];
+}
+
+/** Cap for a model named only by the search hint: below the identify gate, so it can never become a confident identification. */
+export const HINT_ONLY_MARGIN = 0.05;
+
+/**
+ * The search hint must never produce a confident identification on its own, and must not raise confidence when the
+ * photos are unclear: if the model appears in the user's search but not in the listing's own text, and no photo region
+ * supports it, its confidence is capped below the gate (the brand tier still stands). A model read from a photo is
+ * rechecked by Gemini Pro without the hint (versionCheck.ts), so the photos decide there.
+ */
+export function guardSearchHint(
+  result: IdentifyResult,
+  args: { searchQuery: string | null | undefined; listingText: string; catalogue: CatalogueModel[]; min: number },
+): IdentifyResult {
+  if (!args.searchQuery || !result.modelName) return result;
+  const cat = result.catalogueModelId ? args.catalogue.find((m) => m.id === result.catalogueModelId) : undefined;
+  const names = [result.modelName, ...(cat ? [cat.name, ...cat.aliases] : [])];
+  const inListing = names.some((n) => titleMatchesModel(args.listingText, "", n));
+  const inSearch = names.some((n) => titleMatchesModel(args.searchQuery!, "", n));
+  if (inListing || !inSearch) return result;
+  if (result.evidence.some((e) => e.kind === "photo_region")) return result;
+  const cap = Math.max(0, args.min - HINT_ONLY_MARGIN);
+  if (result.confidence <= cap) return result;
+  return {
+    ...result,
+    confidence: cap,
+    reasons: `${result.reasons} The model matches the user's search, but this listing's own text and photos don't show it, so it isn't relied on.`.trim(),
+  };
+}
 
 /** Identification fields (shared by identify and the merged extract+identify call). */
 export function identifyWireSchema(ids: string[]) {

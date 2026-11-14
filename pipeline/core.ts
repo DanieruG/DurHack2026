@@ -10,6 +10,8 @@ import type { RunCtx } from "./runChecks";
 import { decideAndWordVerdict } from "./verdict/wording";
 import { decideVerdict } from "./verdict/rules";
 import { runStage } from "./util";
+import { fromStoredSurvey, matchSurvey, toStoredSurvey, type StoredSurvey, type Survey } from "@/lib/observed";
+import { chartFor, subjectFor, tokensFor } from "./runChecks";
 
 export async function loadImages(deps: Deps, caseId: string): Promise<CaseImage[]> {
   return toCaseImages(await deps.store.getInputs(caseId, { kinds: ["image"] }));
@@ -53,6 +55,30 @@ function logTotals(caseId: string, log: CallLogEntry[], ms: number) {
   if (process.env.VITEST) return;
   const tokens = log.reduce((s, e) => s + (e.promptTokens ?? 0) + (e.outputTokens ?? 0), 0);
   console.info(`[sleuth] case=${caseId} done in ${ms}ms, ${log.length} Gemini calls (${log.filter((l) => l.cached).length} cached), ${tokens} tokens`);
+}
+
+/**
+ * Store the survey's matched subset with the case (Feature A7), matched to the final identification: id, title, price,
+ * URL, thumbnail, size and match level per card, plus counts per level. Unmatched cards are never stored.
+ */
+export async function saveSurvey(ctx: RunCtx): Promise<void> {
+  if (!ctx.survey) return;
+  const subject = subjectFor(ctx);
+  const matched = matchSurvey(ctx.survey, tokensFor(subject), chartFor(subject, ctx.ref.sizeCharts));
+  const stored: StoredSurvey = toStoredSurvey(ctx.survey, matched);
+  await ctx.deps.store.addInputs(ctx.caseId, [{ revision: ctx.revision, kind: "observed_listings", text: JSON.stringify(stored) }]);
+}
+
+/** The stored subset (latest revision), as a survey to re-match on reopen. */
+export async function loadSurvey(deps: Deps, caseId: string): Promise<Survey | null> {
+  const rows = await deps.store.getInputs(caseId, { kinds: ["observed_listings"], withData: false });
+  const last = rows.at(-1)?.text;
+  if (!last) return null;
+  try {
+    return fromStoredSurvey(JSON.parse(last) as StoredSurvey);
+  } catch {
+    return null;
+  }
 }
 
 export type FinaliseResult = { verdict: Verdict; checks: CheckResult[] };

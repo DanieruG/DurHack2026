@@ -13,6 +13,7 @@ import {
   ListingFactsSchema,
   NewOffersSchema,
   NextMoveSchema,
+  ObservedComparisonSchema,
   PlatformSchema,
   SizeSystemSchema,
   UserNeedsSchema,
@@ -65,6 +66,8 @@ export const CaseDetailSchema = z.object({
   nextMoves: z.array(NextMoveSchema),
   /** New-price offers from the shown revision's price check (its details.newOffers); null when none were looked up. */
   newOffers: NewOffersSchema.nullable().default(null),
+  /** The shown revision's comparison with the user's search survey (price details.observedComparison); null without a survey. */
+  observedComparison: ObservedComparisonSchema.nullable().default(null),
   evidenceIndex: z.record(z.string(), EvidenceSchema),
   imageUrls: z.array(z.string()),
   history: z.array(

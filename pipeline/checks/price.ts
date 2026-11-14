@@ -1,4 +1,5 @@
 import type {
+  ObservedComparison,
   CheckResult,
   CheckStatus,
   ConditionGrade,
@@ -13,6 +14,16 @@ import type {
 import type { PriceSample } from "@/schemas/seed";
 import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
 import { toNewOffers, type NewPrices, type ShoppingOffer } from "@/lib/newPrices";
+import {
+  baseComparison,
+  observedConfidence,
+  observedContext,
+  observedEvidenceLabel,
+  observedStats,
+  suggestCheaper,
+  type MatchedListing,
+  type Survey,
+} from "@/lib/observed";
 import { evidenceIds, gbp, round2, unknownCheck } from "../util";
 
 export const SAMPLE_CONFIDENCE_CAP = 0.7;
@@ -101,6 +112,8 @@ export type PriceCheckArgs = {
   forceSourceB?: boolean;
   /** Called as soon as the Shopping lookup returns (live or cached), before the check finishes: the new_offers event. */
   onNewOffers?: (offers: NewOffers) => void;
+  /** The user's survey of a search on this platform, matched to this model (Source C). */
+  observed?: { survey: Survey; matched: MatchedListing[]; userSizeUK: number | null };
 };
 
 export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
@@ -113,17 +126,22 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   }
   const modelId = args.model.id;
   const inCatalogue = modelId !== null;
-  // The sampled comparison needs a catalogue match; otherwise only the current new price (Source B) is available.
-  const restricted = inCatalogue && args.condition ? sampleStats(args.samples, modelId, args.condition) : null;
-  const sample = restricted ?? (inCatalogue ? sampleStats(args.samples, modelId) : null);
+  // Source C (the user's own search) when it has 5+ exact matches; otherwise the catalogue sample (A), which needs a
+  // catalogue match. The new-price rules (B) apply on top of either.
+  const obs = args.observed;
+  const observed = obs ? observedStats(obs.matched, obs.survey.surveyedOn) : null;
+  const restricted = !observed && inCatalogue && args.condition ? sampleStats(args.samples, modelId, args.condition) : null;
+  const sample = observed ?? restricted ?? (inCatalogue ? sampleStats(args.samples, modelId) : null);
   const usedGrade = restricted ? args.condition : undefined;
+  const context = obs && !observed ? observedContext(obs.matched, { familyLevel: false }) : null;
 
   let newPrice: NewPrice | null = null;
   let ranB = false;
   let offersSeen = 0;
   let shoppingLive: boolean | undefined;
   let newOffers: NewOffers | undefined;
-  if (args.forceSourceB || shouldRunSourceB(price, sample)) {
+  // Asking prices from one search can sit above the new price, so with Source C the new-price rules always run.
+  if (args.forceSourceB || observed || shouldRunSourceB(price, sample)) {
     ranB = true;
     try {
       const r = await args.lookupNewPrices();
@@ -141,15 +159,19 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   const decision = decidePrice({ price, sample, newPrice, budgetGBP: args.needs.budgetGBP });
   const nextId = evidenceIds("price");
   const evidence: Evidence[] = [...priceEv];
+  const sampleLabel = sample ? (observed ? observedEvidenceLabel(observed, obs!.survey.surveyedOn) : sampleEvidenceLabel(sample)) : "";
   if (sample) {
     evidence.push({
       id: nextId(),
       kind: "data_point",
-      label: sampleEvidenceLabel(sample) + (usedGrade ? ` (${usedGrade.replace(/_/g, " ")} only)` : ""),
+      label: sampleLabel + (usedGrade ? ` (${usedGrade.replace(/_/g, " ")} only)` : ""),
       value: `median ${gbp(sample.median)}; middle half ${gbp(sample.p25)}–${gbp(sample.p75)}; ${sample.excluded} outlier(s) excluded`,
-      sourceType: "price_sample",
+      sourceType: observed ? "observed_listings" : "price_sample",
       observedOn: sample.collectedOn.to,
     });
+  }
+  if (context) {
+    evidence.push({ id: nextId(), kind: "data_point", label: `${context.line} (not enough exact matches to compare)`, sourceType: "observed_listings", observedOn: obs!.survey.surveyedOn });
   }
   if (newPrice) {
     evidence.push({ id: nextId(), kind: "data_point", label: newPriceLabel(newPrice), value: newPrice.gbp, sourceType: "retailer", observedOn: newPrice.observedOn });
@@ -158,14 +180,32 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
     }
   }
 
-  const body = decision.position === null ? NO_NEW_PRICE : priceSummary({ price, sample, newPrice, decision, grade: usedGrade });
-  const summary = inCatalogue ? body : `${NOT_IN_SAMPLE_NOTE} ${body}`;
+  const body = decision.position === null ? NO_NEW_PRICE : priceSummary({ price, sample, sampleLabel, newPrice, decision, grade: usedGrade });
+  const withContext = context ? `${body} ${context.line} in your search.` : body;
+  const summary = inCatalogue || observed ? withContext : `${NOT_IN_SAMPLE_NOTE} ${withContext}`;
   const features: GeminiFeature[] = args.calledViaTool?.() ? ["function_calling"] : [];
 
   const newPriceConfidence = newPrice ? (newPrice.offers.length >= NEW_PRICE_CONFIDENCE.manyFrom ? NEW_PRICE_CONFIDENCE.many : NEW_PRICE_CONFIDENCE.few) : 0;
   const base =
-    decision.status === "unknown" ? 0 : sample ? Math.min(SAMPLE_CONFIDENCE_CAP, round2(0.4 + sample.n * 0.02)) : newPriceConfidence;
-  const confidence = inCatalogue ? base : Math.min(base, NOT_IN_CATALOGUE_CONFIDENCE_CAP);
+    decision.status === "unknown"
+      ? 0
+      : observed
+        ? observedConfidence(observed)
+        : sample
+          ? Math.min(SAMPLE_CONFIDENCE_CAP, round2(0.4 + sample.n * 0.02))
+          : newPriceConfidence;
+  const confidence = inCatalogue || observed ? base : Math.min(base, NOT_IN_CATALOGUE_CONFIDENCE_CAP);
+
+  const observedComparison: ObservedComparison | undefined = obs
+    ? {
+        ...baseComparison(obs.survey, obs.matched),
+        source: observed ? "observed_listings" : sample ? "price_sample" : newPrice ? "new_price" : "none",
+        stats: observed ? { n: observed.n, excluded: observed.excluded, median: observed.median, p10: observed.p10, p25: observed.p25, p75: observed.p75, p90: observed.p90 } : null,
+        context,
+        note: null,
+        suggestions: suggestCheaper(obs.matched, { price, userSizeUK: obs.userSizeUK, platform: obs.survey.platform }),
+      }
+    : undefined;
 
   return {
     check: "price",
@@ -188,6 +228,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       searchFailed: decision.status === "unknown" && ranB && !newPrice,
       ...(shoppingLive !== undefined ? { shoppingLive } : {}),
       ...(newOffers ? { newOffers } : {}),
+      ...(observedComparison ? { observedComparison } : {}),
       inCatalogue,
     },
   };
@@ -196,12 +237,14 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
 function priceSummary(a: {
   price: number;
   sample: SampleStats | null;
+  /** The comparison's evidence label ("Compared with 12 listings sampled on 10 Nov" / "... from your search on 14 Nov"). */
+  sampleLabel: string;
   newPrice: NewPrice | null;
   decision: PriceDecision;
   grade?: ConditionGrade;
 }): string {
   const p = gbp(a.price);
-  const sampled = a.sample ? `${sampleEvidenceLabel(a.sample).replace(/^Compared with/, "compared with")}` : "";
+  const sampled = a.sample ? a.sampleLabel.replace(/^Compared with/, "compared with") : "";
   const newBit = a.newPrice ? `new it's about ${gbp(a.newPrice.gbp)} (median of ${a.newPrice.offers.length} UK retailers, checked ${shortDate(a.newPrice.observedOn)})` : "";
   let s: string;
   switch (a.decision.position) {
@@ -211,7 +254,7 @@ function priceSummary(a: {
       s = `At ${p} it costs as much as buying new: ${newBit}.`;
       break;
     case "above":
-      s = `At ${p} it's well above the sampled listings (${sampled}, median ${gbp(a.sample!.median)}).`;
+      s = `At ${p} it's well above ${/your search/.test(a.sampleLabel) ? "the listings in your search" : "the sampled listings"} (${sampled}, median ${gbp(a.sample!.median)}).`;
       break;
     case "suspiciously_low":
       s = `At ${p} it's unusually low (${sampled}, median ${gbp(a.sample!.median)}); check condition and details.`;

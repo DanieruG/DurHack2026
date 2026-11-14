@@ -81,6 +81,7 @@ model CatalogueModel {
   retailGBP    Float?
   referenceImg String? // path under /data/images/catalogue
   sizeChartId  String
+  matchTokens  Json? // { family, version, exclude }: how listing titles name it (lib/titleMatch.ts)
 }
 
 model SizeChart {

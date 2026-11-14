@@ -13,6 +13,8 @@ import type { NewPrices } from "@/lib/newPrices";
 import { checkComfort } from "./checks/comfort";
 import { checkCondition } from "./checks/condition";
 import { plainError, runStage, today, unknownCheck, type StageStats } from "./util";
+import { familyComparison, FAMILY_CONFIDENCE_CAP, matchSurvey, modelUnknownComparison, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
+import { catalogueTokens, deriveTokens, type ModelTokens } from "@/lib/titleMatch";
 
 export type DownstreamCheck = Exclude<CheckName, "identify">;
 export const DOWNSTREAM: DownstreamCheck[] = ["fit", "price", "comfort", "condition"];
@@ -37,6 +39,10 @@ export type RunCtx = {
   newPricesViaTool: Set<string>;
   /** The Gemini Pro version check already ran: the recheck_identification lead would only repeat it. */
   versionChecked?: boolean;
+  /** The user's survey of a search on this platform (Feature A), or null. Matched to the model when price runs. */
+  survey?: Survey | null;
+  /** The user's marketplace search: an identify hint only. */
+  searchQuery?: string | null;
 };
 
 const priceKey = (modelName: string, brand: string) => `${brand} ${modelName}`.toLowerCase().replace(/\s+/g, " ").trim();
@@ -101,13 +107,21 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
   if (name === "fit" && !subject.brand) return unknownCheck("fit", "I couldn't tell the brand, so I can't check the fit.");
   if ((name === "price" || name === "comfort") && !subject.modelName) {
     const what = name === "price" ? "compare the price" : "check reviews for comfort";
-    return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`);
+    const observed = name === "price" && ctx.survey ? { details: { observedComparison: modelUnknownComparison(ctx.survey) } } : {};
+    return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`, observed);
   }
   if (name === "price" && subject.tier === "family") {
     const v = ctx.identify?.versionUnclear;
-    return unknownCheck("price", `The exact version is unclear (${v?.options[0] ?? "?"} or ${v?.options[1] ?? "another version"}), so I can't compare the price.`, {
-      details: { versionUnclear: true },
-    });
+    const base = `The exact version is unclear (${v?.options[0] ?? "?"} or ${v?.options[1] ?? "another version"}), so I can't compare the price.`;
+    // Family-level context from the user's search only: never used for the verdict, confidence capped.
+    const obs = observedFor(ctx, subject);
+    const comparison = obs ? familyComparison(obs.survey, obs.matched) : null;
+    return {
+      ...unknownCheck("price", comparison?.context ? `${base} ${comparison.context.line} in your search.` : base, {
+        details: { versionUnclear: true, ...(comparison ? { observedComparison: comparison } : {}) },
+      }),
+      ...(comparison?.context ? { confidence: FAMILY_CONFIDENCE_CAP } : {}),
+    };
   }
   const { deps } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;
@@ -134,6 +148,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             condition: opts.priceCondition,
             forceSourceB: opts.forceSourceB,
             onNewOffers: (offers) => ctx.emit("new_offers", offers),
+            observed: observedFor(ctx, subject),
           });
         case "comfort":
           return checkComfort({
@@ -216,6 +231,20 @@ export async function runDownstream(ctx: RunCtx, names: DownstreamCheck[] = DOWN
     ctx.emit("check_done", linked.changedFit);
   }
   return linked.checks;
+}
+
+/** The identified model's title tokens: the catalogue entry's, else derived from identify's brand and model name. */
+export function tokensFor(subject: Subject): ModelTokens | null {
+  if (subject.catalogue) return catalogueTokens(subject.catalogue);
+  return subject.brand && subject.modelName ? deriveTokens(subject.brand, subject.modelName) : null;
+}
+
+/** The survey matched to what identify established (null tokens: nothing matches), with the user's size on its chart. */
+export function observedFor(ctx: RunCtx, subject: Subject = subjectFor(ctx)): { survey: Survey; matched: MatchedListing[]; userSizeUK: number | null } | undefined {
+  if (!ctx.survey) return undefined;
+  const chart = chartFor(subject, ctx.ref.sizeCharts);
+  const matched = matchSurvey(ctx.survey, tokensFor(subject), chart);
+  return { survey: ctx.survey, matched, userSizeUK: subject.brand ? userSizeUK(ctx.needs, subject.brand, chart, ctx.ref.sizeCharts) : null };
 }
 
 /** The catalogue model's own chart, else any chart for the brand. */

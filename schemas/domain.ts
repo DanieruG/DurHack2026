@@ -29,12 +29,47 @@ export type ConditionGrade = z.infer<typeof ConditionGradeSchema>;
 // ---------- capture & profile ----------
 
 export const MAX_PAGE_TEXT = 20_000;
+/** Most surveyed listings one capture may carry (the extension keeps at most 300 cards in total). */
+export const MAX_OBSERVED_LISTINGS = 300;
+
+const httpsUrl = z
+  .string()
+  .max(2048)
+  .url()
+  .refine((u) => /^https:\/\//i.test(u), "must be https");
+
+/**
+ * One listing card the user saw on a marketplace search results page (Feature A: "Survey this search"). Card facts
+ * only: unknown keys are stripped, and there is deliberately no field for a seller's name, rating or location.
+ */
+export const ObservedListingSchema = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().min(1).max(300),
+  price: z.number().nonnegative().max(100_000).nullable(),
+  currency: z.string().max(8).nullable(),
+  url: httpsUrl,
+  thumbnailUrl: httpsUrl.optional(),
+  sizeText: z.string().max(60).optional(),
+  condition: z.string().max(60).optional(),
+  sponsored: z.boolean().default(false),
+  /** eBay only: auctions are excluded from every comparison (Buy It Now prices only). */
+  buyingFormat: z.enum(["auction", "buy_it_now", "unknown"]).optional(),
+  /** Vinted: which price the card gave. The extension always sends the item price without the buyer protection fee. */
+  priceBasis: z.enum(["listed", "excl_buyer_protection"]).default("listed"),
+  /** When the card was surveyed (ISO). */
+  seenAt: z.string().datetime({ offset: true }),
+});
+export type ObservedListing = z.infer<typeof ObservedListingSchema>;
 
 /** What the extension (or upload page) sends. Screenshots arrive as multipart files. */
 export const CaptureSchema = z.object({
   pageUrl: z.string().url().max(2048).optional(),
   pageText: z.string().max(MAX_PAGE_TEXT).optional(),
   imageUrls: z.array(z.string().url().max(2048)).max(32).optional(),
+  /** Listings from the user's own survey of a search on the same platform (never a wider search). */
+  observedListings: z.array(ObservedListingSchema).max(MAX_OBSERVED_LISTINGS).optional(),
+  /** The search the survey came from: the USER's search, a hint only, never a fact about this listing. */
+  searchQuery: z.string().trim().max(200).optional(),
 });
 export type Capture = z.infer<typeof CaptureSchema>;
 
@@ -75,6 +110,7 @@ export const EvidenceSourceTypeSchema = z.enum([
   "manufacturer",
   "retailer",
   "price_sample",
+  "observed_listings",
   "other",
 ]);
 export type EvidenceSourceType = z.infer<typeof EvidenceSourceTypeSchema>;
@@ -326,6 +362,63 @@ export const NewOffersSchema = z.object({
   enoughForComparison: z.boolean(),
 });
 export type NewOffers = z.infer<typeof NewOffersSchema>;
+
+// ---------- observed listings (Feature A: the user's own search survey) ----------
+
+export const MatchLevelSchema = z.enum(["exact", "version_unknown", "different_version", "none"]);
+export type MatchLevelName = z.infer<typeof MatchLevelSchema>;
+
+export const MatchCountsSchema = z.object({
+  exact: z.number().int(),
+  version_unknown: z.number().int(),
+  different_version: z.number().int(),
+  none: z.number().int(),
+});
+export type MatchCounts = z.infer<typeof MatchCountsSchema>;
+
+/** A cheaper surveyed listing that matches exactly (Price exhibit evidence, never a ranking of all results). */
+export const ObservedSuggestionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  priceGBP: z.number(),
+  url: z.string(),
+  thumbnailUrl: z.string().optional(),
+  platform: PlatformSchema,
+  /** "UK 9", or null with sizeNotStated true. */
+  sizeLabel: z.string().nullable(),
+  sizeNotStated: z.boolean(),
+  sponsored: z.boolean(),
+  /** How much cheaper than the listing being investigated. */
+  savingGBP: z.number(),
+});
+export type ObservedSuggestion = z.infer<typeof ObservedSuggestionSchema>;
+
+export const ObservedComparisonSchema = z.object({
+  searchQuery: z.string().nullable(),
+  /** The survey's date (YYYY-MM-DD). */
+  surveyedOn: z.string(),
+  platform: PlatformSchema,
+  /** Which Vinted price the survey used, recorded so it's consistent ("listed" on eBay). */
+  priceBasis: z.enum(["listed", "excl_buyer_protection"]),
+  /** Usable cards per match level, plus what was left out before matching. */
+  counts: MatchCountsSchema.extend({
+    surveyed: z.number().int(),
+    auctionsExcluded: z.number().int(),
+    unpricedExcluded: z.number().int(),
+  }),
+  /** The comparison the price verdict used: observed listings (Source C), the catalogue sample (A), the new price only (B), or none. */
+  source: z.enum(["observed_listings", "price_sample", "new_price", "none"]),
+  /** Source C stats over exact matches (all adult sizes); null when fewer than 5 exact matches. */
+  stats: z.object({ n: z.number().int(), excluded: z.number().int(), median: z.number(), p10: z.number(), p25: z.number(), p75: z.number(), p90: z.number() }).nullable(),
+  /** Shown instead when there were too few exact matches (or only the family is known): "4 similar listings seen, £30 to £45". */
+  context: z
+    .object({ n: z.number().int(), minGBP: z.number(), maxGBP: z.number(), exact: z.number().int(), versionUnknown: z.number().int(), familyLevel: z.boolean(), line: z.string() })
+    .nullable(),
+  /** e.g. "Couldn't compare: model unknown." */
+  note: z.string().nullable(),
+  suggestions: z.array(ObservedSuggestionSchema),
+});
+export type ObservedComparison = z.infer<typeof ObservedComparisonSchema>;
 
 export const FitMatchSchema = z.enum(["exact", "close", "mismatch", "estimated"]);
 export type FitMatch = z.infer<typeof FitMatchSchema>;
