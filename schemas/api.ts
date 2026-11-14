@@ -11,6 +11,7 @@ import {
   LeadSchema,
   LeadsReportSchema,
   ListingFactsSchema,
+  NewOffersSchema,
   NextMoveSchema,
   PlatformSchema,
   SizeSystemSchema,
@@ -62,6 +63,8 @@ export const CaseDetailSchema = z.object({
   run: z.object({ durationMs: z.number(), geminiCalls: z.number().int(), cachedCalls: z.number().int().optional() }).nullable().default(null),
   verdict: VerdictSchema.nullable(),
   nextMoves: z.array(NextMoveSchema),
+  /** New-price offers from the shown revision's price check (its details.newOffers); null when none were looked up. */
+  newOffers: NewOffersSchema.nullable().default(null),
   evidenceIndex: z.record(z.string(), EvidenceSchema),
   imageUrls: z.array(z.string()),
   history: z.array(
@@ -104,6 +107,8 @@ export const SseEventSchemas = {
   }),
   capture_warning: z.object({ message: z.string() }),
   check_done: CheckResultSchema,
+  /** Sent as soon as the price check's Shopping lookup completes (live or cached), before the check itself finishes. */
+  new_offers: NewOffersSchema,
   lead_started: LeadSchema,
   lead_done: LeadSchema,
   leads_skipped: z.object({ reason: z.string() }),

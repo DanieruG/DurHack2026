@@ -133,6 +133,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             calledViaTool: () => ctx.newPricesViaTool.has(priceKey(subject.modelName!, subject.brand!)),
             condition: opts.priceCondition,
             forceSourceB: opts.forceSourceB,
+            onNewOffers: (offers) => ctx.emit("new_offers", offers),
           });
         case "comfort":
           return checkComfort({

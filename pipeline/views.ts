@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { CaseDetail } from "@/schemas/api";
-import type { CaseSummary, CheckResult, SizeSystem } from "@/schemas/domain";
+import { NewOffersSchema, type CaseSummary, type CheckResult, type NewOffers, type SizeSystem } from "@/schemas/domain";
 import { FeedSeedItemSchema, type FeedItem, type FeedSeedItem, type SizeChart } from "@/schemas/seed";
 import { convertSize, parseSizeText } from "@/lib/sizes";
 import type { CaseRow } from "@/lib/store";
@@ -21,6 +21,13 @@ async function latestChecks(deps: Deps, c: CaseRow) {
     if (checks.length) return { checks, leads: await deps.store.getLeads(c.id, r), revision: r };
   }
   return { checks: [], leads: [], revision: c.revision };
+}
+
+/** The price check's new-price offers (details.newOffers), or null when it didn't look any up. */
+export function newOffersOf(checks: CheckResult[]): NewOffers | null {
+  const raw = (checks.find((c) => c.check === "price")?.details as { newOffers?: unknown } | undefined)?.newOffers;
+  const parsed = raw === undefined ? null : NewOffersSchema.safeParse(raw);
+  return parsed?.success ? parsed.data : null;
 }
 
 export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promise<CaseDetail> {
@@ -43,6 +50,7 @@ export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promis
     run: entry?.run ?? null,
     verdict: c.verdict,
     nextMoves: c.nextMoves ?? [],
+    newOffers: newOffersOf(checks),
     evidenceIndex: indexEvidence(c.listingFacts?.evidence, c.identify?.evidence, ...checks.map((x) => x.evidence)),
     imageUrls: images.map((_, i) => imageUrl(origin, c.id, i)),
     history: c.history,
@@ -79,6 +87,8 @@ export async function synthesizeEvents(deps: Deps, c: CaseRow): Promise<SseEvent
   let seq = 0;
   const push = (event: SseEvent["event"], data: unknown) => out.push({ id: `${revision}:${++seq}`, revision, event, data });
   push("investigation_started", { caseId: c.id, revision });
+  const offers = newOffersOf(checks);
+  if (offers) push("new_offers", offers);
   for (const ch of checks) push("check_done", ch);
   for (const l of leads) push("lead_done", l);
   const skipped = c.history.find((h) => h.revision === revision)?.leads?.skipped;

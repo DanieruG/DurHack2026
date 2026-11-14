@@ -5,13 +5,14 @@ import type {
   Evidence,
   GeminiFeature,
   ListingFacts,
+  NewOffers,
   PricePosition,
   SampleStats,
   UserNeeds,
 } from "@/schemas/domain";
 import type { PriceSample } from "@/schemas/seed";
 import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
-import type { NewPrices, ShoppingOffer } from "@/lib/newPrices";
+import { toNewOffers, type NewPrices, type ShoppingOffer } from "@/lib/newPrices";
 import { evidenceIds, gbp, round2, unknownCheck } from "../util";
 
 export const SAMPLE_CONFIDENCE_CAP = 0.7;
@@ -98,6 +99,8 @@ export type PriceCheckArgs = {
   /** deeper_price_comparison lead: restrict Source A to this grade and force Source B. */
   condition?: ConditionGrade;
   forceSourceB?: boolean;
+  /** Called as soon as the Shopping lookup returns (live or cached), before the check finishes: the new_offers event. */
+  onNewOffers?: (offers: NewOffers) => void;
 };
 
 export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
@@ -119,12 +122,15 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   let ranB = false;
   let offersSeen = 0;
   let shoppingLive: boolean | undefined;
+  let newOffers: NewOffers | undefined;
   if (args.forceSourceB || shouldRunSourceB(price, sample)) {
     ranB = true;
     try {
       const r = await args.lookupNewPrices();
       offersSeen = r.offers.length;
       shoppingLive = !r.fromCache;
+      newOffers = toNewOffers(r, price);
+      args.onNewOffers?.(newOffers);
       newPrice = toNewPrice(r);
     } catch (err) {
       if ((err as Error)?.name === "StageTimeoutError") throw err;
@@ -181,6 +187,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       // Unknown only because the Shopping lookup failed or found too few retailers.
       searchFailed: decision.status === "unknown" && ranB && !newPrice,
       ...(shoppingLive !== undefined ? { shoppingLive } : {}),
+      ...(newOffers ? { newOffers } : {}),
       inCatalogue,
     },
   };

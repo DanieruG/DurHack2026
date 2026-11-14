@@ -224,6 +224,8 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       if (!stage) return { ...s, fatal: message };
       return { ...s, log: upsert(s.log, { key: `error:${stage}`, text: message, state: "problem", kind: "warning", at: e.at }) };
     }
+    case "new_offers":
+      return s; // shown by the panel's offer cards (next commit)
     case "verdict":
       return { ...s, verdict: e.data as Verdict };
     case "next_moves":

@@ -1,6 +1,7 @@
 import { sha256 } from "./hash";
 import type { CacheMode } from "./cache";
 import type { Store } from "./store";
+import type { NewOffer, NewOffers } from "@/schemas/domain";
 
 /**
  * Current new retail prices from Google Shopping (SerpApi), UK results in GBP.
@@ -14,7 +15,7 @@ export const SHOPPING_TIMEOUT_MS = 8_000;
 export const SHOPPING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const MIN_OFFERS = 3;
 
-export type ShoppingOffer = { retailer: string; priceGBP: number; url: string; title: string };
+export type ShoppingOffer = { retailer: string; priceGBP: number; url: string; title: string; thumbnailUrl?: string };
 
 export type NewPrices = {
   offers: ShoppingOffer[];
@@ -37,6 +38,7 @@ export type RawShoppingResult = {
   extracted_price?: number;
   product_link?: string;
   link?: string;
+  thumbnail?: string;
   second_hand_condition?: string;
   tag?: string;
   extensions?: string[];
@@ -114,6 +116,73 @@ export function rejectReason(r: RawShoppingResult, args: { brand: string; modelN
   return null;
 }
 
+// ---------- links and thumbnails (pure) ----------
+
+const isGoogleHost = (host: string) => /(^|\.)google\.[a-z.]+$/i.test(host);
+
+const httpUrl = (s: string | undefined): URL | null => {
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    return u.protocol === "https:" || u.protocol === "http:" ? u : null;
+  } catch {
+    return null;
+  }
+};
+
+/** A google.*\/url?q=... or ?url=... redirect, unwrapped to the http(s) page it points at. */
+function unwrapGoogleRedirect(u: URL): URL | null {
+  if (!isGoogleHost(u.hostname) || u.pathname !== "/url") return null;
+  const target = httpUrl(u.searchParams.get("url") ?? u.searchParams.get("q") ?? undefined);
+  return target && !isGoogleHost(target.hostname) ? target : null;
+}
+
+/**
+ * The link a card opens: the retailer's own product page when Shopping gives one (`link`, or a Google redirect to it),
+ * else the Google Shopping page (`product_link`). Only http(s); "" when there is none.
+ */
+export function offerUrl(r: Pick<RawShoppingResult, "link" | "product_link">): string {
+  const candidates = [r.link, r.product_link].map(httpUrl).filter((u): u is URL => !!u);
+  const direct = candidates.find((u) => !isGoogleHost(u.hostname)) ?? candidates.map(unwrapGoogleRedirect).find((u): u is URL => !!u);
+  return (direct ?? candidates[0])?.toString() ?? "";
+}
+
+/**
+ * Shopping thumbnails are served from encrypted-tbn0..3.gstatic.com (checked against a live gl=uk response). Anything
+ * else is dropped (the panel shows its placeholder), so the panel only ever loads images from these hosts.
+ */
+export const THUMBNAIL_HOST = /^encrypted-tbn[0-9]\.gstatic\.com$/;
+
+export function offerThumbnail(url: string | undefined): string | undefined {
+  const u = httpUrl(url);
+  return u && u.protocol === "https:" && THUMBNAIL_HOST.test(u.hostname) ? u.toString() : undefined;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * The offers the panel shows as cards: cheapest first, exactly one marked isLowest, each with its difference from the
+ * listing price (negative = cheaper than the listing). Offers without an http(s) link are left out (nothing to open).
+ * enoughForComparison mirrors the price rule (at least MIN_OFFERS kept); it never changes the verdict.
+ */
+export function toNewOffers(r: Pick<NewPrices, "offers" | "checkedOn">, listingPriceGBP: number): NewOffers {
+  const sorted = r.offers
+    .filter((o) => httpUrl(o.url))
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => a.o.priceGBP - b.o.priceGBP || a.i - b.i)
+    .map(({ o }) => o);
+  const offers: NewOffer[] = sorted.map((o, i) => ({
+    retailer: o.retailer,
+    title: o.title,
+    priceGBP: o.priceGBP,
+    url: o.url,
+    ...(offerThumbnail(o.thumbnailUrl) ? { thumbnailUrl: offerThumbnail(o.thumbnailUrl) } : {}),
+    differenceGBP: round2(o.priceGBP - listingPriceGBP),
+    isLowest: i === 0,
+  }));
+  return { offers, checkedOn: r.checkedOn, enoughForComparison: r.offers.length >= MIN_OFFERS };
+}
+
 const retailerKey = (s: string) => s.toLowerCase().replace(/\b(uk|ire|ie|com|co uk|online|store|shop)\b/g, "").replace(/[^a-z0-9]+/g, "");
 
 /** Keep retailer offers for exactly this model; one per retailer (its lowest price), cheapest first. */
@@ -122,7 +191,8 @@ export function filterOffers(results: RawShoppingResult[], args: { brand: string
   for (const r of results) {
     if (rejectReason(r, args)) continue;
     const priceGBP = parseGBP(r)!;
-    const offer: ShoppingOffer = { retailer: r.source!.trim(), priceGBP, url: r.product_link ?? r.link ?? "", title: r.title!.trim() };
+    const thumbnailUrl = offerThumbnail(r.thumbnail);
+    const offer: ShoppingOffer = { retailer: r.source!.trim(), priceGBP, url: offerUrl(r), title: r.title!.trim(), ...(thumbnailUrl ? { thumbnailUrl } : {}) };
     const key = retailerKey(offer.retailer);
     const prev = best.get(key);
     if (!prev || priceGBP < prev.priceGBP) best.set(key, offer);
@@ -251,8 +321,8 @@ export function createNewPriceClient(opts: NewPriceClientOptions): NewPriceClien
 }
 
 function pick(r: RawShoppingResult): RawShoppingResult {
-  const { title, source, price, extracted_price, product_link, link, second_hand_condition, tag, extensions } = r;
-  return { title, source, price, extracted_price, product_link, link, second_hand_condition, tag, extensions };
+  const { title, source, price, extracted_price, product_link, link, thumbnail, second_hand_condition, tag, extensions } = r;
+  return { title, source, price, extracted_price, product_link, link, thumbnail, second_hand_condition, tag, extensions };
 }
 
 /** Convenience wrapper with the spec's signature; pass the client the app built (see pipeline/deps.ts). */

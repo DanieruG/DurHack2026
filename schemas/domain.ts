@@ -304,5 +304,28 @@ export const PricePositionSchema = z.enum([
 ]);
 export type PricePosition = z.infer<typeof PricePositionSchema>;
 
+/** One UK retailer's current new price (Google Shopping). Retailer data only: never a user or a seller. */
+export const NewOfferSchema = z.object({
+  retailer: z.string(),
+  title: z.string(),
+  priceGBP: z.number(),
+  /** The retailer's own product page when Shopping gives one, otherwise the Google Shopping page. Always http(s). */
+  url: z.string(),
+  /** Shopping thumbnail, only from the allowed image hosts (lib/newPrices.ts THUMBNAIL_HOST). */
+  thumbnailUrl: z.string().optional(),
+  /** Offer price minus listing price; negative means cheaper than the listing. */
+  differenceGBP: z.number(),
+  isLowest: z.boolean(),
+});
+export type NewOffer = z.infer<typeof NewOfferSchema>;
+
+/** The kept new-price offers, cheapest first; enoughForComparison is false when fewer than 3 were kept (not used for the verdict). */
+export const NewOffersSchema = z.object({
+  offers: z.array(NewOfferSchema),
+  checkedOn: z.string(),
+  enoughForComparison: z.boolean(),
+});
+export type NewOffers = z.infer<typeof NewOffersSchema>;
+
 export const FitMatchSchema = z.enum(["exact", "close", "mismatch", "estimated"]);
 export type FitMatch = z.infer<typeof FitMatchSchema>;

@@ -43,6 +43,11 @@ describe("schemas round-trip fixtures", () => {
       stage_done: { stage: "identify" },
       capture_warning: { message: "Only 1 photo could be loaded" },
       check_done: check,
+      new_offers: {
+        offers: [{ retailer: "Decathlon UK", title: "Nike Pegasus 40", priceGBP: 79.99, url: "https://www.decathlon.co.uk/p/1", differenceGBP: 37.99, isLowest: true }],
+        checkedOn: "2026-11-14",
+        enoughForComparison: false,
+      },
       lead_started: { id: "lead_1", type: "deeper_price_comparison", reason: "r", status: "pending" },
       lead_done: { id: "lead_1", type: "deeper_price_comparison", reason: "r", status: "done", outcome: "o" },
       leads_skipped: { reason: "Skipped: the review search was unavailable." },
