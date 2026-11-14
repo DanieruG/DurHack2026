@@ -16,8 +16,12 @@ export type FunctionResponsePart = {
 export type Part = (TextPart | InlineDataPart | FunctionCallPart | FunctionResponsePart) & Record<string, unknown>;
 export type Content = { role: "user" | "model"; parts: Part[] };
 
+/** Gemini 3 thinking depth. Lower is faster; LOW suits extraction, wording and anything not needing deep reasoning. */
+export type ThinkingLevel = "MINIMAL" | "LOW" | "MEDIUM" | "HIGH";
+
 export type GenConfig = {
   systemInstruction?: string;
+  thinkingConfig?: { thinkingLevel?: ThinkingLevel };
   responseMimeType?: string;
   responseJsonSchema?: unknown;
   tools?: Record<string, unknown>[];

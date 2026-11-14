@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Content, GeminiClient, GenConfig, GenResponse, Part, Tier } from "./client";
+import type { Content, GeminiClient, GenConfig, GenResponse, Part, ThinkingLevel, Tier } from "./client";
 import { runToolLoop, type ToolExecutor } from "./tools";
 
 export class StructuredOutputError extends Error {
@@ -74,6 +74,7 @@ export type StructuredArgs = {
   toolConfig?: Record<string, unknown>;
   executors?: Partial<Record<string, ToolExecutor>>;
   temperature?: number;
+  thinking?: ThinkingLevel;
 };
 
 export type StructuredResult<T> = { data: T; response: GenResponse; calledFunctions: string[] };
@@ -93,6 +94,7 @@ export async function generateStructured<T>(
   const config: GenConfig = {
     systemInstruction: args.system,
     temperature: args.temperature ?? 0.2,
+    ...(args.thinking ? { thinkingConfig: { thinkingLevel: args.thinking } } : {}),
     ...(withTools
       ? { tools: args.tools, toolConfig: args.toolConfig }
       : { responseMimeType: "application/json", responseJsonSchema: jsonSchema }),

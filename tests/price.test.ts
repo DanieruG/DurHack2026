@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agreeingCluster, checkPrice, decidePrice, parseNewPrices, shouldRunSourceB } from "@/pipeline/checks/price";
+import { agreeingCluster, checkPrice, decidePrice, pricesFromSegments, shouldRunSourceB } from "@/pipeline/checks/price";
+import { supportedSegments } from "@/gemini/groundedSearch";
 import { createGeminiClient } from "@/gemini/client";
 import { testConfig } from "@/lib/config";
 import type { ListingFacts, SampleStats } from "@/schemas/domain";
@@ -73,14 +74,25 @@ describe("Source B parsing", () => {
     expect(agreeingCluster([{ priceGBP: 100 }])).toBeNull();
     expect(agreeingCluster([{ priceGBP: 60 }, { priceGBP: 120 }, { priceGBP: 125 }, { priceGBP: 119 }])?.length).toBe(3);
   });
-  it("attributes prices only to grounded sources and drops resale sites", () => {
+  it("attributes prices only to grounded sentences, drops resale sites and prices the sentence doesn't contain", () => {
     const res = grounded([
-      ["PRICE | SportsShoes | £119.99", ["sportsshoes.com"]],
-      ["PRICE | Nike | £119.95", ["nike.com"]],
-      ["PRICE | eBay | £60", ["ebay.co.uk"]],
-      ["PRICE | Unsupported | £99", []],
+      ["SportsShoes sells them new for £119.99.", ["sportsshoes.com"]],
+      ["Nike's UK site lists them at £119.95.", ["nike.com"]],
+      ["Used pairs go for £60 on eBay.", ["ebay.co.uk"]],
+      ["Unsupported claim of £99.", []],
     ]);
-    const prices = parseNewPrices(res.text, res.groundingMetadata);
+    const segments = supportedSegments(res.groundingMetadata);
+    expect(segments.map((s) => s.id)).toEqual(["S1", "S2", "S3"]);
+    const prices = pricesFromSegments(
+      [
+        { segment: "S1", retailer: "SportsShoes", priceGBP: 119.99, brandNew: true },
+        { segment: "S2", retailer: "Nike", priceGBP: 119.95, brandNew: true },
+        { segment: "S3", retailer: "eBay", priceGBP: 60, brandNew: false },
+        { segment: "S2", retailer: "Nike", priceGBP: 89, brandNew: true }, // not in the sentence: invented
+        { segment: "S9", retailer: "Nowhere", priceGBP: 99, brandNew: true }, // no such sentence
+      ],
+      segments,
+    );
     expect(prices.map((p) => [p.domain, p.priceGBP])).toEqual([
       ["sportsshoes.com", 119.99],
       ["nike.com", 119.95],

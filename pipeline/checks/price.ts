@@ -12,8 +12,11 @@ import type {
 import type { PriceSample } from "@/schemas/seed";
 import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
 import type { GeminiClient } from "@/gemini/client";
-import { groundingSources, sourcesForLine, sourceToEvidence, type GroundedSource } from "@/gemini/grounding";
-import { functionTool, runToolLoop, type ToolExecutor } from "@/gemini/tools";
+import { z } from "zod";
+import { sourceToEvidence, type GroundedSource } from "@/gemini/grounding";
+import { groundedSearch, segmentList, type Segment } from "@/gemini/groundedSearch";
+import { generateStructured } from "@/gemini/structured";
+import type { ToolExecutor } from "@/gemini/tools";
 import { evidenceIds, gbp, round2, unknownCheck, withSearchBudget } from "../util";
 
 export const SAMPLE_CONFIDENCE_CAP = 0.7;
@@ -39,36 +42,79 @@ export type NewPrice = {
 
 // ---------- Source B: current new price via Google Search grounding ----------
 
+/** Step 1 (grounded): plain prose, which keeps Google's source attribution (a rigid line format loses it). */
 export function newPricePrompt(model: Pick<PricedModel, "brand" | "name">): string {
   return (
-    `What is the current NEW retail price in the UK, in GBP, of the ${model.brand} ${model.name} trainers ` +
-    `(adult sizes, standard colourways)? Search UK retailers and the manufacturer's UK site.\n` +
-    `Answer with up to 6 lines, one per retailer, exactly in this form:\n` +
-    `PRICE | <retailer or site name> | £<price>\n` +
-    `Only include prices for brand-new pairs that you found in the search results. ` +
-    `Never include second-hand, used, pre-owned, resale or marketplace prices (eBay, Vinted, Depop, StockX, GOAT, etc.). ` +
-    `If you find no reliable new prices, answer exactly: PRICE | none | none`
+    `What does a brand-new pair of ${model.brand} ${model.name} trainers (adult sizes, standard colourways) cost right now ` +
+    `from UK retailers and ${model.brand}'s UK site? Search for current prices and write one short sentence per retailer, ` +
+    `naming the retailer and the price in GBP. Only brand-new pairs: leave out second-hand, used, pre-owned and resale ` +
+    `prices (eBay, Vinted, Depop, StockX, GOAT and similar).`
   );
 }
 
-/** Parse "PRICE | retailer | £120" lines; attribute each price only to sources whose grounding supports that line. */
-export function parseNewPrices(
-  text: string,
-  meta: Parameters<typeof groundingSources>[0],
-): NewPrice["sources"] {
-  const sources = groundingSources(meta);
+export const PriceItemsSchema = z.object({
+  prices: z
+    .array(
+      z.object({
+        segment: z.string(),
+        retailer: z.string(),
+        priceGBP: z.number(),
+        brandNew: z.boolean(),
+      }),
+    )
+    .default([]),
+});
+export type PriceItem = z.infer<typeof PriceItemsSchema>["prices"][number];
+
+const PRICE_PARSE_SYSTEM = `You turn search-answer sentences into data. Each sentence has an id (S1, S2, ...).
+For every sentence that states the price of a pair at a retailer or the brand's own site, return one item:
+segment (the sentence id), retailer (as written), priceGBP (the number written in that sentence, in GBP), brandNew
+(false for second-hand, used, pre-owned, resale or marketplace prices). Use only what the sentence says; never add prices.`;
+
+/** Step 2 (no tools): structure the supported sentences. */
+export async function structurePrices(gemini: GeminiClient, segments: Segment[]): Promise<PriceItem[]> {
+  const { data } = await generateStructured(gemini, PriceItemsSchema, {
+    stage: "price_parse",
+    tier: "fast",
+    system: PRICE_PARSE_SYSTEM,
+    parts: [{ text: segmentList(segments) }],
+    temperature: 0,
+    thinking: "LOW",
+  });
+  return data.prices;
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** True if the sentence itself contains this price (guards against the structuring step inventing numbers). */
+export function sentenceHasPrice(text: string, price: number): boolean {
+  for (const m of text.matchAll(/£\s?(\d{1,4}(?:,\d{3})*(?:\.\d{1,2})?)|(\d{1,4}(?:\.\d{1,2})?)\s?(?:GBP|pounds)/gi)) {
+    const n = Number((m[1] ?? m[2]).replace(/,/g, ""));
+    if (Math.abs(n - price) < 0.005) return true;
+  }
+  return false;
+}
+
+/**
+ * Attribute each structured price only to sources that Google says support its sentence; prefer the source whose
+ * domain matches the named retailer. Drops resale sites, review sites, invented prices and repeat domains.
+ */
+export function pricesFromSegments(items: PriceItem[], segments: Segment[]): NewPrice["sources"] {
   const out: NewPrice["sources"] = [];
   const seen = new Set<string>();
-  for (const line of text.split("\n")) {
-    const m = /^\s*PRICE\s*\|\s*(.+?)\s*\|\s*£\s*([\d,]+(?:\.\d{1,2})?)/i.exec(line);
-    if (!m) continue;
-    const priceGBP = Number(m[2].replace(/,/g, ""));
-    if (!(priceGBP > 5 && priceGBP < 2000)) continue;
-    for (const src of sourcesForLine(sources, line)) {
-      if (RESALE.test(src.domain + ".") || src.sourceType === "independent_review") continue;
+  for (const item of items) {
+    const seg = segments.find((s) => s.id === item.segment.trim().toUpperCase());
+    if (!seg || !item.brandNew) continue;
+    const priceGBP = item.priceGBP;
+    if (!(priceGBP > 5 && priceGBP < 2000) || !sentenceHasPrice(seg.text, priceGBP)) continue;
+    const eligible = seg.sources.filter((src) => !RESALE.test(src.domain + ".") && src.sourceType !== "independent_review");
+    const want = norm(item.retailer);
+    const named = want.length >= 3 ? eligible.filter((src) => norm(src.domain).includes(want) || want.includes(norm(src.domain.split(".")[0]))) : [];
+    for (const src of named.length ? named : eligible) {
       if (seen.has(src.domain)) continue;
       seen.add(src.domain);
-      out.push({ domain: src.domain, title: src.title, url: src.url, priceGBP, line: line.trim(), chunk: src });
+      out.push({ domain: src.domain, title: src.title, url: src.url, priceGBP, line: seg.text, chunk: src });
+      break; // one source per price item
     }
   }
   return out;
@@ -89,39 +135,21 @@ export async function findNewPrice(
   gemini: GeminiClient,
   args: { model: Pick<PricedModel, "brand" | "name">; today: string; combinedTools: boolean; executors: Partial<Record<string, ToolExecutor>> },
 ): Promise<NewPrice | null> {
-  const contents = [{ role: "user" as const, parts: [{ text: newPricePrompt(args.model) }] }];
-  let text: string;
-  let meta;
-  let calledFunctions: string[] = [];
-  if (args.combinedTools) {
-    // One call with Search grounding + function calling (Gemini 3 tool combination).
-    const res = await runToolLoop(gemini, {
-      stage: "price",
-      tier: "fast",
-      contents,
-      config: {
-        temperature: 0,
-        tools: [{ googleSearch: {} }, functionTool(["sampleStats"])],
-        toolConfig: { includeServerSideToolInvocations: true },
-      },
-      executors: args.executors,
-    });
-    text = res.response.text;
-    meta = res.response.groundingMetadata;
-    calledFunctions = res.calledFunctions;
-  } else {
-    const res = await gemini.generate({ stage: "price", tier: "fast", contents, config: { temperature: 0, tools: [{ googleSearch: {} }] } });
-    text = res.text;
-    meta = res.groundingMetadata;
-  }
-  const found = parseNewPrices(text, meta);
+  const answer = await groundedSearch(gemini, {
+    stage: "price",
+    prompt: newPricePrompt(args.model),
+    combinedTools: args.combinedTools,
+    functions: ["sampleStats"],
+    executors: args.executors,
+  });
+  const found = pricesFromSegments(await structurePrices(gemini, answer.segments), answer.segments);
   const cluster = agreeingCluster(found);
   if (!cluster) return null;
   const agreeing = cluster.map((i) => found[i]);
   const prices = agreeing.map((a) => a.priceGBP).sort((a, b) => a - b);
   const mid = Math.floor(prices.length / 2);
   const median = prices.length % 2 ? prices[mid] : round2((prices[mid - 1] + prices[mid]) / 2);
-  return { gbp: median, sources: agreeing, observedOn: args.today, calledFunctions };
+  return { gbp: median, sources: agreeing, observedOn: args.today, calledFunctions: answer.calledFunctions };
 }
 
 // ---------- status table (pure) ----------

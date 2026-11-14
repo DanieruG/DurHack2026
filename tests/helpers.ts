@@ -112,6 +112,16 @@ export function happyHandlers(): Record<string, Handler> {
     identify: () =>
       json({ catalogueModelId: "nike-pegasus-40", confidence: 0.92, reasons: "Title and swoosh/sole pattern match.", evidence: [{ kind: "quote", label: "Title names the model", quote: "Nike Air Zoom Pegasus 40" }] }),
     price: () => grounded([["PRICE | none | none", []]]),
+    // Step 2 of the grounded price search: structure "S1: <sentence> (sources: ...)" lines. Mocks state prices as
+    // "PRICE | <retailer> | £<n>" sentences; this parses them the way the model would.
+    price_parse: (req) => {
+      const prices = promptText(req)
+        .split("\n")
+        .map((l) => /^(S\d+): PRICE \| (.+?) \| £([\d.]+)/.exec(l))
+        .filter((m): m is RegExpExecArray => !!m)
+        .map((m) => ({ segment: m[1], retailer: m[2], priceGBP: Number(m[3]), brandNew: true }));
+      return json({ prices });
+    },
     comfort: () =>
       grounded(
         [
