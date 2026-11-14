@@ -6,12 +6,14 @@ import { gbp, PLATFORM_NAMES, WEAR_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { VERDICTS } from "../../lib/verdicts";
 import { Button, Label, Notice } from "../ui";
+import type { SearchPage } from "../../lib/survey";
 
 export type ReadyState =
   | { kind: "loading" }
   | { kind: "listing"; preview: ListingPreview }
   | { kind: "no_listing" }
-  | { kind: "no_access"; host: string; origin: string };
+  | { kind: "no_access"; host: string; origin: string }
+  | { kind: "search"; page: SearchPage };
 
 export function ListingHead(props: { preview: Pick<ListingPreview, "title" | "priceGBP" | "platform" | "photoCount" | "thumbnail"> }) {
   const p = props.preview;
@@ -47,11 +49,13 @@ export function CaseReady(props: {
   onOpenCase: (c: CaseSummary) => void;
   onEditProfile: () => void;
   onAllow: (origin: string) => void;
+  /** Set when a search survey on this platform will go with the case. */
+  surveyNote?: string | null;
 }) {
   const [note, setNote] = useState(props.defaultNote ?? "");
   const s = props.state;
 
-  if (s.kind === "loading") return <div className="screen" />;
+  if (s.kind === "loading" || s.kind === "search") return <div className="screen" />;
   if (s.kind === "no_listing") {
     return (
       <div className="screen">
@@ -123,6 +127,7 @@ export function CaseReady(props: {
       </section>
 
       <div className="foot">
+        {props.surveyNote && <p className="note dim">{props.surveyNote}</p>}
         {props.error && <Notice tone="problem">{props.error}</Notice>}
         <Button wide onClick={() => props.onInvestigate(note)} disabled={props.busy}>
           {props.busy ? "Opening case" : "Investigate"}

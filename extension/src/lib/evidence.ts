@@ -1,6 +1,6 @@
 import type { CaseDetail } from "@/schemas/api";
-import type { CheckResult, ConditionFinding, DefectLabel, Evidence, Lead, SampleStats } from "@/schemas/domain";
-import { domainOf, gbp, shortDate } from "./format";
+import type { CheckResult, ConditionFinding, DefectLabel, Evidence, Lead, ObservedComparison, ObservedSuggestion, SampleStats } from "@/schemas/domain";
+import { domainOf, gbp, PLATFORM_NAMES, shortDate } from "./format";
 
 const DEFECT_WORDS: Record<DefectLabel, string> = {
   outsole_wear: "outsole wear",
@@ -102,7 +102,8 @@ export function priceView(check: CheckResult): PriceView {
     newPrice?: { gbp: number; sources: number; observedOn?: string };
   };
   const lines: string[] = [];
-  if (d.sample) {
+  // A comparison with the user's own search is described by observedView instead.
+  if (d.sample && !d.sample.ruleIds?.includes("observed_listings")) {
     const when = d.sample.collectedOn.from === d.sample.collectedOn.to
       ? shortDate(d.sample.collectedOn.to)
       : `${shortDate(d.sample.collectedOn.from)}–${shortDate(d.sample.collectedOn.to)}`;
@@ -129,6 +130,50 @@ export function priceView(check: CheckResult): PriceView {
     };
   }
   return { listing: d.listingPriceGBP, sample: d.sample, lines, strip };
+}
+
+// ---------- the user's search survey (Price exhibit) ----------
+
+export type ObservedView = { lines: string[]; counts: string; suggestions: ObservedSuggestion[] };
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** What the Price exhibit says about the user's search survey: the comparison used (or why not), counts, suggestions. */
+export function observedView(c: ObservedComparison | null | undefined): ObservedView | null {
+  if (!c) return null;
+  const q = c.searchQuery ? ` for “${c.searchQuery}”` : "";
+  const when = `on ${shortDate(c.surveyedOn)}`;
+  const lines: string[] = [];
+  if (c.note) lines.push(c.note);
+  else if (c.stats) {
+    lines.push(`Compared with ${c.stats.n} listings from your search${q} ${when}: median ${gbp(c.stats.median)}, middle half ${gbp(c.stats.p25)}–${gbp(c.stats.p75)}.`);
+    lines.push("These are asking prices from one search, so they count for less than sold prices.");
+  } else if (c.context?.familyLevel) lines.push(`${c.context.line} in your search${q} ${when}. The version is unclear, so this is context only.`);
+  else if (c.context) lines.push(`${c.context.line} in your search${q} ${when}. Too few exact matches to compare the price with.`);
+  else lines.push(`None of the listings in your search${q} ${when} matched this model.`);
+  if (c.priceBasis === "excl_buyer_protection") lines.push(`${PLATFORM_NAMES[c.platform]} prices without the buyer protection fee.`);
+  const k = c.counts;
+  const parts = [
+    `${k.exact} exact`,
+    k.version_unknown ? `${k.version_unknown} not stating the version` : null,
+    k.different_version ? plural(k.different_version, "other version") : null,
+    k.none ? `${k.none} not this model` : null,
+  ].filter(Boolean);
+  const left = [k.auctionsExcluded ? plural(k.auctionsExcluded, "auction") : null, k.unpricedExcluded ? `${k.unpricedExcluded} without a £ price` : null].filter(Boolean);
+  const counts = `Surveyed ${plural(k.surveyed, "listing")}: ${parts.join(", ")}${left.length ? ` (left out: ${left.join(", ")})` : ""}.`;
+  return { lines, counts, suggestions: c.suggestions };
+}
+
+/** "UK 9", or "Size not stated". */
+export function suggestionSize(s: ObservedSuggestion): string {
+  return s.sizeLabel ?? "Size not stated";
+}
+
+/** The card's accessible summary. */
+export function suggestionLabel(s: ObservedSuggestion): string {
+  return [s.title, gbp(s.priceGBP), `${gbp(s.savingGBP)} cheaper`, PLATFORM_NAMES[s.platform], suggestionSize(s), s.sponsored ? "sponsored" : null, "not investigated yet"]
+    .filter(Boolean)
+    .join(", ");
 }
 
 /** Fit and identity evidence is already worded by the backend ("Your saved Nike size: UK 9"). */

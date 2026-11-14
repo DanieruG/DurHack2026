@@ -1,5 +1,6 @@
 import { collectGalleryState, collectListing, needsPageState, type RawCapture } from "../lib/capture";
 import type { GalleryState } from "../lib/gallery";
+import { collectSearchResults, type RawSearchCapture } from "../lib/survey";
 
 export type TabCapture =
   | { ok: true; raw: RawCapture; screenshot: Blob | null }
@@ -85,4 +86,51 @@ export function onActiveListingChange(fn: () => void): () => void {
     chrome.tabs.onActivated.removeListener(onActivated);
     chrome.tabs.onUpdated.removeListener(onUpdated);
   };
+}
+
+/** The active tab's URL (no page access needed: the extension has the "tabs" permission). */
+export async function activeTabUrl(): Promise<string | null> {
+  return (await activeTab())?.url ?? null;
+}
+
+export type SurveyCapture =
+  | { ok: true; raw: RawSearchCapture }
+  | { ok: false; reason: "failed" }
+  | { ok: false; reason: "no_access"; origin: string; host: string };
+
+/** Read the search results cards in the active tab. Only when the user clicks Survey; same access as Investigate. */
+export async function surveyActiveTab(): Promise<SurveyCapture> {
+  const tab = await activeTab();
+  const target = tab?.url ? originPattern(tab.url) : null;
+  if (!tab?.id || !target) return { ok: false, reason: "failed" };
+  try {
+    const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectSearchResults });
+    const raw = result?.result as RawSearchCapture | undefined;
+    return raw ? { ok: true, raw } : { ok: false, reason: "failed" };
+  } catch {
+    const granted = await chrome.permissions.contains({ origins: [target.origin] }).catch(() => false);
+    return granted ? { ok: false, reason: "failed" } : { ok: false, reason: "no_access", ...target };
+  }
+}
+
+/** Open a listing in a new active tab; resolves when it has finished loading (or after `timeoutMs`). */
+export async function openListingTab(url: string, timeoutMs = 20_000): Promise<boolean> {
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (!tab.id) return false;
+  const id = tab.id;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      resolve(ok);
+    };
+    const onUpdated = (tabId: number, info: { status?: string }) => {
+      if (tabId === id && info.status === "complete") finish(true);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+  });
 }

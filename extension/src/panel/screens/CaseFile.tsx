@@ -3,7 +3,9 @@ import type { CaseDetail } from "@/schemas/api";
 import type { CheckName, CheckResult } from "@/schemas/domain";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
-import { conditionView, evidenceLines, leadsView, priceView, sourceRefs, type ConditionView, type SourceRef } from "../../lib/evidence";
+import { conditionView, evidenceLines, leadsView, observedView, priceView, sourceRefs, suggestionLabel, suggestionSize, type ConditionView, type ObservedView, type SourceRef } from "../../lib/evidence";
+import type { ObservedSuggestion } from "@/schemas/domain";
+import { safeThumbnail } from "../../lib/offers";
 import { Button, CopyButton, Label, Notice, StatusMark, Tags, Verdict } from "../ui";
 import { checkTags, runTotals } from "../../lib/tags";
 import { BUY_NEW_MOVE_ID } from "../../lib/offers";
@@ -28,6 +30,8 @@ export function CaseFile(props: {
     onSubmit: (d: EvidenceDraft) => void;
   };
   initialAdding?: boolean;
+  /** Open a suggested listing from the user's search and investigate it. */
+  onInvestigateListing?: (url: string) => void;
 }) {
   const { detail } = props;
   const [open, setOpen] = useState<Set<RowKey>>(new Set(props.initialOpen ?? []));
@@ -67,7 +71,7 @@ export function CaseFile(props: {
       <section className="evidence" aria-label="Evidence">
         {rows.map((c) => (
           <EvidenceRow key={c.check} check={c} open={open.has(c.check)} onToggle={() => toggle(c.check)} refs={c.check === "comfort" || c.check === "price" ? sourceRefs(c) : undefined}>
-            <CheckBody check={c} detail={detail} />
+            <CheckBody check={c} detail={detail} onInvestigateListing={props.onInvestigateListing} />
           </EvidenceRow>
         ))}
         {detail.verdict?.explanation && (
@@ -175,7 +179,7 @@ function EvidenceRow(props: { check: CheckResult; open: boolean; onToggle: () =>
   );
 }
 
-function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }) {
+function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult; detail: CaseDetail; onInvestigateListing?: (url: string) => void }) {
   switch (check.check) {
     case "condition":
       return <ConditionExhibit view={conditionView(check, detail.imageUrls)} />;
@@ -208,6 +212,7 @@ function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }
               {l}
             </p>
           ))}
+          <ObservedExhibit view={observedView(detail.observedComparison)} onInvestigate={onInvestigateListing} />
           {detail.newOffers && <OfferCards data={detail.newOffers} />}
           {sourceRefs(check).length > 0 && <SourceList refs={sourceRefs(check)} />}
         </>
@@ -224,6 +229,66 @@ function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }
         </>
       );
   }
+}
+
+/** The user's own search survey, inside the Price exhibit: what it was compared with, and up to 2 cheaper exact matches. */
+function ObservedExhibit({ view, onInvestigate }: { view: ObservedView | null; onInvestigate?: (url: string) => void }) {
+  if (!view) return null;
+  return (
+    <div className="observed" aria-label="Your search">
+      <Label>Your search</Label>
+      {view.lines.map((l) => (
+        <p className="note" key={l}>
+          {l}
+        </p>
+      ))}
+      <p className="note dim">{view.counts}</p>
+      {view.suggestions.length > 0 && (
+        <>
+          <p className="observed-sub">Cheaper in your search</p>
+          <ul className="offer-list" aria-label="Cheaper similar listings from your search">
+            {view.suggestions.map((s) => (
+              <li key={s.id}>
+                <SuggestionCard s={s} onInvestigate={onInvestigate} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SuggestionCard({ s, onInvestigate }: { s: ObservedSuggestion; onInvestigate?: (url: string) => void }) {
+  const [failed, setFailed] = useState(false);
+  const thumb = safeThumbnail(s.thumbnailUrl);
+  return (
+    <div className="offer suggestion" aria-label={suggestionLabel(s)}>
+      {thumb && !failed ? (
+        <span className="offer-thumb" aria-hidden="true">
+          <img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
+        </span>
+      ) : (
+        <span className="offer-thumb offer-thumb-none" aria-hidden="true" />
+      )}
+      <span className="offer-text">
+        <span className="offer-title">{s.title}</span>
+        <span className="offer-retailer">
+          {PLATFORM_NAMES[s.platform]} · <span className={s.sizeNotStated ? "flag" : ""}>{suggestionSize(s)}</span>
+          {s.sponsored && <span className="flag"> · Sponsored</span>}
+        </span>
+        <span className="offer-diff">{gbp(s.savingGBP)} cheaper · Not investigated yet</span>
+      </span>
+      <span className="offer-side">
+        <span className="offer-price">{gbp(s.priceGBP)}</span>
+        {onInvestigate && (
+          <Button kind="secondary" small onClick={() => onInvestigate(s.url)}>
+            Investigate
+          </Button>
+        )}
+      </span>
+    </div>
+  );
 }
 
 /** A numbered source chip: a real link that opens the source in a new tab (plain text when there is no URL). */

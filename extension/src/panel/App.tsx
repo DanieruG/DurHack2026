@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { CaseDetail } from "@/schemas/api";
 import type { Capture, CaseDiff, CaseSummary, Profile } from "@/schemas/domain";
 import { ApiError, createApi } from "../chrome/api";
-import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, rememberCase, saveHistory, saveProfile, saveSettings } from "../chrome/storage";
+import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, loadSurveys, rememberCase, saveHistory, saveProfile, saveSettings, saveSurveyCards } from "../chrome/storage";
 import { caseForUrl, historyRows, keepFound, type HistoryEntry } from "../lib/history";
-import { captureActiveTab, onActiveListingChange, requestSiteAccess } from "../chrome/tab";
+import { activeTabUrl, captureActiveTab, onActiveListingChange, openListingTab, requestSiteAccess, surveyActiveTab } from "../chrome/tab";
+import { cardsFromCapture, searchPageOf, summariseSurvey, summaryLine, surveyForCase, type SearchPage } from "../lib/survey";
+import { listingItemId } from "@/lib/listingScope";
+import { detectPlatform } from "@/lib/platform";
+import { SearchSurvey } from "./screens/SearchSurvey";
 import { prepareCapture, type ListingPreview } from "../lib/capture";
 import { applyEvent, newInvestigation, type IncomingEvent, type Investigation } from "../lib/progress";
 import { CaseFile, type EvidenceDraft } from "./screens/CaseFile";
@@ -51,6 +55,12 @@ export function App() {
   const unsub = useRef<(() => void) | null>(null);
   const finished = useRef<string | null>(null);
   const evidenceCapture = useRef<Capture | null>(null);
+  /** The search survey screen's state. */
+  const [survey, setSurvey] = useState<{ summary: string | null; added: number | null; busy: boolean; error: string | null }>({ summary: null, added: null, busy: false, error: null });
+  /** A suggested listing opened from a case file: investigate it as soon as its page is read. */
+  const pendingInvestigate = useRef<{ url: string; loaded: boolean } | null>(null);
+  /** "Compared with your survey of “nike pegasus 40” (38 listings)" on the Investigate screen. */
+  const [surveyNote, setSurveyNote] = useState<string | null>(null);
 
   const api = useMemo(() => createApi(apiBase), [apiBase]);
 
@@ -97,8 +107,20 @@ export function App() {
     if (wantsSummaries) void refreshSummaries(historyRef.current);
   }, [wantsSummaries, refreshSummaries]);
 
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+
   // ---------- capture the active tab while on Case ready ----------
   const refreshCapture = useCallback(async () => {
+    // A search results page: offer the survey instead of an investigation.
+    const page = searchPageOf(await activeTabUrl().catch(() => null));
+    if (page) {
+      setCaptured(null);
+      const existing = (await loadSurveys()).find((x) => x.key === page.key);
+      setSurvey({ summary: existing ? summaryLine(summariseSurvey(existing, profileRef.current)) : null, added: null, busy: false, error: null });
+      setReady({ kind: "search", page });
+      return;
+    }
     const r = await captureActiveTab();
     if (!r.ok) {
       setCaptured(null);
@@ -112,6 +134,8 @@ export function App() {
       return;
     }
     setCaptured({ ...p, screenshot: null });
+    const s = surveyForCase(await loadSurveys(), { platform: p.preview.platform, pageUrl: p.preview.pageUrl, now: Date.now() });
+    setSurveyNote(s ? `Compared with your survey${s.searchQuery ? ` of “${s.searchQuery}”` : ""} (${s.observedListings.length} listing${s.observedListings.length === 1 ? "" : "s"})` : null);
     setReady({ kind: "listing", preview: p.preview });
   }, []);
 
@@ -120,6 +144,18 @@ export function App() {
     void refreshCapture();
     return onActiveListingChange(() => void refreshCapture());
   }, [view.name, refreshCapture]);
+
+  // A suggested listing has loaded and been read: start its investigation (the normal capture flow).
+  useEffect(() => {
+    const want = pendingInvestigate.current;
+    // Only once its tab has loaded (the panel may first read the tab it was opened from).
+    if (!want?.loaded || view.name !== "ready" || busy || ready.kind === "loading") return;
+    pendingInvestigate.current = null;
+    if (ready.kind !== "listing") return; // can't capture it automatically: the normal screen (e.g. Allow) stays up
+    const id = listingItemId(want.url, detectPlatform(want.url));
+    if (id && id === listingItemId(ready.preview.pageUrl, ready.preview.platform)) void investigate("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, view.name, busy]);
 
   // ---------- live investigation ----------
   const follow = useCallback(
@@ -162,8 +198,10 @@ export function App() {
       // Re-read at the moment of asking: lazy-loaded photos may have appeared, and the screenshot is a fallback image.
       const fresh = await captureActiveTab({ withScreenshot: true });
       const now = fresh.ok ? { ...prepareCapture(fresh.raw), screenshot: fresh.screenshot } : captured;
+      // The most recent survey on this platform goes with the case (without this listing).
+      const s = surveyForCase(await loadSurveys(), { platform: now.preview.platform, pageUrl: now.preview.pageUrl, now: Date.now() });
       const { caseId } = await api.createCase({
-        capture: now.capture,
+        capture: s ? { ...now.capture, observedListings: s.observedListings, ...(s.searchQuery ? { searchQuery: s.searchQuery } : {}) } : now.capture,
         profile,
         caseNote: note,
         screenshots: now.screenshot ? [now.screenshot] : [],
@@ -178,6 +216,43 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const surveyNow = async (page: SearchPage) => {
+    setSurvey((x) => ({ ...x, busy: true, error: null }));
+    const r = await surveyActiveTab();
+    if (!r.ok) {
+      if (r.reason === "no_access") {
+        setReady({ kind: "no_access", host: r.host, origin: r.origin });
+        setSurvey((x) => ({ ...x, busy: false }));
+      } else setSurvey((x) => ({ ...x, busy: false, error: "Couldn't read this page. Reload it and try again." }));
+      return;
+    }
+    // The tab may have moved on to another search since the screen was drawn.
+    const now = searchPageOf(r.raw.pageUrl) ?? page;
+    const cards = cardsFromCapture(r.raw, now.platform, new Date().toISOString());
+    if (!cards.length) {
+      setSurvey((x) => ({ ...x, busy: false, error: "No listings found on this page yet. Wait for the results to load, then try again." }));
+      return;
+    }
+    const { survey: saved, added } = await saveSurveyCards(now, cards);
+    setSurvey({ summary: saved ? summaryLine(summariseSurvey(saved, profile)) : null, added: saved && saved.cards.length > added ? added : null, busy: false, error: null });
+  };
+
+  /** Investigate a suggested listing: open it, and investigate as soon as it's read (else the normal Investigate button). */
+  const investigateListing = async (url: string) => {
+    const pending = { url, loaded: false };
+    pendingInvestigate.current = pending;
+    setError(null);
+    unsub.current?.();
+    unsub.current = null;
+    setView({ name: "ready" });
+    setReady({ kind: "loading" });
+    const loaded = await openListingTab(url).catch(() => false);
+    if (pendingInvestigate.current !== pending) return;
+    if (loaded) pending.loaded = true;
+    else pendingInvestigate.current = null; // didn't finish loading: the normal Investigate button will be there
+    void refreshCapture();
   };
 
   const openCase = async (caseId: string) => {
@@ -288,8 +363,11 @@ export function App() {
     case "ready": {
       const onFile = ready.kind === "listing" ? caseForUrl(history, summaries, ready.preview.pageUrl) : null;
       nav = mainNav;
-      body = profile && (
+      body = ready.kind === "search" ? (
+        <SearchSurvey page={ready.page} summary={survey.summary} added={survey.added} busy={survey.busy} error={survey.error} onSurvey={() => void surveyNow(ready.page)} />
+      ) : profile && (
         <CaseReady
+          surveyNote={surveyNote}
           key={ready.kind === "listing" ? ready.preview.pageUrl : ready.kind}
           state={ready}
           profile={profile}
@@ -349,6 +427,7 @@ export function App() {
           detail={active.detail}
           listing={{ title: active.title, priceGBP: active.priceGBP }}
           addEvidence={{ busy, error, onCaptureTab: captureForEvidence, onSubmit: submitEvidence }}
+          onInvestigateListing={(url) => void investigateListing(url)}
         />
       );
       break;

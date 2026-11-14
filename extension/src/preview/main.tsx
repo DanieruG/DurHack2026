@@ -4,6 +4,7 @@ import type { VerdictLabel } from "@/schemas/domain";
 import { VERDICT_ORDER } from "../lib/verdicts";
 import { CaseFile } from "../panel/screens/CaseFile";
 import { CaseReady } from "../panel/screens/CaseReady";
+import { SearchSurvey } from "../panel/screens/SearchSurvey";
 import { Investigating } from "../panel/screens/Investigating";
 import { ProfileScreen } from "../panel/screens/Profile";
 import { WhatChanged } from "../panel/screens/WhatChanged";
@@ -94,6 +95,16 @@ function App() {
         <Panel n="01" name="Profile">
           <ProfileScreen profile={PROFILE} apiBase="http://localhost:3000" firstRun onSave={noop} />
         </Panel>
+        <Panel n="01b" name="Search survey" nav={<NavLink onClick={noop}>Profile</NavLink>}>
+          <SearchSurvey
+            page={{ platform: "vinted", query: "nike pegasus 40", key: "vinted:nike pegasus 40" }}
+            summary="Surveyed 38 listings · 21 in your size · 6 couldn't be matched to a model yet"
+            added={12}
+            busy={false}
+            error={null}
+            onSurvey={noop}
+          />
+        </Panel>
         <Panel n="02" name="Case ready" nav={<NavLink onClick={noop}>Profile</NavLink>}>
           <CaseReady
             state={{ kind: "listing", preview: LISTING }}
@@ -105,6 +116,7 @@ function App() {
             onOpenCase={noop}
             onEditProfile={noop}
             onAllow={noop}
+            surveyNote="Compared with your survey of “nike pegasus 40” (38 listings)"
           />
         </Panel>
         <Panel n="03" name="Investigation in progress" nav={<NavLink onClick={noop}>New case</NavLink>}>
@@ -115,8 +127,9 @@ function App() {
             caseId="cmpreview000042"
             detail={CASE_FILE}
             listing={{ title: LISTING.title, priceGBP: 42 }}
-            initialOpen={["condition"]}
+            initialOpen={["condition", "price"]}
             addEvidence={{ busy: false, error: null, onCaptureTab: async () => null, onSubmit: noop }}
+            onInvestigateListing={noop}
           />
         </Panel>
         <Panel n="05" name="What changed" nav={<NavLink onClick={noop}>New case</NavLink>}>
