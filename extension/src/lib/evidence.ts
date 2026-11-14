@@ -26,34 +26,47 @@ export function notShownNote(area: string): string {
   return `${a[0].toUpperCase()}${a.slice(1)} not shown.`;
 }
 
-export type PhotoBox = { top: number; left: number; width: number; height: number; caption: string; severe: boolean };
+/** One box on a photo. `finding` indexes ConditionView.findings; `possible` (confidence < 0.6) is drawn dashed. */
+export type PhotoBox = { top: number; left: number; width: number; height: number; caption: string; severe: boolean; possible: boolean; finding: number };
 
 /** Box2d is [ymin, xmin, ymax, xmax] normalised 0-1000; returned as CSS percentages. */
-export function boxStyle(box: [number, number, number, number]): Omit<PhotoBox, "caption" | "severe"> {
+export function boxStyle(box: [number, number, number, number]): Pick<PhotoBox, "top" | "left" | "width" | "height"> {
   const [ymin, xmin, ymax, xmax] = box.map((v) => Math.min(1000, Math.max(0, v)));
   return { top: ymin / 10, left: xmin / 10, height: Math.max(2, (ymax - ymin) / 10), width: Math.max(2, (xmax - xmin) / 10) };
 }
 
+export type FindingItem = { photoIndex: number; caption: string; note: string; possible: boolean; severe: boolean };
+
 export type ConditionView = {
+  /** Every listing photo (for the switcher), each with its boxes. */
   photos: { index: number; url: string | null; boxes: PhotoBox[] }[];
+  findings: FindingItem[];
+  /** The photo to show first: the first one with a finding. */
+  initialPhoto: number;
   notes: string[];
   contradictions: string[];
 };
 
 export function conditionView(check: CheckResult, imageUrls: string[]): ConditionView {
   const d = (check.details ?? {}) as { findings?: ConditionFinding[]; notVisible?: string[]; contradictions?: string[] };
-  const byPhoto = new Map<number, PhotoBox[]>();
-  for (const f of d.findings ?? []) {
-    const boxes = byPhoto.get(f.photoIndex) ?? [];
-    boxes.push({ ...boxStyle(f.box2d), caption: findingCaption(f), severe: f.severity !== "minor" && f.confidence >= POSSIBLE_BELOW });
-    byPhoto.set(f.photoIndex, boxes);
-  }
-  const photos = [...byPhoto.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([index, boxes]) => ({ index, url: imageUrls[index] ?? null, boxes }));
-  if (!photos.length && imageUrls[0]) photos.push({ index: 0, url: imageUrls[0], boxes: [] });
+  const raw = d.findings ?? [];
+  const findings: FindingItem[] = raw.map((f) => ({
+    photoIndex: f.photoIndex,
+    caption: findingCaption(f),
+    note: f.note,
+    possible: f.confidence < POSSIBLE_BELOW,
+    severe: f.severity !== "minor" && f.confidence >= POSSIBLE_BELOW,
+  }));
+  const indices = [...new Set([...imageUrls.map((_, i) => i), ...raw.map((f) => f.photoIndex)])].sort((a, b) => a - b);
+  const photos = indices.map((index) => ({
+    index,
+    url: imageUrls[index] ?? null,
+    boxes: raw.flatMap((f, i) => (f.photoIndex === index ? [{ ...boxStyle(f.box2d), caption: findings[i].caption, severe: findings[i].severe, possible: findings[i].possible, finding: i }] : [])),
+  }));
   return {
     photos,
+    findings,
+    initialPhoto: raw[0]?.photoIndex ?? indices[0] ?? 0,
     notes: (d.notVisible ?? []).filter((a) => a !== "all areas").map(notShownNote),
     contradictions: d.contradictions ?? [],
   };

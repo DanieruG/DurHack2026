@@ -3,7 +3,7 @@ import type { CaseDetail } from "@/schemas/api";
 import type { CheckName, CheckResult } from "@/schemas/domain";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
-import { conditionView, evidenceLines, leadsView, priceView, sourceRefs, type SourceRef } from "../../lib/evidence";
+import { conditionView, evidenceLines, leadsView, priceView, sourceRefs, type ConditionView, type SourceRef } from "../../lib/evidence";
 import { Button, CopyButton, Label, Notice, StatusMark, Tags, Verdict } from "../ui";
 import { checkTags, runTotals } from "../../lib/tags";
 
@@ -63,7 +63,7 @@ export function CaseFile(props: {
 
       <section className="evidence" aria-label="Evidence">
         {rows.map((c) => (
-          <EvidenceRow key={c.check} check={c} open={open.has(c.check)} onToggle={() => toggle(c.check)} refs={c.check === "comfort" ? sourceRefs(c) : undefined}>
+          <EvidenceRow key={c.check} check={c} open={open.has(c.check)} onToggle={() => toggle(c.check)} refs={c.check === "comfort" || c.check === "price" ? sourceRefs(c) : undefined}>
             <CheckBody check={c} detail={detail} />
           </EvidenceRow>
         ))}
@@ -148,10 +148,8 @@ function EvidenceRow(props: { check: CheckResult; open: boolean; onToggle: () =>
         {c.summary}
         {props.refs && props.refs.length > 0 && (
           <span className="refs" aria-label={`${props.refs.length} sources`}>
-            {props.refs.slice(0, 5).map((r) => (
-              <span className="ref" key={r.n}>
-                {r.n}
-              </span>
+            {props.refs.slice(0, 8).map((r) => (
+              <SourceChip key={r.n} r={r} />
             ))}
           </span>
         )}
@@ -163,61 +161,11 @@ function EvidenceRow(props: { check: CheckResult; open: boolean; onToggle: () =>
 
 function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }) {
   switch (check.check) {
-    case "condition": {
-      const v = conditionView(check, detail.imageUrls);
-      return (
-        <>
-          {v.photos.map((p) => (
-            <figure className="photo" key={p.index}>
-              {p.url ? <img src={p.url} alt={`Listing photo ${p.index + 1}`} /> : <div className="photo-missing" />}
-              {p.boxes.map((b, i) => (
-                <span
-                  key={i}
-                  className={`box ${b.severe ? "severe" : ""} ${b.top < 10 ? "cap-below" : ""} ${b.left + b.width > 60 ? "cap-right" : ""}`}
-                  style={{ top: `${b.top}%`, left: `${b.left}%`, width: `${b.width}%`, height: `${b.height}%` }}
-                >
-                  <span className="box-cap">{b.caption}</span>
-                </span>
-              ))}
-              <figcaption className="mono dim">Photo {p.index + 1}</figcaption>
-            </figure>
-          ))}
-          {v.contradictions.map((t) => (
-            <p className="note problem" key={t}>
-              {t}
-            </p>
-          ))}
-          {v.notes.map((t) => (
-            <p className="note" key={t}>
-              {t}
-            </p>
-          ))}
-        </>
-      );
-    }
+    case "condition":
+      return <ConditionExhibit view={conditionView(check, detail.imageUrls)} />;
     case "comfort": {
       const refs = sourceRefs(check);
-      if (!refs.length) return <p className="note">No sources.</p>;
-      return (
-        <ol className="sources">
-          {refs.map((r) => (
-            <li key={r.n}>
-              <span className="ref">{r.n}</span>
-              <div>
-                {r.url ? (
-                  <a href={r.url} target="_blank" rel="noreferrer">
-                    {r.title}
-                  </a>
-                ) : (
-                  <span>{r.title}</span>
-                )}
-                {r.domain && <span className="dim"> · {r.domain}</span>}
-                {r.quote && <p className="quote">“{r.quote}”</p>}
-              </div>
-            </li>
-          ))}
-        </ol>
-      );
+      return refs.length ? <SourceList refs={refs} /> : <p className="note">No sources.</p>;
     }
     case "price": {
       const v = priceView(check);
@@ -244,6 +192,7 @@ function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }
               {l}
             </p>
           ))}
+          {sourceRefs(check).length > 0 && <SourceList refs={sourceRefs(check)} />}
         </>
       );
     }
@@ -258,6 +207,132 @@ function CheckBody({ check, detail }: { check: CheckResult; detail: CaseDetail }
         </>
       );
   }
+}
+
+/** A numbered source chip: a real link that opens the source in a new tab (plain text when there is no URL). */
+function SourceChip({ r }: { r: SourceRef }) {
+  const label = `Source ${r.n}: ${r.title}${r.domain ? `, ${r.domain}` : ""} (opens in a new tab)`;
+  return r.url ? (
+    <a className="ref ref-link" href={r.url} target="_blank" rel="noreferrer" aria-label={label} title={r.title}>
+      {r.n}
+    </a>
+  ) : (
+    <span className="ref" title={r.title}>
+      {r.n}
+    </span>
+  );
+}
+
+function SourceList({ refs }: { refs: SourceRef[] }) {
+  return (
+    <ol className="sources">
+      {refs.map((r) => (
+        <li key={r.n}>
+          <SourceChip r={r} />
+          <div>
+            {r.url ? (
+              <a href={r.url} target="_blank" rel="noreferrer">
+                {r.title}
+              </a>
+            ) : (
+              <span>{r.title}</span>
+            )}
+            {r.domain && <span className="dim"> · {r.domain}</span>}
+            {r.quote && <p className="quote">“{r.quote}”</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Condition exhibit: a photo switcher with each photo's boxes, and the findings list. Hovering, focusing or clicking a
+ * finding switches to its photo and highlights its box; clicking a box highlights its finding. All controls are buttons.
+ */
+function ConditionExhibit({ view: v }: { view: ConditionView }) {
+  const [photo, setPhoto] = useState(v.initialPhoto);
+  const [active, setActive] = useState<number | null>(null);
+  const shown = v.photos.find((p) => p.index === photo) ?? v.photos[0];
+  const pick = (i: number) => {
+    setActive(i);
+    setPhoto(v.findings[i].photoIndex);
+  };
+  return (
+    <>
+      {v.photos.length > 1 && (
+        <div className="switcher" role="group" aria-label="Listing photos">
+          {v.photos.map((p) => (
+            <button
+              key={p.index}
+              type="button"
+              className={`sw ${p.index === shown?.index ? "on" : ""} ${p.boxes.length ? "has" : ""}`}
+              aria-pressed={p.index === shown?.index}
+              aria-label={`Photo ${p.index + 1}${p.boxes.length ? `, ${p.boxes.length} finding${p.boxes.length === 1 ? "" : "s"}` : ""}`}
+              onClick={() => setPhoto(p.index)}
+            >
+              {p.index + 1}
+            </button>
+          ))}
+        </div>
+      )}
+      {shown && (
+        <figure className="photo">
+          {shown.url ? <img src={shown.url} alt={`Listing photo ${shown.index + 1}`} /> : <div className="photo-missing" />}
+          {shown.boxes.map((b) => (
+            <button
+              key={b.finding}
+              type="button"
+              className={`box ${b.severe ? "severe" : ""} ${b.possible ? "possible" : ""} ${active === b.finding ? "on" : ""} ${b.top < 10 ? "cap-below" : ""} ${b.left + b.width > 60 ? "cap-right" : ""}`}
+              style={{ top: `${b.top}%`, left: `${b.left}%`, width: `${b.width}%`, height: `${b.height}%` }}
+              aria-pressed={active === b.finding}
+              aria-label={b.caption}
+              onClick={() => setActive(b.finding)}
+            >
+              <span className="box-cap">{b.caption}</span>
+            </button>
+          ))}
+          <figcaption className="mono dim">
+            Photo {shown.index + 1}
+            {v.photos.length > 1 ? ` of ${v.photos.length}` : ""}
+          </figcaption>
+        </figure>
+      )}
+      {v.findings.length > 0 && (
+        <ul className="findings" aria-label="Findings">
+          {v.findings.map((f, i) => (
+            <li key={i}>
+              <button
+                type="button"
+                className={`finding ${active === i ? "on" : ""} ${f.possible ? "possible" : ""}`}
+                aria-pressed={active === i}
+                onMouseEnter={() => pick(i)}
+                onFocus={() => pick(i)}
+                onClick={() => pick(i)}
+              >
+                <span className={`finding-mark ${f.possible ? "possible" : ""}`} aria-hidden="true" />
+                <span className="finding-text">
+                  {f.caption}
+                  <span className="dim"> · photo {f.photoIndex + 1}</span>
+                  {f.note && <span className="finding-note">{f.note}</span>}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {v.contradictions.map((t) => (
+        <p className="note problem" key={t}>
+          {t}
+        </p>
+      ))}
+      {v.notes.map((t) => (
+        <p className="note" key={t}>
+          {t}
+        </p>
+      ))}
+    </>
+  );
 }
 
 function AddEvidence(props: {

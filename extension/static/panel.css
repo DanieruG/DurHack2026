@@ -243,15 +243,44 @@ p, h1, h2, ol, ul, dl, dd, figure { margin: 0; padding: 0; }
 .photo:first-child { margin-top: 20px; }
 .photo img, .photo-missing { width: 100%; display: block; background: var(--slate); }
 .photo-missing { aspect-ratio: 4 / 3; }
-.box { position: absolute; box-shadow: inset 0 0 0 2px var(--red); }
+.box {
+  position: absolute; padding: 0; margin: 0; background: transparent; cursor: pointer;
+  border: 2px solid var(--red); border-radius: 0;
+}
+.box.possible { border-style: dashed; }
+.box.on { border-color: var(--light); box-shadow: 0 0 0 2px var(--red); }
+.box:focus-visible { outline: 2px solid var(--light); outline-offset: 2px; }
 .box-cap {
-  position: absolute; left: 0; bottom: 100%; white-space: nowrap;
+  position: absolute; left: -2px; bottom: 100%; white-space: nowrap;
   background: var(--red); color: var(--light);
   font-size: 11.5px; font-weight: 500; line-height: 1; padding: 4px 6px;
 }
+.box.on .box-cap { background: var(--light); color: var(--charcoal); }
 .box.cap-below .box-cap { bottom: auto; top: 100%; }
-.box.cap-right .box-cap { left: auto; right: 0; }
+.box.cap-right .box-cap { left: auto; right: -2px; }
 .photo figcaption { margin-top: 6px; }
+
+.switcher { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 18px; }
+.sw {
+  min-width: 28px; height: 28px; padding: 0 6px; background: transparent; cursor: pointer;
+  border: 1px solid var(--slate); color: var(--muted); font: 400 11px/1 var(--mono);
+}
+.sw.has { color: var(--text); border-color: var(--mid); }
+.sw.has::after { content: ""; display: inline-block; width: 5px; height: 5px; margin-left: 4px; vertical-align: 1px; background: var(--red); }
+.sw.on { background: var(--light); color: var(--charcoal); border-color: var(--light); }
+.switcher + .photo { margin-top: 12px; }
+
+.findings { list-style: none; margin-top: 14px; border-top: 1px solid var(--line); }
+.finding {
+  width: 100%; display: grid; grid-template-columns: 12px 1fr; gap: 10px; align-items: start;
+  padding: 9px 0; background: none; border: 0; border-bottom: 1px solid var(--line);
+  text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 14px;
+}
+.finding:hover .finding-text, .finding.on .finding-text { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mid); }
+.finding-mark { width: 12px; height: 9px; margin-top: 5px; border: 2px solid var(--red); }
+.finding-mark.possible { border-style: dashed; }
+.finding.on .finding-mark { border-color: var(--light); }
+.finding-note { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
 .note { font-size: 14px; margin-top: 10px; }
 .note:first-child { margin-top: 0; }
 .note.problem { padding-left: 10px; border-left: 3px solid var(--red); }
@@ -262,6 +291,9 @@ p, h1, h2, ol, ul, dl, dd, figure { margin: 0; padding: 0; }
 .sources a { color: var(--text); text-decoration: underline; text-decoration-color: var(--slate); text-underline-offset: 3px; }
 .sources a:hover { text-decoration-color: var(--light); }
 .quote { font-size: 13px; color: var(--muted); margin-top: 3px; }
+a.ref-link { text-decoration: none; color: var(--text); box-shadow: inset 0 0 0 1px var(--mid); }
+a.ref-link:hover { box-shadow: inset 0 0 0 1px var(--light); }
+.sources .ref { margin-top: 2px; }
 
 .range { margin: 2px 0 16px; }
 .range-track { position: relative; height: 44px; }

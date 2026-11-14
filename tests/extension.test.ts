@@ -234,3 +234,29 @@ describe("leads followed", () => {
     expect(s.log.at(-1)).toMatchObject({ text: "No follow-ups", note: "the review search was unavailable." });
   });
 });
+
+describe("evidence interaction", () => {
+  const f = (photoIndex: number, confidence: number, label = "heel_wear" as const) => ({ label, photoIndex, box2d: [100, 100, 300, 300] as [number, number, number, number], severity: "moderate" as const, confidence, note: "n", evidenceId: "e" });
+  const check = { check: "condition" as const, status: "warn" as const, summary: "", evidence: [], confidence: 0.7, geminiFeatures: [], details: { findings: [f(2, 0.9), f(0, 0.4), f(2, 0.55)] } };
+  const urls = ["https://x.test/0.jpg", "https://x.test/1.jpg", "https://x.test/2.jpg"];
+
+  it("the switcher has every photo; boxes link to their findings; below 0.6 is 'possible'", () => {
+    const v = conditionView(check, urls);
+    expect(v.photos.map((p) => [p.index, p.boxes.map((b) => b.finding)])).toEqual([[0, [1]], [1, []], [2, [0, 2]]]);
+    expect(v.initialPhoto).toBe(2);
+    expect(v.findings.map((x) => [x.photoIndex, x.possible, x.caption])).toEqual([[2, false, "Moderate heel wear"], [0, true, "Possible heel wear"], [2, true, "Possible heel wear"]]);
+    expect(v.photos[2].boxes.map((b) => b.possible)).toEqual([false, true]);
+  });
+
+  it("retailer offers are numbered source chips with links", () => {
+    const price = {
+      check: "price" as const, status: "pass" as const, summary: "", confidence: 0.7, geminiFeatures: [],
+      evidence: [
+        { id: "p1", kind: "data_point" as const, label: "New price £89.99", value: 89.99 },
+        { id: "p2", kind: "source" as const, label: "Retailer: JD", url: "https://jd.test/p", title: "Pegasus 40", sourceType: "retailer" as const },
+        { id: "p3", kind: "source" as const, label: "Retailer: SportsShoes", url: "https://ss.test/p", title: "Pegasus 40", sourceType: "retailer" as const },
+      ],
+    };
+    expect(sourceRefs(price).map((r) => [r.n, r.url])).toEqual([[1, "https://jd.test/p"], [2, "https://ss.test/p"]]);
+  });
+});
