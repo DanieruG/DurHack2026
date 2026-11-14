@@ -1,0 +1,105 @@
+import type { ListingFacts, UserNeeds } from "@/schemas/domain";
+import type { Deps } from "./deps";
+import { emptyFacts, extractListing } from "./extract";
+import { buildNeeds } from "./needs";
+import { passesGate } from "./identify";
+import { inputHashFor, intakeImages, prepareText, type CaseRequest } from "./intake";
+import { followLeads } from "./leads";
+import { buildCtx, gateFailedChecks, runDownstream, runIdentify } from "./runChecks";
+import { runStage } from "./util";
+import { finalise, instrumented, loadImages, loadPageText } from "./core";
+
+export { reopenCase, startReopen, ReopenConflictError } from "./reopen";
+export { finalise, instrumented, loadImages } from "./core";
+
+/** Strip query and fragment from the listing URL before storing it (display + platform detection only). */
+export function displayUrl(pageUrl: string | undefined): string | null {
+  if (!pageUrl) return null;
+  try {
+    const u = new URL(pageUrl);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+/** POST /api/cases: store the case and its inputs, then start the investigation in the background. */
+export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId: string; done: Promise<void> }> {
+  const { platform, pageText } = prepareText(req.capture);
+  const needs = await buildNeeds(req.profile, req.caseNote, null);
+  const row = await deps.store.createCase({
+    status: "investigating",
+    platform,
+    pageUrl: displayUrl(req.capture.pageUrl),
+    inputHash: inputHashFor(
+      req.screenshots.map((s, index) => ({ ...s, index })),
+      pageText + JSON.stringify(req.capture.imageUrls ?? []),
+      needs,
+      deps.config.pipelineVersion,
+    ),
+    needs,
+  });
+  await deps.store.addInputs(row.id, [
+    ...(pageText ? [{ revision: 1, kind: "page_text" as const, text: pageText }] : []),
+    ...req.screenshots.map((s, i) => ({ revision: 1, kind: "screenshot" as const, mimeType: s.mimeType, data: s.bytes, position: i })),
+  ]);
+  deps.hub.startRevision(row.id, 1);
+  const done = runInvestigation(deps, row.id, { imageUrls: req.capture.imageUrls ?? [] });
+  return { caseId: row.id, done };
+}
+
+function profileFromNeeds(needs: UserNeeds) {
+  return { sizes: needs.sizes, priorities: needs.priorities, budgetGBP: needs.budgetGBP, wearTolerance: needs.wearTolerance };
+}
+
+/** The investigation pipeline (spec 7.2). Always reaches a verdict unless something unexpected throws. */
+export async function runInvestigation(deps: Deps, caseId: string, opts: { imageUrls: string[] }): Promise<void> {
+  const c = await deps.store.getCase(caseId);
+  if (!c) throw new Error(`Case ${caseId} not found`);
+  if (!deps.hub.has(caseId)) deps.hub.startRevision(caseId, c.revision);
+  const { config } = deps;
+
+  await instrumented(deps, caseId, c.revision, async (emit) => {
+    emit("investigation_started", { caseId, revision: c.revision });
+
+    await runStage("intake", { emit, timeoutMs: config.stageTimeoutMs + 6000 }, () =>
+      intakeImages(deps, { caseId, revision: c.revision, imageUrls: opts.imageUrls, emit, existingImageCount: 0 }),
+    ).catch(() => emit("capture_warning", { message: "The listing photos couldn't be loaded" }));
+
+    const [images, pageText, ref] = await Promise.all([loadImages(deps, caseId), loadPageText(deps, caseId), deps.store.getReference()]);
+    if (images.length === 0) emit("capture_warning", { message: "No photos available, so condition can't be checked" });
+
+    const [facts, needs] = await Promise.all([
+      runStage("extract", { emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"] }, () =>
+        extractListing(deps.gemini, { pageText, images, platform: c.platform }),
+      ).catch((): ListingFacts => {
+        emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
+        return emptyFacts(c.platform, images.length);
+      }),
+      c.needs.caseNote
+        ? runStage("needs", { emit, timeoutMs: config.stageTimeoutMs }, () => buildNeeds(profileFromNeeds(c.needs), c.needs.caseNote, deps.gemini)).catch(() => c.needs)
+        : Promise.resolve(c.needs),
+    ]);
+
+    const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null });
+    const { result: identify, check: identifyCheck } = await runIdentify(ctx);
+    ctx.identify = identify;
+    emit("check_done", identifyCheck);
+
+    if (!passesGate(identify, config.identifyConfidenceMin)) {
+      const unknowns = gateFailedChecks();
+      for (const u of unknowns) emit("check_done", u);
+      await finalise(ctx, { checks: [identifyCheck, ...unknowns], leads: [], row: c, inputHashImages: images });
+      return;
+    }
+
+    const downstream = await runDownstream(ctx);
+    const { checks, leads } = await followLeads(ctx, [identifyCheck, ...downstream]);
+    await finalise(ctx, { checks, leads, row: c, inputHashImages: images });
+  });
+}
+
+/** Fire-and-forget wrapper used by the route handlers. */
+export function startInBackground(p: Promise<unknown>): void {
+  p.catch((err) => console.error("[sleuth] background investigation failed", err));
+}
