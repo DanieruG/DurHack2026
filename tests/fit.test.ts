@@ -15,7 +15,8 @@ const facts = (sizeText?: string, sizeSystem?: ListingFacts["sizeSystem"]): List
 });
 const needs = (sizes: UserNeeds["sizes"]): UserNeeds => ({ sizes, priorities: [], wearTolerance: "light", extraPriorities: [], assumptions: [] });
 const nike9 = needs([{ brand: "Nike", size: 9, system: "UK" }]);
-const run = (f: ListingFacts, n: UserNeeds) => checkFit({ facts: f, needs: n, model: pegasus, charts: ref.sizeCharts });
+const run = (f: ListingFacts, n: UserNeeds) =>
+  checkFit({ facts: f, needs: n, brand: pegasus.brand, chart: ref.sizeCharts.find((c) => c.id === pegasus.sizeChartId), charts: ref.sizeCharts });
 
 describe("fit check", () => {
   it("exact match passes", () => {

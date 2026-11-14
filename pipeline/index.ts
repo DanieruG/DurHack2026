@@ -2,11 +2,12 @@ import type { ListingFacts, UserNeeds } from "@/schemas/domain";
 import type { Deps } from "./deps";
 import { emptyFacts, extractListing } from "./extract";
 import { buildNeeds } from "./needs";
-import { passesGate } from "./identify";
+import { brandKnown } from "./identify";
 import { inputHashFor, intakeImages, prepareText, type CaseRequest } from "./intake";
 import { followLeads } from "./leads";
-import { buildCtx, gateFailedChecks, runDownstream, runIdentify } from "./runChecks";
+import { buildCtx, runDownstream, runIdentify } from "./runChecks";
 import { runStage } from "./util";
+import { scopeListingImages } from "@/lib/listingScope";
 import { finalise, instrumented, loadImages, loadPageText } from "./core";
 
 export { reopenCase, startReopen, ReopenConflictError } from "./reopen";
@@ -44,7 +45,8 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
     ...req.screenshots.map((s, i) => ({ revision: 1, kind: "screenshot" as const, mimeType: s.mimeType, data: s.bytes, position: i })),
   ]);
   deps.hub.startRevision(row.id, 1);
-  const done = runInvestigation(deps, row.id, { imageUrls: req.capture.imageUrls ?? [] });
+  // Only this listing's own photos: drop other listings' thumbnails and size variants of the same photo.
+  const done = runInvestigation(deps, row.id, { imageUrls: scopeListingImages(req.capture.imageUrls ?? [], platform) });
   return { caseId: row.id, done };
 }
 
@@ -86,15 +88,12 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     ctx.identify = identify;
     emit("check_done", identifyCheck);
 
-    if (!passesGate(identify, config.identifyConfidenceMin)) {
-      const unknowns = gateFailedChecks();
-      for (const u of unknowns) emit("check_done", u);
-      await finalise(ctx, { checks: [identifyCheck, ...unknowns], leads: [], row: c, inputHashImages: images });
-      return;
-    }
-
+    // Each check runs on whatever identify established (brand / model / catalogue); condition runs on photos alone.
     const downstream = await runDownstream(ctx);
-    const { checks, leads } = await followLeads(ctx, [identifyCheck, ...downstream]);
+    // Without a brand the verdict is R1 whatever the leads find, so don't spend calls on them.
+    const { checks, leads } = brandKnown(identify, config.identifyConfidenceMin, ref.catalogue)
+      ? await followLeads(ctx, [identifyCheck, ...downstream])
+      : { checks: [identifyCheck, ...downstream], leads: [] };
     await finalise(ctx, { checks, leads, row: c, inputHashImages: images });
   });
 }

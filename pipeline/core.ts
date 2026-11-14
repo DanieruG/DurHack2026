@@ -3,7 +3,7 @@ import { withCallLog, type CallLogEntry } from "@/gemini/client";
 import type { CaseRow } from "@/lib/store";
 import type { Deps } from "./deps";
 import type { Emit } from "./events";
-import { passesGate } from "./identify";
+import { brandKnown } from "./identify";
 import { inputHashFor, toCaseImages, type CaseImage } from "./intake";
 import { generateNextMoves } from "./nextMoves";
 import type { RunCtx } from "./runChecks";
@@ -62,7 +62,7 @@ export async function finalise(
 ): Promise<FinaliseResult> {
   const { deps, emit, caseId, revision } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;
-  const identifyPassed = passesGate(ctx.identify, deps.config.identifyConfidenceMin);
+  const identifyPassed = brandKnown(ctx.identify, deps.config.identifyConfidenceMin, ctx.ref.catalogue);
 
   const { verdict } = await runStage("verdict", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () =>
     decideAndWordVerdict(deps.gemini, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence }),

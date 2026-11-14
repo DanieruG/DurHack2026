@@ -18,7 +18,7 @@ const LABEL_MEANING: Record<VerdictLabel, string> = {
   proceed_with_caution: "loose ends or concerns to resolve before buying",
   overpriced: "the price doesn't stack up against the evidence",
   wrong_fit: "the size won't fit this buyer",
-  not_enough_evidence: "the exact model couldn't be confirmed, so the other checks couldn't run",
+  not_enough_evidence: "not even the brand could be identified from this listing, so most checks couldn't run",
 };
 
 const WORDING_SYSTEM = `You are Sleuth, a sceptical but fair detective giving a second opinion on a second-hand trainer listing.
@@ -80,6 +80,7 @@ export function templateVerdictText(label: VerdictLabel, checks: CheckResult[]):
 
 export async function decideAndWordVerdict(
   gemini: GeminiClient | null,
+  /** identifyPassed: the brand is known (R1 otherwise). */
   args: { checks: CheckResult[]; identifyPassed: boolean; extraEvidence?: Evidence[] },
 ): Promise<{ verdict: Verdict; usedTemplate: boolean }> {
   const decision: RuleDecision = decideVerdict(args.checks, args.identifyPassed);

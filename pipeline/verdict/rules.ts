@@ -8,10 +8,10 @@ const get = (checks: CheckResult[], name: CheckName) => checks.find((c) => c.che
 
 /**
  * Deterministic decision table (spec 7.9). Evaluated in order; first match wins.
- * Gemini never chooses or changes the label.
+ * Gemini never chooses or changes the label. `brandKnown`: R1 fires only when identify couldn't even name the brand.
  */
-export function decideVerdict(checks: CheckResult[], identifyPassed: boolean): RuleDecision {
-  if (!identifyPassed) return { label: "not_enough_evidence", ruleId: "R1" };
+export function decideVerdict(checks: CheckResult[], brandKnown: boolean): RuleDecision {
+  if (!brandKnown) return { label: "not_enough_evidence", ruleId: "R1" };
   if (get(checks, "fit")?.status === "fail") return { label: "wrong_fit", ruleId: "R2" };
   if (get(checks, "price")?.status === "fail") return { label: "overpriced", ruleId: "R3" };
   if (get(checks, "condition")?.status === "fail") return { label: "proceed_with_caution", ruleId: "R4" };

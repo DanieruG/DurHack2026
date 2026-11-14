@@ -1,19 +1,23 @@
 import type { CheckResult, Evidence, FitMatch, ListingFacts, SizeSystem, UserNeeds } from "@/schemas/domain";
-import type { CatalogueModel, SizeChart } from "@/schemas/seed";
+import type { SizeChart } from "@/schemas/seed";
 import { convertSize, formatSize, parseSizeText, sizeIn, type ConvertedSize } from "@/lib/sizes";
 import { evidenceIds, unknownCheck } from "../util";
 
 export type FitInput = {
   facts: ListingFacts;
   needs: UserNeeds;
-  model: CatalogueModel;
+  /** The identified brand (fit only needs the brand, not the exact model). */
+  brand: string;
+  /** The size chart to use: the catalogue model's own, else the brand's; undefined when we have none. */
+  chart: SizeChart | undefined;
+  /** All charts, for cross-brand estimates from the user's other saved sizes. */
   charts: SizeChart[];
 };
 
 const sameBrand = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** Fit check: pure code, exact size-chart lookups only (spec 7.6). */
-export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult {
+export function checkFit({ facts, needs, brand, chart, charts }: FitInput): CheckResult {
   const nextId = evidenceIds("fit");
   const listedEv = facts.evidence.filter((e) => e.label.startsWith("Listed size"));
   const parsed = parseSizeText(facts.sizeText, facts.sizeSystem === "unknown" ? undefined : facts.sizeSystem);
@@ -22,16 +26,15 @@ export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult
       details: { listed: null, listedSystem: null, userSize: null, match: null },
     });
   }
-  const chart = charts.find((c) => c.id === model.sizeChartId);
   if (!chart) {
-    return unknownCheck("fit", `I don't have a ${model.brand} size chart to check the fit against.`, { evidence: listedEv });
+    return unknownCheck("fit", `I don't have a ${brand} size chart to check the fit against.`, { evidence: listedEv });
   }
   const assumedSystem = parsed.system === "unknown";
   const listedSystem: SizeSystem = assumedSystem ? "UK" : parsed.system as SizeSystem;
   const listedRow = convertSize(parsed.size, listedSystem, chart);
   const listedLabel = formatSize(parsed.size, listedSystem);
   if (!listedRow) {
-    return unknownCheck("fit", `${listedLabel} isn't on the ${model.brand} size chart, so I can't compare it with your size.`, {
+    return unknownCheck("fit", `${listedLabel} isn't on the ${brand} size chart, so I can't compare it with your size.`, {
       evidence: listedEv,
       details: { listed: facts.sizeText, listedSystem, userSize: null, match: null },
     });
@@ -41,11 +44,11 @@ export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult
   const chartEv: Evidence = {
     id: nextId(),
     kind: "data_point",
-    label: `${model.brand} size chart: ${formatSize(listedRow.uk, "UK")} = ${formatSize(listedRow.us, "US")} = ${formatSize(listedRow.eu, "EU")} (${listedRow.cm} cm)`,
+    label: `${brand} size chart: ${formatSize(listedRow.uk, "UK")} = ${formatSize(listedRow.us, "US")} = ${formatSize(listedRow.eu, "EU")} (${listedRow.cm} cm)`,
     value: listedRow.cm,
   };
 
-  const own = needs.sizes.find((s) => sameBrand(s.brand, model.brand));
+  const own = needs.sizes.find((s) => sameBrand(s.brand, brand));
   let status: CheckResult["status"];
   let match: FitMatch;
   let summary: string;
@@ -57,7 +60,7 @@ export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult
     userSizeLabel = `${formatSize(own.size, own.system)} (${own.brand})`;
     evidence.push({ id: nextId(), kind: "data_point", label: `Your saved ${own.brand} size: ${formatSize(own.size, own.system)}`, value: own.size });
     if (!userRow) {
-      return unknownCheck("fit", `Your saved ${userSizeLabel} isn't on the ${model.brand} chart, so I can't compare.`, { evidence });
+      return unknownCheck("fit", `Your saved ${userSizeLabel} isn't on the ${brand} chart, so I can't compare.`, { evidence });
     }
     evidence.push(chartEv);
     const steps = Math.abs(listedRow.index - userRow.index);
@@ -65,17 +68,17 @@ export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult
     if (steps === 0) {
       status = "pass";
       match = "exact";
-      summary = `Listed ${listedLabel} matches your ${model.brand} size.`;
+      summary = `Listed ${listedLabel} matches your ${brand} size.`;
       confidence = 0.95;
     } else if (steps === 1) {
       status = "warn";
       match = "close";
-      summary = `Listed ${listedLabel} (${listedInYours}) is half a size ${listedRow.index > userRow.index ? "bigger" : "smaller"} than your ${model.brand} size.`;
+      summary = `Listed ${listedLabel} (${listedInYours}) is half a size ${listedRow.index > userRow.index ? "bigger" : "smaller"} than your ${brand} size.`;
       confidence = 0.9;
     } else {
       status = "fail";
       match = "mismatch";
-      summary = `Listed ${listedLabel} (${listedInYours}) is ${steps / 2} sizes ${listedRow.index > userRow.index ? "bigger" : "smaller"} than your ${model.brand} size.`;
+      summary = `Listed ${listedLabel} (${listedInYours}) is ${steps / 2} sizes ${listedRow.index > userRow.index ? "bigger" : "smaller"} than your ${brand} size.`;
       confidence = 0.9;
     }
   } else {
@@ -84,7 +87,7 @@ export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult
       return unknownCheck(
         "fit",
         needs.sizes.length
-          ? `You haven't saved a ${model.brand} size and I can't convert your other sizes, so the fit is unknown.`
+          ? `You haven't saved a ${brand} size and I can't convert your other sizes, so the fit is unknown.`
           : "You haven't saved any sizes, so I can't check the fit.",
         { evidence: [...evidence, chartEv], details: { listed: facts.sizeText, listedSystem, userSize: null, match: null } },
       );
@@ -105,7 +108,7 @@ export function checkFit({ facts, needs, model, charts }: FitInput): CheckResult
       match = "estimated";
       summary =
         Math.abs(deltaCm) <= 0.25
-          ? `Cross-brand estimate: listed ${listedLabel} should be close to your ${other.size.brand} size, but you haven't saved a ${model.brand} size.`
+          ? `Cross-brand estimate: listed ${listedLabel} should be close to your ${other.size.brand} size, but you haven't saved a ${brand} size.`
           : `Cross-brand estimate: listed ${listedLabel} is about half a size ${deltaCm > 0 ? "bigger" : "smaller"} than your ${other.size.brand} size.`;
       confidence = 0.55;
     }

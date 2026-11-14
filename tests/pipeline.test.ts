@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createCase } from "@/pipeline";
 import { startReopen } from "@/pipeline/reopen";
+import { IDENTIFY_SYSTEM } from "@/pipeline/identify";
 import { CaseDiffSchema, CheckResultSchema, SseEventSchemas, VerdictSchema } from "@/schemas";
 import type { CheckResult, NextMove, Verdict } from "@/schemas/domain";
 import { checksFrom, eventNames, grounded, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, type Handler } from "./helpers";
@@ -62,22 +63,65 @@ describe("investigation pipeline (mocked Gemini)", () => {
     }
   });
 
-  it("identify gate: null model -> other checks unknown, not_enough_evidence, ask for model/label", async () => {
-    const deps = makeDeps({ handlers: { identify: () => json({ catalogueModelId: null, confidence: 0.3, reasons: "Could be several models", evidence: [] }) } });
+  it("no brand: R1, but condition still runs on the photos; fit/price/comfort are unknown without any calls", async () => {
+    const deps = makeDeps({ handlers: { identify: () => json({ brand: null, modelName: null, catalogueModelId: null, confidence: 0.3, reasons: "Can't tell", evidence: [] }) } });
     const { caseId, events } = await investigate(deps);
     const checks = checksFrom(events);
-    expect(checks.identify.status).toBe("unknown");
-    for (const c of ["fit", "price", "comfort", "condition"]) expect(checks[c]).toMatchObject({ status: "unknown", summary: "Couldn't identify the exact model" });
+    expect(checks.identify).toMatchObject({ status: "unknown", details: { tier: "none", inCatalogue: false } });
+    expect(checks.fit).toMatchObject({ status: "unknown", summary: expect.stringMatching(/brand/) });
+    for (const c of ["price", "comfort"]) expect(checks[c]).toMatchObject({ status: "unknown", summary: expect.stringMatching(/exact model/) });
+    expect(checks.condition.status).not.toBe("unknown");
+    expect(stageCalls(deps, "condition")).toBe(1);
+    expect(stageCalls(deps, "comfort") + stageCalls(deps, "price") + stageCalls(deps, "leads")).toBe(0);
     expect((events.find((e) => e.event === "verdict")!.data as Verdict)).toMatchObject({ label: "not_enough_evidence", ruleId: "R1" });
     const moves = (await deps.store.getCase(caseId))!.nextMoves!;
     expect(moves[0]).toMatchObject({ kind: "ask_seller", relatesTo: ["identify"] });
-    expect(stageCalls(deps, "condition") + stageCalls(deps, "comfort") + stageCalls(deps, "price")).toBe(0);
   });
 
-  it("low confidence fails the gate too", async () => {
+  it("a low-confidence catalogue guess with no confident brand is still R1", async () => {
     const deps = makeDeps({ handlers: { identify: () => json({ catalogueModelId: "nike-pegasus-40", confidence: 0.6, reasons: "maybe", evidence: [] }) } });
     const { events } = await investigate(deps);
     expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).toBe("not_enough_evidence");
+  });
+
+  it("brand only: fit runs on the brand's size chart; price and comfort are unknown; not R1", async () => {
+    const deps = makeDeps({ handlers: { identify: () => json({ brand: "nike", brandConfidence: 0.95, modelName: null, catalogueModelId: null, confidence: 0, reasons: "Swoosh visible", evidence: [] }) } });
+    const { caseId, events } = await investigate(deps);
+    const checks = checksFrom(events);
+    expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "brand", brand: "Nike", modelName: "Nike" } });
+    expect(checks.fit).toMatchObject({ status: "pass", details: { match: "exact" } });
+    expect(checks.price.status).toBe("unknown");
+    expect(checks.comfort.status).toBe("unknown");
+    expect(stageCalls(deps, "comfort") + stageCalls(deps, "price")).toBe(0);
+    expect((events.find((e) => e.event === "verdict")!.data as Verdict)).toMatchObject({ label: "proceed_with_caution", ruleId: "R5" });
+    const moves = (await deps.store.getCase(caseId))!.nextMoves!;
+    expect(moves.some((m) => m.relatesTo.includes("identify"))).toBe(true);
+  });
+
+  it("model named but not in the catalogue: comfort + new-price search use the name; no sampled comparison; plain note; lower confidence", async () => {
+    const deps = makeDeps({
+      handlers: {
+        identify: () => json({ brand: "Nike", brandConfidence: 0.95, modelName: "Nike Pegasus 39", catalogueModelId: null, confidence: 0.9, reasons: "Tongue label reads Pegasus 39", evidence: [] }),
+        price: () => grounded([["PRICE | Nike | £100", ["nike.com"]], ["PRICE | JD Sports | £105", ["jdsports.co.uk"]]]),
+      },
+    });
+    const { events } = await investigate(deps);
+    const checks = checksFrom(events);
+    expect(checks.identify).toMatchObject({ status: "pass", details: { tier: "model", modelName: "Nike Pegasus 39", catalogueModelId: null, inCatalogue: false } });
+    expect(checks.fit.status).toBe("pass"); // Nike chart, by brand
+    expect(checks.price.summary.startsWith("This model isn't in our price sample, so price is compared with the current new price only.")).toBe(true);
+    expect(checks.price).toMatchObject({ status: "pass", confidence: 0.45, details: { inCatalogue: false, position: "below", sourceBRun: true } });
+    expect(checks.price.details).not.toHaveProperty("sample");
+    expect(checks.comfort.status).not.toBe("unknown");
+    const prompts = deps.calls.filter((c) => c.stage === "price" || c.stage === "comfort").map(promptText);
+    expect(prompts).toHaveLength(2);
+    for (const p of prompts) expect(p).toContain("Nike Pegasus 39");
+    expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
+  });
+
+  it("identify is told to use only this listing, never other listings on the page", () => {
+    expect(IDENTIFY_SYSTEM).toMatch(/ONLY this listing's own title, item details, description and photos/);
+    expect(IDENTIFY_SYSTEM).toMatch(/similar items/);
   });
 
   it("a rejected check becomes unknown with a plain explanation, and the case still reaches a verdict", async () => {

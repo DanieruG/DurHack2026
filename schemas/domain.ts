@@ -110,8 +110,20 @@ export const ListingFactsSchema = z.object({
 });
 export type ListingFacts = z.infer<typeof ListingFactsSchema>;
 
+/**
+ * Tiered identification. Brand and model name are reported even when the model isn't in the catalogue;
+ * catalogueModelId is set only for an exact catalogue match. Defaults keep cases stored before the tiers valid.
+ */
 export const IdentifyResultSchema = z.object({
+  /** Recognised brand (catalogue casing when the brand is in the catalogue), or null. */
+  brand: z.string().nullable().default(null),
+  /** Probability that `brand` is right. */
+  brandConfidence: z.number().min(0).max(1).default(0),
+  /** Recognised model name without the brand, e.g. "Dropset 3", or null. */
+  modelName: z.string().nullable().default(null),
   catalogueModelId: z.string().nullable(),
+  inCatalogue: z.boolean().default(false),
+  /** Probability that `modelName` (and catalogueModelId, when set) is exactly right. */
   confidence: z.number().min(0).max(1),
   reasons: z.string(),
   evidence: z.array(EvidenceSchema),

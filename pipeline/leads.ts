@@ -10,7 +10,7 @@ import {
 import { generateStructured } from "@/gemini/structured";
 import { functionTool } from "@/gemini/tools";
 import { gradeFromClaims, recheckConditionPhoto } from "./checks/condition";
-import { passesGate } from "./identify";
+import { subjectOf } from "./identify";
 import { runCheck, runDownstream, runIdentify, type RunCtx } from "./runChecks";
 import { plainError, runStage } from "./util";
 
@@ -47,7 +47,7 @@ export function compactSummary(checks: CheckResult[]) {
   return checks.map((c) => {
     const d = (c.details ?? {}) as Record<string, unknown>;
     const extra: Record<string, unknown> = {};
-    if (c.check === "identify") Object.assign(extra, { catalogueModelId: d.catalogueModelId });
+    if (c.check === "identify") Object.assign(extra, { tier: d.tier, modelName: d.modelName, catalogueModelId: d.catalogueModelId, inCatalogue: d.inCatalogue });
     if (c.check === "price") Object.assign(extra, { position: d.position, sampleN: (d.sample as { n?: number } | undefined)?.n, newPrice: d.newPrice, sourceBRun: d.sourceBRun });
     if (c.check === "condition") {
       Object.assign(extra, {
@@ -92,7 +92,7 @@ async function proposeLeads(ctx: RunCtx, checks: CheckResult[]): Promise<LeadWir
       {
         text:
           `Max leads: ${ctx.deps.config.maxLeads}. Photos available: ${ctx.images.length}.\n` +
-          `Identified model id: ${ctx.identify?.catalogueModelId ?? "none"}. Seller condition claims: ${JSON.stringify(ctx.facts.conditionClaims)}.\n` +
+          `Identified: ${subjectOf(ctx.identify, ctx.deps.config.identifyConfidenceMin, ctx.ref.catalogue).displayName ?? "nothing"} (catalogue id: ${ctx.identify?.catalogueModelId ?? "none"}). Seller condition claims: ${JSON.stringify(ctx.facts.conditionClaims)}.\n` +
           `Check results:\n${JSON.stringify(compactSummary(checks))}`,
       },
     ],
@@ -167,21 +167,24 @@ async function executeLead(
     case "recheck_identification": {
       const photo = wire.photoIndex != null && wire.photoIndex < ctx.images.length ? wire.photoIndex : ctx.images.length ? 0 : undefined;
       if (photo === undefined) return { checks, updated: [], status: "skipped", outcome: "No photo to recheck." };
-      const before = ctx.identify;
-      const { result, check } = await runIdentify(ctx, { onlyPhotoIndex: photo });
       const min = ctx.deps.config.identifyConfidenceMin;
-      if (passesGate(result, min) && result.catalogueModelId !== before?.catalogueModelId) {
+      const before = subjectOf(ctx.identify, min, ctx.ref.catalogue);
+      const { result, check } = await runIdentify(ctx, { onlyPhotoIndex: photo });
+      const after = subjectOf(result, min, ctx.ref.catalogue);
+      const changed = after.displayName !== before.displayName || after.catalogue?.id !== before.catalogue?.id;
+      // Adopt the recheck only when it names a model confidently and differs from what we had.
+      if (after.modelName && changed) {
         ctx.identify = result;
         ctx.newPrice = null;
         const downstream = await runDownstream(ctx, ["fit", "price", "comfort"], checks.filter((c) => c.check !== "identify"));
         const next = [check, ...downstream];
-        return { checks: next, updated: [check], status: "done", outcome: `Model changed to ${result.catalogueModelId}; reran fit, price and comfort.` };
+        return { checks: next, updated: [check], status: "done", outcome: `Model changed to ${after.displayName}; reran fit, price and comfort.` };
       }
       return {
         checks,
         updated: [],
         status: "done",
-        outcome: result.catalogueModelId === before?.catalogueModelId ? "Identification confirmed on the clearest photo." : "Recheck was inconclusive; kept the original identification.",
+        outcome: !changed ? "Identification confirmed on the clearest photo." : "Recheck was inconclusive; kept the original identification.",
       };
     }
 

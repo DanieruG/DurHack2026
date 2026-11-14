@@ -12,9 +12,10 @@ import { redact } from "@/lib/redact";
 import { generateStructured } from "@/gemini/structured";
 import { imagePart, type GeminiClient, type Part } from "@/gemini/client";
 import type { Deps } from "./deps";
-import { passesGate } from "./identify";
+import { subjectOf } from "./identify";
+import { scopeListingImages } from "@/lib/listingScope";
 import { intakeImages, type CaseImage, type ReopenRequest } from "./intake";
-import { buildCtx, DOWNSTREAM, gateFailedChecks, runDownstream, runIdentify, type DownstreamCheck } from "./runChecks";
+import { buildCtx, DOWNSTREAM, runDownstream, runIdentify, type DownstreamCheck } from "./runChecks";
 import { finalise, instrumented, loadImages } from "./core";
 import { runStage, textContains } from "./util";
 
@@ -146,7 +147,7 @@ export async function startReopen(deps: Deps, caseId: string, req: ReopenRequest
     ...req.screenshots.map((s, i) => ({ revision, kind: "screenshot" as const, mimeType: s.mimeType, data: s.bytes, position: existing + i })),
   ]);
   deps.hub.startRevision(caseId, revision);
-  const done = reopenCase(deps, caseId, { imageUrls: req.capture?.imageUrls ?? [], replyText });
+  const done = reopenCase(deps, caseId, { imageUrls: scopeListingImages(req.capture?.imageUrls ?? [], c.platform), replyText });
   return { revision, done };
 }
 
@@ -229,28 +230,23 @@ export async function reopenCase(deps: Deps, caseId: string, args: { imageUrls: 
 
     let identifyChanged = false;
     if (affected.has("identify")) {
-      const prev = c.identify;
+      const min = config.identifyConfidenceMin;
+      const prev = subjectOf(c.identify, min, ref.catalogue);
       const { result, check } = await runIdentify(ctx);
       rerun.add("identify");
-      const min = config.identifyConfidenceMin;
-      identifyChanged = passesGate(result, min) !== passesGate(prev, min) || result.catalogueModelId !== prev?.catalogueModelId;
+      const next = subjectOf(result, min, ref.catalogue);
+      identifyChanged = next.tier !== prev.tier || next.displayName !== prev.displayName || next.catalogue?.id !== prev.catalogue?.id;
       ctx.identify = result;
       emit("check_done", check);
       checks = [check, ...checks.filter((x) => x.check !== "identify")];
     }
 
-    const identifyPassed = passesGate(ctx.identify, config.identifyConfidenceMin);
-    if (!identifyPassed) {
-      const unknowns = gateFailedChecks();
-      if (identifyChanged) for (const u of unknowns) emit("check_done", u);
-      checks = [checks.find((x) => x.check === "identify")!, ...unknowns];
-    } else {
-      const toRun: DownstreamCheck[] = identifyChanged ? DOWNSTREAM : DOWNSTREAM.filter((n) => affected.has(n));
-      for (const n of toRun) rerun.add(n);
-      if (toRun.length) {
-        const downstream = await runDownstream(ctx, toRun, checks.filter((x) => x.check !== "identify"));
-        checks = [checks.find((x) => x.check === "identify")!, ...downstream];
-      }
+    // Checks gate themselves on what identify established; a changed identification reruns them all.
+    const toRun: DownstreamCheck[] = identifyChanged ? DOWNSTREAM : DOWNSTREAM.filter((n) => affected.has(n));
+    for (const n of toRun) rerun.add(n);
+    if (toRun.length) {
+      const downstream = await runDownstream(ctx, toRun, checks.filter((x) => x.check !== "identify"));
+      checks = [checks.find((x) => x.check === "identify")!, ...downstream];
     }
 
     // Leads are not re-run on reopen; flagged gaps the seller has now answered are dropped.

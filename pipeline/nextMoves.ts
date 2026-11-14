@@ -70,9 +70,9 @@ function gapFor(c: CheckResult): Gap | null {
 export function computeGaps(args: { checks: CheckResult[]; leads: Lead[]; label: VerdictLabel; answered: CheckName[] }): Gap[] {
   const gaps = new Map<string, Gap>();
   const identify = args.checks.find((c) => c.check === "identify");
-  if (args.label === "not_enough_evidence" || (identify && identify.status !== "pass")) {
-    gaps.set("identify", gapFor({ check: "identify" } as CheckResult)!);
-  } else {
+  if (identify && identify.status !== "pass") gaps.set("identify", gapFor({ check: "identify" } as CheckResult)!);
+  // Without even a brand, only the identity question is worth asking.
+  if (args.label !== "not_enough_evidence") {
     for (const c of args.checks) {
       if (c.check === "identify") continue;
       if (c.status !== "warn" && c.status !== "unknown") continue;

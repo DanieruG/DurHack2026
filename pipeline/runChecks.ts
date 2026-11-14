@@ -1,11 +1,11 @@
 import type { CheckName, CheckResult, ConditionGrade, IdentifyResult, ListingFacts, UserNeeds } from "@/schemas/domain";
-import type { CatalogueModel } from "@/schemas/seed";
+import type { SizeChart } from "@/schemas/seed";
 import type { ReferenceData } from "@/lib/seedData";
 import { makeToolExecutors, type ToolExecutor } from "@/gemini/tools";
 import type { Deps } from "./deps";
 import type { Emit } from "./events";
 import type { CaseImage } from "./intake";
-import { identifyCheck, identifyProduct, passesGate } from "./identify";
+import { identifyCheck, identifyProduct, subjectOf, type Subject } from "./identify";
 import { applyReviewSizingNote, checkFit, type SizingAdvice } from "./checks/fit";
 import { checkPrice, type NewPrice } from "./checks/price";
 import { checkComfort } from "./checks/comfort";
@@ -37,9 +37,9 @@ export function buildCtx(base: Omit<RunCtx, "executors" | "today">): RunCtx {
   return { ...base, executors: makeToolExecutors(base.ref), today: today(base.deps.now()) };
 }
 
-export function identifiedModel(ctx: RunCtx): CatalogueModel | null {
-  if (!passesGate(ctx.identify, ctx.deps.config.identifyConfidenceMin)) return null;
-  return ctx.ref.catalogue.find((m) => m.id === ctx.identify!.catalogueModelId) ?? null;
+/** What identify established, by tier (brand / model name / catalogue match). */
+export function subjectFor(ctx: RunCtx): Subject {
+  return subjectOf(ctx.identify, ctx.deps.config.identifyConfidenceMin, ctx.ref.catalogue);
 }
 
 export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number } = {}): Promise<{ result: IdentifyResult; check: CheckResult }> {
@@ -57,8 +57,8 @@ export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number }
     );
     return { result, check: identifyCheck(result, { min: config.identifyConfidenceMin, catalogue: ctx.ref.catalogue, hadImages: ctx.images.length > 0 }) };
   } catch (err) {
-    const result: IdentifyResult = { catalogueModelId: null, confidence: 0, reasons: "Identification failed", evidence: [] };
-    return { result, check: unknownCheck("identify", plainError("identify", err), { details: { catalogueModelId: null, gatePassed: false } }) };
+    const result: IdentifyResult = { brand: null, brandConfidence: 0, modelName: null, catalogueModelId: null, inCatalogue: false, confidence: 0, reasons: "Identification failed", evidence: [] };
+    return { result, check: unknownCheck("identify", plainError("identify", err), { details: { tier: "none", catalogueModelId: null, inCatalogue: false, gatePassed: false } }) };
   }
 }
 
@@ -66,8 +66,13 @@ export type CheckOpts = { priceCondition?: ConditionGrade; forceSourceB?: boolea
 
 /** Run one downstream check as a stage. Errors and timeouts become `unknown` with a plain explanation. */
 export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOpts = {}): Promise<CheckResult> {
-  const model = identifiedModel(ctx);
-  if (!model && name !== "condition") return unknownCheck(name, "Couldn't identify the exact model, so this check couldn't run.");
+  const subject = subjectFor(ctx);
+  // Tiers: brand -> fit; model name -> comfort + new-price search; catalogue match -> sampled prices too; photos -> condition always.
+  if (name === "fit" && !subject.brand) return unknownCheck("fit", "I couldn't tell the brand, so I can't check the fit.");
+  if ((name === "price" || name === "comfort") && !subject.modelName) {
+    const what = name === "price" ? "compare the price" : "check reviews for comfort";
+    return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`);
+  }
   const { deps } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;
   const features = {
@@ -80,12 +85,12 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     return await runStage(name, { emit: ctx.emit, timeoutMs, geminiFeatures: [...features[name]] }, async () => {
       switch (name) {
         case "fit":
-          return checkFit({ facts: ctx.facts, needs: ctx.needs, model: model!, charts: ctx.ref.sizeCharts });
+          return checkFit({ facts: ctx.facts, needs: ctx.needs, brand: subject.brand!, chart: chartFor(subject, ctx.ref.sizeCharts), charts: ctx.ref.sizeCharts });
         case "price": {
           const res = await checkPrice({
             facts: ctx.facts,
             needs: ctx.needs,
-            model: model!,
+            model: { id: subject.catalogue?.id ?? null, brand: subject.brand!, name: subject.modelName! },
             samples: ctx.ref.priceSamples,
             today: ctx.today,
             gemini: deps.gemini,
@@ -103,12 +108,12 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
         case "comfort":
           return checkComfort({
             gemini: deps.gemini,
-            model: model!,
+            model: { brand: subject.brand!, name: subject.modelName! },
             needs: ctx.needs,
             today: ctx.today,
             combinedTools: deps.config.combinedTools,
             executors: ctx.executors,
-            snippets: ctx.ref.reviews.filter((r) => r.modelId === model!.id),
+            snippets: subject.catalogue ? ctx.ref.reviews.filter((r) => r.modelId === subject.catalogue!.id) : [],
             searchTimeoutMs: deps.config.searchTimeoutMs,
           });
         case "condition":
@@ -168,6 +173,9 @@ export async function runDownstream(ctx: RunCtx, names: DownstreamCheck[] = DOWN
   return linked.checks;
 }
 
-export function gateFailedChecks(): CheckResult[] {
-  return DOWNSTREAM.map((n) => unknownCheck(n, "Couldn't identify the exact model"));
+/** The catalogue model's own chart, else any chart for the brand. */
+export function chartFor(subject: Subject, charts: SizeChart[]): SizeChart | undefined {
+  if (subject.catalogue) return charts.find((c) => c.id === subject.catalogue!.sizeChartId);
+  const brand = subject.brand?.trim().toLowerCase();
+  return brand ? charts.find((c) => c.brand.trim().toLowerCase() === brand) : undefined;
 }

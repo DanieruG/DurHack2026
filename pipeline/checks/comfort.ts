@@ -1,5 +1,5 @@
 import type { CheckResult, CheckStatus, Evidence, GeminiFeature, UserNeeds } from "@/schemas/domain";
-import type { CatalogueModel, ReviewSnippet } from "@/schemas/seed";
+import type { ReviewSnippet } from "@/schemas/seed";
 import type { GeminiClient } from "@/gemini/client";
 import {
   groundingSources,
@@ -18,7 +18,10 @@ export const FALLBACK_CONFIDENCE_CAP = 0.6;
 const DEFAULT_PRIORITIES = ["all-day comfort", "durability"];
 type Assessment = "positive" | "negative" | "mixed" | "unclear";
 
-export function comfortPrompt(model: CatalogueModel, priorities: string[]): string {
+/** The model to research: brand and name (catalogue or not). */
+export type ModelRef = { brand: string; name: string };
+
+export function comfortPrompt(model: ModelRef, priorities: string[]): string {
   return (
     `Research what independent reviewers and wearers say about the ${model.brand} ${model.name} trainers ` +
     `for a buyer who cares about: ${priorities.join("; ")}. Also check sizing advice (do they run small, large or true to size?).\n` +
@@ -189,7 +192,7 @@ export function comfortFromSnippets(snippets: ReviewSnippet[], needs: UserNeeds,
 
 export async function checkComfort(args: {
   gemini: GeminiClient;
-  model: CatalogueModel;
+  model: ModelRef;
   needs: UserNeeds;
   today: string;
   combinedTools: boolean;

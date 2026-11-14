@@ -9,7 +9,7 @@ import type {
   SampleStats,
   UserNeeds,
 } from "@/schemas/domain";
-import type { CatalogueModel, PriceSample } from "@/schemas/seed";
+import type { PriceSample } from "@/schemas/seed";
 import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
 import type { GeminiClient } from "@/gemini/client";
 import { groundingSources, sourcesForLine, sourceToEvidence, type GroundedSource } from "@/gemini/grounding";
@@ -17,10 +17,18 @@ import { functionTool, runToolLoop, type ToolExecutor } from "@/gemini/tools";
 import { evidenceIds, gbp, round2, unknownCheck, withSearchBudget } from "../util";
 
 export const SAMPLE_CONFIDENCE_CAP = 0.7;
+/** New price only, for a catalogue model whose sample is missing. */
+export const NEW_PRICE_ONLY_CONFIDENCE = 0.6;
+/** New price only because the model isn't in the catalogue (no sample exists at all). */
+export const NOT_IN_CATALOGUE_CONFIDENCE_CAP = 0.45;
+export const NOT_IN_SAMPLE_NOTE = "This model isn't in our price sample, so price is compared with the current new price only.";
 export const NEW_PRICE_AGREEMENT = 0.15;
 
 // Resale / second-hand marketplaces: never used as a "new price" source.
 const RESALE = /(^|\.)(ebay|vinted|depop|facebook|gumtree|preloved|stockx|goat|laced|klekt|grailed|poshmark|mercari|vestiairecollective|thredup|shpock|alias)\./i;
+
+/** The model being priced. `id` is the catalogue id, or null when the model isn't in the catalogue. */
+export type PricedModel = { id: string | null; brand: string; name: string };
 
 export type NewPrice = {
   gbp: number;
@@ -31,7 +39,7 @@ export type NewPrice = {
 
 // ---------- Source B: current new price via Google Search grounding ----------
 
-export function newPricePrompt(model: CatalogueModel): string {
+export function newPricePrompt(model: Pick<PricedModel, "brand" | "name">): string {
   return (
     `What is the current NEW retail price in the UK, in GBP, of the ${model.brand} ${model.name} trainers ` +
     `(adult sizes, standard colourways)? Search UK retailers and the manufacturer's UK site.\n` +
@@ -79,7 +87,7 @@ export function agreeingCluster(prices: { priceGBP: number }[], tolerance = NEW_
 
 export async function findNewPrice(
   gemini: GeminiClient,
-  args: { model: CatalogueModel; today: string; combinedTools: boolean; executors: Partial<Record<string, ToolExecutor>> },
+  args: { model: Pick<PricedModel, "brand" | "name">; today: string; combinedTools: boolean; executors: Partial<Record<string, ToolExecutor>> },
 ): Promise<NewPrice | null> {
   const contents = [{ role: "user" as const, parts: [{ text: newPricePrompt(args.model) }] }];
   let text: string;
@@ -164,7 +172,7 @@ export function shouldRunSourceB(price: number, sample: SampleStats | null): boo
 export type PriceCheckArgs = {
   facts: ListingFacts;
   needs: UserNeeds;
-  model: CatalogueModel;
+  model: PricedModel;
   samples: PriceSample[];
   today: string;
   gemini: GeminiClient;
@@ -187,8 +195,11 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult & { 
       details: { position: null },
     });
   }
-  const restricted = args.condition ? sampleStats(args.samples, args.model.id, args.condition) : null;
-  const sample = restricted ?? sampleStats(args.samples, args.model.id);
+  const modelId = args.model.id;
+  const inCatalogue = modelId !== null;
+  // The sampled comparison needs a catalogue match; otherwise only the current new price (Source B) is available.
+  const restricted = inCatalogue && args.condition ? sampleStats(args.samples, modelId, args.condition) : null;
+  const sample = restricted ?? (inCatalogue ? sampleStats(args.samples, modelId) : null);
   const usedGrade = restricted ? args.condition : undefined;
 
   let newPrice: NewPrice | null = args.previousNewPrice ?? null;
@@ -226,7 +237,9 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult & { 
     }
   }
 
-  const summary = priceSummary({ price, sample, newPrice, decision, grade: usedGrade });
+  const summary = inCatalogue
+    ? priceSummary({ price, sample, newPrice, decision, grade: usedGrade })
+    : `${NOT_IN_SAMPLE_NOTE} ${decision.position === null ? "I couldn't find a reliable current new price, so the price is unknown." : priceSummary({ price, sample, newPrice, decision })}`;
   const features: GeminiFeature[] = [];
   if (ranB && !bError) features.push("search_grounding");
   if (newPrice?.calledFunctions.length) features.push("function_calling");
@@ -236,7 +249,9 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult & { 
       ? 0
       : sample
         ? Math.min(SAMPLE_CONFIDENCE_CAP, round2(0.4 + sample.n * 0.02))
-        : 0.6;
+        : inCatalogue
+          ? NEW_PRICE_ONLY_CONFIDENCE
+          : NOT_IN_CATALOGUE_CONFIDENCE_CAP;
 
   return {
     check: "price",
@@ -254,6 +269,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult & { 
       budgetGBP: args.needs.budgetGBP,
       conditionGrade: usedGrade ?? null,
       sourceBRun: ranB,
+      inCatalogue,
     },
     newPrice,
   };

@@ -86,7 +86,7 @@ function checkLine(c: CheckResult): Pick<LogLine, "text" | "state"> {
     case "identify":
       return ok
         ? { text: `Identified ${(d.modelName as string) ?? "the model"}`, state: "done" }
-        : { text: "Model not confirmed", state: "problem" };
+        : { text: d.tier === "brand" && d.brand ? `${d.brand as string}, model not confirmed` : "Model not confirmed", state: "problem" };
     case "fit": {
       if (c.status === "unknown") return { text: "Size not stated", state: "problem" };
       const match = d.match as string | undefined;
