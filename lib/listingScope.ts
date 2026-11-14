@@ -86,12 +86,54 @@ export function ebayFullSizeUrl(url: string): string {
   return img && !img.thumb ? `https://i.ebayimg.com/images/g/${img.id}/s-l${EBAY_FULL_SIZE}${img.ext}` : url;
 }
 
+// Vinted image URLs: https://images1.vinted.net/t/<photo id>/<size>/<file>.webp?s=<signature>. Sizes are 70x100, 150x210,
+// 310x430 and f800 (also /tc/<photo id>/<file> for full size). The signature covers the size, so a thumbnail can't be
+// rewritten to a larger size: the largest variant seen is kept.
+const VINTED_IMAGE = /^https:\/\/images\d*\.vinted\.net\/(?:t|tc)\/([^/]+)\/(?:([^/]+)\/)?[^/?]+/i;
+
+/** Vinted photo id and a size rank (bigger is larger), or null for other URLs. */
+export function vintedImage(url: string): { id: string; rank: number } | null {
+  const m = VINTED_IMAGE.exec(url);
+  if (!m) return null;
+  const size = m[2] ?? "";
+  const f = /^f(\d+)$/i.exec(size);
+  const wh = /^(\d+)x(\d+)$/i.exec(size);
+  // /tc/ (no size segment) is the original upload; f800 is 800px on the long side; WxH are crops.
+  const rank = !m[2] || /\/tc\//i.test(url) ? Number.MAX_SAFE_INTEGER : f ? Number(f[1]) ** 2 * 2 : wh ? Number(wh[1]) * Number(wh[2]) : 0;
+  return { id: m[1], rank };
+}
+
+/** The listing's item id from its URL (Vinted /items/<id>-slug, eBay /itm/<id> or /itm/<slug>/<id>), or null. */
+export function listingItemId(pageUrl: string, platform: Platform): string | null {
+  let path: string;
+  try {
+    path = new URL(pageUrl).pathname;
+  } catch {
+    return null;
+  }
+  const m =
+    platform === "vinted" ? /\/items\/(\d+)/.exec(path) : platform === "ebay" ? /\/itm\/(?:[^/]+\/)?(\d{6,})/.exec(path) : /\/(?:items?|listing|products?|marketplace\/item)\/(\d+)/i.exec(path);
+  return m ? m[1] : null;
+}
+
 /**
  * Drop images that belong to other listings and collapse size variants of the same photo, keeping page order.
  * eBay: "/thumbs/" images are other listings' cards; one photo appears as s-l64, s-l400, s-l1600, ... so each id is
- * kept once, at full size.
+ * kept once, at full size. Vinted: one photo appears as 70x100 ... f800, each with its own signature, so each id is kept
+ * once, at the largest size seen.
  */
 export function scopeListingImages(urls: string[], platform: Platform): string[] {
+  if (platform === "vinted") {
+    const best = new Map<string, { url: string; rank: number }>();
+    for (const url of urls) {
+      const img = vintedImage(url);
+      const key = img ? img.id : url;
+      const rank = img ? img.rank : 0;
+      const prev = best.get(key);
+      if (!prev || rank > prev.rank) best.set(key, { url, rank }); // Map keeps first-seen order on update
+    }
+    return [...best.values()].map((v) => v.url);
+  }
   if (platform !== "ebay") return [...new Set(urls)];
   const out: string[] = [];
   const seen = new Set<string>();

@@ -33,6 +33,16 @@ for 7 days. Each live call is logged as `[websearch] q=... results=N`.
 `SEARCH_TIMEOUT_MS` (default `10000`) caps the comfort web search. If the search fails, times out or finds nothing, comfort
 falls back to the saved `ReviewSnippet` rows (confidence capped at 0.6). `STAGE_TIMEOUT_MS` still bounds each stage as a whole.
 
+Listing photos (`extension/src/lib/gallery.ts`). Galleries often show a few photos and a "+N" tile, and the rest are never
+rendered as `<img>`. The extension reads them from the page's data, in this order. First, the embedded JSON: JSON-LD
+`Product.image`, `__NEXT_DATA__`, Vinted's Next.js RSC chunks (`self.__next_f.push`) and eBay's `mediaList`. If that finds
+nothing, it reads the page's JavaScript state with `chrome.scripting.executeScript({ world: "MAIN" })`: framework globals
+and the gallery's React props. Vinted needs this after client-side navigation, when the inline data still describes the
+first item opened. It also collects every image in the gallery container, hidden or not (srcset, `data-src`, `<picture>`
+sources). Only this item's photos are kept: data inside an object whose id is the item id from the URL, the gallery's own
+props, or a JSON-LD Product naming this listing. Each image id appears once, at full size: eBay is rewritten to `s-l1600`,
+and Vinted keeps the largest signed variant (normally `f800`). Nothing is clicked, and no `webRequest` permission is used.
+
 The price check's current new price (Source B) comes from Google Shopping via SerpApi (`SHOPPING_API_KEY`), not from
 grounding. `lib/newPrices.ts` queries `"{brand} {model}"` with UK results, then filters in code: retailers only (no
 eBay, Vinted, Depop, StockX, GOAT and similar), the exact model and version, no accessories or kids' versions, GBP prices,

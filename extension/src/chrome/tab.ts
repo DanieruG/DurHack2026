@@ -1,4 +1,5 @@
-import { collectListing, type RawCapture } from "../lib/capture";
+import { collectGalleryState, collectListing, needsPageState, type RawCapture } from "../lib/capture";
+import type { GalleryState } from "../lib/gallery";
 
 export type TabCapture =
   | { ok: true; raw: RawCapture; screenshot: Blob | null }
@@ -29,6 +30,19 @@ async function screenshot(windowId: number): Promise<Blob | null> {
   }
 }
 
+/**
+ * The gallery data in the page's own JavaScript state (MAIN world: page globals and React props aren't visible to the
+ * isolated world). Best effort: null if the page blocks it.
+ */
+async function readPageState(tabId: number): Promise<GalleryState | null> {
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func: collectGalleryState });
+    return (res?.result as GalleryState | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read the listing in the active tab. Nothing is sent anywhere until the user presses Investigate. */
 export async function captureActiveTab(opts: { withScreenshot?: boolean } = {}): Promise<TabCapture> {
   const tab = await activeTab();
@@ -38,6 +52,7 @@ export async function captureActiveTab(opts: { withScreenshot?: boolean } = {}):
     const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: collectListing });
     const raw = result?.result as RawCapture | undefined;
     if (!raw) return { ok: false, reason: "no_listing" };
+    if (needsPageState(raw)) raw.state = (await readPageState(tab.id)) ?? undefined;
     const shot = opts.withScreenshot ? await screenshot(tab.windowId) : null;
     return { ok: true, raw, screenshot: shot };
   } catch {
