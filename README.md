@@ -56,6 +56,12 @@ one offer per retailer. It needs at least 3 offers, and the new price is their m
 for 24 hours, and `CACHE_MODE=replay` serves them without calling the API. Each live call is logged as
 `[shopping] q=... raw=N kept=M` (the key is never logged) so the free quota can be tracked.
 
+`npm run seed:reviews` (`scripts/seed-reviews.ts`) fills the saved review snippets that comfort falls back on. For each
+catalogue model without any, it runs the same SerpApi search once and stores each top result as a ReviewSnippet: title, real URL,
+snippet text, source type and topics. Google redirect links are resolved from their 302 and kept only when they land on the
+displayed site. Unknown domains are classified by Gemini, as in the live check, and topics are tagged in code. Responses are kept
+in `data/review-searches.json`, so reruns use no new searches. `data/reviews.json` stays the source for `npm run seed`.
+
 Without `DATABASE_URL`, the app falls back to an in-memory store seeded from `/data`. This is useful for local work, but it isn't persistent.
 
 ### Test data stays off the main database

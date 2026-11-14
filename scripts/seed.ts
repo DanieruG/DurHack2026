@@ -5,6 +5,7 @@
 import "../lib/loadEnv";
 import { hashObject } from "../lib/hash";
 import { loadSeedFiles } from "../lib/seedData";
+import { reviewRows } from "../lib/reviewSnippets";
 
 async function main() {
   const seed = loadSeedFiles(); // throws with a readable report on invalid data
@@ -44,9 +45,9 @@ async function main() {
   await db.priceSample.deleteMany({ where: { id: { notIn: sampleRows.map((r) => r.id) } } });
   await db.priceSample.createMany({ data: sampleRows, skipDuplicates: true });
 
-  const reviewRows = seed.reviews.map((r, i) => ({ id: `rs_${hashObject(r).slice(0, 20)}_${i}`, ...r }));
-  await db.reviewSnippet.deleteMany({ where: { id: { notIn: reviewRows.map((r) => r.id) } } });
-  if (reviewRows.length) await db.reviewSnippet.createMany({ data: reviewRows, skipDuplicates: true });
+  const rows = reviewRows(seed.reviews);
+  await db.reviewSnippet.deleteMany({ where: { id: { notIn: rows.map((r) => r.id) } } });
+  if (rows.length) await db.reviewSnippet.createMany({ data: rows, skipDuplicates: true });
 
   // Catalogue models / charts removed from the files are removed from the database too.
   await db.catalogueModel.deleteMany({ where: { id: { notIn: seed.catalogue.map((m) => m.id) } } });
