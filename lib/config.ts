@@ -21,6 +21,7 @@ const EnvSchema = z.object({
   MAX_LEADS: z.coerce.number().int().min(0).max(5).default(2),
   STAGE_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
   SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  PRO_RECHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   MAX_IMAGES: z.coerce.number().int().positive().max(20).default(8),
   MAX_IMAGE_BYTES: z.coerce.number().int().positive().default(8_000_000),
   PIPELINE_VERSION: z.string().default("2"),
@@ -42,6 +43,8 @@ export type Config = {
   stageTimeoutMs: number;
   /** Cap on the comfort check's SerpApi web search; past it, saved review snippets are used. */
   searchTimeoutMs: number;
+  /** Cap on the Gemini Pro version check (model read only from photos); past it the version is reported as unclear. */
+  proRecheckTimeoutMs: number;
   maxImages: number;
   maxImageBytes: number;
   pipelineVersion: string;
@@ -64,6 +67,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     maxLeads: e.MAX_LEADS,
     stageTimeoutMs: e.STAGE_TIMEOUT_MS,
     searchTimeoutMs: e.SEARCH_TIMEOUT_MS,
+    proRecheckTimeoutMs: e.PRO_RECHECK_TIMEOUT_MS,
     maxImages: e.MAX_IMAGES,
     maxImageBytes: e.MAX_IMAGE_BYTES,
     pipelineVersion: e.PIPELINE_VERSION,
@@ -80,6 +84,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     maxLeads: 2,
     stageTimeoutMs: 2000,
     searchTimeoutMs: 1000,
+    proRecheckTimeoutMs: 1500,
     maxImages: 8,
     maxImageBytes: 8_000_000,
     pipelineVersion: "test",

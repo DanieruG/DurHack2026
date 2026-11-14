@@ -10,6 +10,7 @@ import { buildCtx, runDownstream, runIdentify, toIdentifyCheck } from "./runChec
 import { runStage } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
 import { finalise, instrumented, loadImages, loadPageText } from "./core";
+import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
 
 export { reopenCase, startReopen, ReopenConflictError } from "./reopen";
 export { finalise, instrumented, loadImages } from "./core";
@@ -101,10 +102,13 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     const identify = ctx.identify!;
     emit("check_done", identifyCheck);
 
+    // A model read only from the photos is checked by Gemini Pro, in parallel with the other checks (max 15s).
+    const versionCheck = modelFromPhotosOnly(identify, ctx.facts, ctx.pageText, ref.catalogue) && ctx.images.length ? runVersionCheck(ctx) : null;
     // Each check runs on whatever identify established (brand / model / catalogue); condition runs on photos alone.
     const downstream = await runDownstream(ctx);
+    let all = [identifyCheck, ...downstream];
+    if (versionCheck) all = await applyVersionCheck(ctx, await versionCheck, all);
     // Without a brand the verdict is R1 whatever the leads find, so don't spend calls on them.
-    const all = [identifyCheck, ...downstream];
     const { checks, leads, report } = brandKnown(identify, config.identifyConfidenceMin, ref.catalogue) ? await followLeads(ctx, all) : skipLeads(ctx, all, NO_BRAND_SKIP);
     await finalise(ctx, { checks, leads, leadsReport: report, row: c, inputHashImages: images });
   });

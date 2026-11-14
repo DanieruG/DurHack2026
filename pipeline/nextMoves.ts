@@ -3,10 +3,12 @@ import type { CheckName, CheckResult, Lead, NextMove, VerdictLabel } from "@/sch
 import { generateStructured } from "@/gemini/structured";
 import type { GeminiClient } from "@/gemini/client";
 import { validateNextMoveText } from "./verdict/validate";
+import { versionQuestion } from "./versionCheck";
 
 export const MAX_QUESTIONS = 3;
 
-export type Gap = { id: string; check: CheckName; priority: number; ask: string; fallback: string };
+/** `exact`: the fallback is the question, word for word (not rephrased by Gemini). */
+export type Gap = { id: string; check: CheckName; priority: number; ask: string; fallback: string; exact?: boolean };
 
 const PRIORITY: Record<CheckName, number> = { identify: 0, fit: 1, condition: 2, price: 3, comfort: 5 };
 
@@ -15,7 +17,12 @@ type Details = Record<string, unknown> | undefined;
 function gapFor(c: CheckResult): Gap | null {
   const d = c.details as Details;
   switch (c.check) {
-    case "identify":
+    case "identify": {
+      const v = d?.versionUnclear as { family: string; options: [string, string | null] } | undefined;
+      if (v) {
+        const q = versionQuestion((d?.brand as string | null) ?? null, v);
+        return { id: "gap_version", check: "identify", priority: PRIORITY.identify, ask: q, fallback: q, exact: true };
+      }
       return {
         id: "gap_identify",
         check: "identify",
@@ -23,6 +30,7 @@ function gapFor(c: CheckResult): Gap | null {
         ask: "Ask for the exact model name, or a photo of the size label inside the tongue.",
         fallback: "Could you tell me the exact model name, or share a photo of the size label inside the tongue?",
       };
+    }
     case "fit": {
       if (d?.match === null || d?.listed === null || d?.listed === undefined) {
         return { id: "gap_fit", check: "fit", priority: PRIORITY.fit, ask: "Ask which size these are, including UK, US or EU.", fallback: "Could you confirm the size, and whether it's UK, US or EU?" };
@@ -70,7 +78,7 @@ function gapFor(c: CheckResult): Gap | null {
 export function computeGaps(args: { checks: CheckResult[]; leads: Lead[]; label: VerdictLabel; answered: CheckName[] }): Gap[] {
   const gaps = new Map<string, Gap>();
   const identify = args.checks.find((c) => c.check === "identify");
-  if (identify && identify.status !== "pass") gaps.set("identify", gapFor({ check: "identify" } as CheckResult)!);
+  if (identify && identify.status !== "pass") gaps.set("identify", gapFor(identify)!);
   // Without even a brand, only the identity question is worth asking.
   if (args.label !== "not_enough_evidence") {
     for (const c of args.checks) {
@@ -167,7 +175,7 @@ export async function generateNextMoves(
 
   const moves: NextMove[] = [];
   gaps.forEach((g, i) => {
-    const candidate = phrased.questions.find((q) => q.gapId === g.id)?.text.trim();
+    const candidate = g.exact ? undefined : phrased.questions.find((q) => q.gapId === g.id)?.text.trim();
     const text = candidate && validateNextMoveText(candidate, "ask_seller").length === 0 ? candidate : g.fallback;
     moves.push({ id: `nm_ask_${i + 1}`, kind: "ask_seller", text, relatesTo: [g.check] });
   });

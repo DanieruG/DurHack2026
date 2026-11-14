@@ -35,6 +35,8 @@ export type RunCtx = {
   newPrices: (modelName: string, brand: string) => Promise<NewPrices>;
   /** Models ("brand model", lower case) whose new prices Gemini fetched via the getNewPrices tool. */
   newPricesViaTool: Set<string>;
+  /** The Gemini Pro version check already ran: the recheck_identification lead would only repeat it. */
+  versionChecked?: boolean;
 };
 
 const priceKey = (modelName: string, brand: string) => `${brand} ${modelName}`.toLowerCase().replace(/\s+/g, " ").trim();
@@ -100,6 +102,12 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
   if ((name === "price" || name === "comfort") && !subject.modelName) {
     const what = name === "price" ? "compare the price" : "check reviews for comfort";
     return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`);
+  }
+  if (name === "price" && subject.tier === "family") {
+    const v = ctx.identify?.versionUnclear;
+    return unknownCheck("price", `The exact version is unclear (${v?.options[0] ?? "?"} or ${v?.options[1] ?? "another version"}), so I can't compare the price.`, {
+      details: { versionUnclear: true },
+    });
   }
   const { deps } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;

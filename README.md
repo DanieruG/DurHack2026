@@ -43,6 +43,12 @@ sources). Only this item's photos are kept: data inside an object whose id is th
 props, or a JSON-LD Product naming this listing. Each image id appears once, at full size: eBay is rewritten to `s-l1600`,
 and Vinted keeps the largest signed variant (normally `f800`). Nothing is clicked, and no `webRequest` permission is used.
 
+Version check (`pipeline/versionCheck.ts`). When the model name comes only from the photos (the listing's own text never
+names it), Gemini Pro rechecks it alongside the other checks, capped by `PRO_RECHECK_TIMEOUT_MS` (default `15000`). If Pro
+agrees, the case continues. If Pro disagrees, declines or times out, identify reports the brand and model family with
+"version unclear (A or B)": price is unknown, fit and condition stand, comfort runs on the family name, and the seller is asked
+"Is this the {model} A or B?". Both models' answers are kept as evidence, and `npm run eval` reports the disagreement rate.
+
 The price check's current new price (Source B) comes from Google Shopping via SerpApi (`SHOPPING_API_KEY`), not from
 grounding. `lib/newPrices.ts` queries `"{brand} {model}"` with UK results, then filters in code: retailers only (no
 eBay, Vinted, Depop, StockX, GOAT and similar), the exact model and version, no accessories or kids' versions, GBP prices,

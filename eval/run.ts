@@ -40,6 +40,8 @@ type Row = {
   label: z.infer<typeof LabelSchema>;
   predictedModel: string | null;
   gatePassed: boolean;
+  /** Gemini Pro version check (model read only from photos): agree | disagree | declined | timeout, or undefined when it didn't run. */
+  proRecheck?: string;
   listedUK?: number;
   priceGBP?: number;
   grade?: string;
@@ -89,6 +91,7 @@ async function main() {
       const identify = get("identify");
       row.predictedModel = c.identify?.catalogueModelId ?? null;
       row.gatePassed = identify?.status === "pass";
+      row.proRecheck = (identify?.details as { proRecheck?: { outcome: string } } | undefined)?.proRecheck?.outcome;
       row.listedUK = (get("fit")?.details as { listedUK?: number } | undefined)?.listedUK;
       row.priceGBP = c.listingFacts?.priceGBP;
       row.grade = gradeFromClaims(c.listingFacts?.conditionClaims ?? []);
@@ -115,6 +118,8 @@ async function main() {
   const gradeAgree = rows.filter((r) => r.grade === r.label.conditionGrade).length;
   const withVerdict = rows.filter((r) => r.label.expectedVerdict);
   const verdictAgree = withVerdict.filter((r) => r.verdict === r.label.expectedVerdict).length;
+  const rechecked = rows.filter((r) => r.proRecheck);
+  const proCount = (o: string) => rechecked.filter((r) => r.proRecheck === o).length;
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 
   const report = `# Sleuth evaluation report
@@ -132,6 +137,16 @@ Percentages are truncated to one decimal place (never rounded up). Quote the cou
 | Wrong model passed the gate | ${pct(idWrong, known.length)} |
 | Refused (gate) although a model was labelled | ${pct(idRefused, known.length)} |
 | Gate correctly refused (label is null) | ${pct(gateRefusedCorrectly, unknown.length)} |
+
+## Version check (model read only from photos: Gemini Flash vs the Gemini Pro recheck)
+
+| Metric | Result |
+| --- | --- |
+| Pro recheck ran | ${pct(rechecked.length, rows.length)} |
+| Flash/Pro disagreement (Pro named a different model) | ${pct(proCount("disagree"), rechecked.length)} |
+| Pro declined to name a model | ${pct(proCount("declined"), rechecked.length)} |
+| Pro timed out | ${pct(proCount("timeout"), rechecked.length)} |
+| Flash/Pro agreement | ${pct(proCount("agree"), rechecked.length)} |
 
 ## Extraction agreement with labels
 
@@ -157,10 +172,10 @@ Percentages are truncated to one decimal place (never rounded up). Quote the cou
 
 ## Per listing
 
-| Listing | Label model | Predicted (gate) | Size UK label / got | Price label / got | Grade label / got | Verdict expected / got | ms | calls |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Listing | Label model | Predicted (gate) | Pro recheck | Size UK label / got | Price label / got | Grade label / got | Verdict expected / got | ms | calls |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${rows
-  .map((r) => `| ${r.id} | ${r.label.catalogueModelId ?? "null"} | ${r.predictedModel ?? "null"} (${r.gatePassed ? "pass" : "refused"}) | ${r.label.sizeUK ?? "-"} / ${r.listedUK ?? "-"} | ${r.label.priceGBP} / ${r.priceGBP ?? "-"} | ${r.label.conditionGrade} / ${r.grade ?? "-"} | ${r.label.expectedVerdict ?? "-"} / ${r.verdict ?? "-"} | ${r.durationMs} | ${r.geminiCalls} |`)
+  .map((r) => `| ${r.id} | ${r.label.catalogueModelId ?? "null"} | ${r.predictedModel ?? "null"} (${r.gatePassed ? "pass" : "refused"}) | ${r.proRecheck ?? "-"} | ${r.label.sizeUK ?? "-"} / ${r.listedUK ?? "-"} | ${r.label.priceGBP} / ${r.priceGBP ?? "-"} | ${r.label.conditionGrade} / ${r.grade ?? "-"} | ${r.label.expectedVerdict ?? "-"} / ${r.verdict ?? "-"} | ${r.durationMs} | ${r.geminiCalls} |`)
   .join("\n")}
 `;
   fs.writeFileSync(path.join(process.cwd(), "eval", "report.md"), report);

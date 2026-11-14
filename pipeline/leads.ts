@@ -145,7 +145,9 @@ export async function followLeads(ctx: RunCtx, checks: CheckResult[]): Promise<L
   } catch {
     return skipLeads(ctx, checks, PLAN_FAILED_SKIP);
   }
-  const leads = sanitiseLeads(proposed, { maxLeads: max, photoCount: ctx.images.length });
+  // The Pro version check already looked again at the model: a recheck_identification lead would only repeat it.
+  const usable = ctx.versionChecked ? proposed.filter((w) => w.type !== "recheck_identification") : proposed;
+  const leads = sanitiseLeads(usable, { maxLeads: max, photoCount: ctx.images.length });
 
   let current = checks;
   const done: Lead[] = [];

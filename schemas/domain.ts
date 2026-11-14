@@ -129,6 +129,13 @@ export const IdentifyResultSchema = z.object({
   confidence: z.number().min(0).max(1),
   reasons: z.string(),
   evidence: z.array(EvidenceSchema),
+  /**
+   * Set when the model came only from photos and the Gemini Pro recheck disagreed, declined or timed out: the brand and
+   * model family are known, the exact version isn't. `options` are the two candidate versions (B is null when Pro gave none).
+   */
+  versionUnclear: z
+    .object({ family: z.string(), options: z.tuple([z.string(), z.string().nullable()]) })
+    .optional(),
 });
 export type IdentifyResult = z.infer<typeof IdentifyResultSchema>;
 

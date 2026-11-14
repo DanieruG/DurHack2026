@@ -44,7 +44,8 @@ export function identifyWireSchema(ids: string[]) {
   });
 }
 
-export type IdentifyTier = "catalogue" | "model" | "brand" | "none";
+/** "family": brand and model family known, exact version unclear (Flash and the Pro recheck disagreed; see versionCheck.ts). */
+export type IdentifyTier = "catalogue" | "model" | "family" | "brand" | "none";
 
 /** What the downstream checks can rely on, after applying IDENTIFY_CONFIDENCE_MIN to each tier. */
 export type Subject = {
@@ -68,6 +69,10 @@ export function subjectOf(result: IdentifyResult | null | undefined, min: number
   const brandOk = !!brand && (modelOk || (result.brandConfidence ?? 0) >= min);
   if (!brandOk) return NO_SUBJECT;
   if (!modelOk) return { tier: "brand", brand, modelName: null, displayName: brand, catalogue: null };
+  if (result.versionUnclear?.family) {
+    const family = result.versionUnclear.family;
+    return { tier: "family", brand, modelName: family, displayName: `${brand} ${family}`, catalogue: null };
+  }
   const modelName = cat?.name ?? result.modelName!;
   return { tier: cat ? "catalogue" : "model", brand, modelName, displayName: `${brand} ${modelName}`, catalogue: cat };
 }
@@ -211,6 +216,13 @@ export function identifyCheck(
       summary = `Identified as the ${s.displayName}. This model isn't in our catalogue, so there's no sampled price to compare with.`;
       confidence = result.confidence;
       break;
+    case "family": {
+      const v = result.versionUnclear!;
+      status = "warn";
+      summary = `It's a ${s.displayName}, version unclear (${v.options[0]} or ${v.options[1] ?? "another version"}). The photos alone don't settle it, so the price can't be compared yet.`;
+      confidence = Math.min(result.confidence, 0.5);
+      break;
+    }
     case "brand":
       status = "warn";
       summary = guess
@@ -238,6 +250,7 @@ export function identifyCheck(
       inCatalogue: !!s.catalogue,
       reasons: result.reasons,
       gatePassed: s.tier === "catalogue",
+      ...(result.versionUnclear ? { versionUnclear: result.versionUnclear } : {}),
     },
   };
 }

@@ -74,6 +74,7 @@ const STAGE_TEXT: Partial<Record<string, string>> = {
   price: "Comparing prices",
   comfort: "Reading reviews",
   condition: "Inspecting photos",
+  version_check: "Checking the exact version",
   verdict: "Weighing the evidence",
   reopen: "Reading the new evidence",
 };
@@ -87,6 +88,7 @@ function checkLine(c: CheckResult): Pick<LogLine, "text" | "state"> {
   const d = (c.details ?? {}) as Record<string, unknown>;
   switch (c.check) {
     case "identify":
+      if (d.tier === "family") return { text: `${(d.modelName as string) ?? "Model"}, version unclear`, state: "problem" };
       return ok
         ? { text: `Identified ${(d.modelName as string) ?? "the model"}`, state: "done" }
         : { text: d.tier === "brand" && d.brand ? `${d.brand as string}, model not confirmed` : "Model not confirmed", state: "problem" };
