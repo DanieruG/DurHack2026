@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createCase } from "@/pipeline";
 import { caseDetail } from "@/pipeline/views";
 import { checkPrice } from "@/pipeline/checks/price";
+import { BUY_NEW_MOVE_ID, buyNewMove, generateNextMoves } from "@/pipeline/nextMoves";
 import {
   createNewPriceClient,
   filterOffers,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/newPrices";
 import { SseEventSchemas } from "@/schemas/api";
 import type { CheckResult, ListingFacts, NewOffers } from "@/schemas/domain";
-import { fixtureReference, json, makeDeps, PAGE_TEXT, PROFILE } from "./helpers";
+import { check, fixtureReference, json, makeDeps, PAGE_TEXT, PROFILE } from "./helpers";
 
 const THUMB = "https://encrypted-tbn1.gstatic.com/shopping?q=tbn:ANd9GcTest";
 const offer = (retailer: string, priceGBP: number, over: Partial<ShoppingOffer> = {}): ShoppingOffer => ({
@@ -220,5 +221,23 @@ describe("new offers: stream and case detail", () => {
     const price = events.filter((e) => e.event === "check_done" && (e.data as CheckResult).check === "price").at(-1)!.data as CheckResult;
     expect(price.status).toBe("unknown");
     expect((await caseDetail(deps, (await deps.store.getCase(caseId))!, "http://x.test")).newOffers).toMatchObject({ enoughForComparison: false });
+  });
+});
+
+describe("new offers: Consider buying new", () => {
+  const offers = toNewOffers({ offers: [offer("Schuh", 90), offer("Decathlon UK", 79.99), offer("JD Sports", 95)], checkedOn: "2026-11-14" }, 95);
+  const price = (position: string, newOffers?: NewOffers) => check({ check: "price", status: "fail", details: { position, ...(newOffers ? { newOffers } : {}) } });
+
+  it("is added only when the listing costs as much as new and offers were found", async () => {
+    expect(buyNewMove([price("at_or_above_new", offers)])).toEqual({
+      id: BUY_NEW_MOVE_ID,
+      kind: "before_you_pay",
+      text: "Consider buying new: 3 UK retailers sell this model new, from £79.99.",
+      relatesTo: ["price"],
+    });
+    expect(buyNewMove([price("typical", offers)])).toBeNull();
+    expect(buyNewMove([price("at_or_above_new")])).toBeNull();
+    const moves = await generateNextMoves(null, { checks: [check({ check: "fit", status: "pass" }), price("at_or_above_new", offers)], leads: [], label: "overpriced" });
+    expect(moves.map((m) => m.id)).toEqual([BUY_NEW_MOVE_ID]);
   });
 });

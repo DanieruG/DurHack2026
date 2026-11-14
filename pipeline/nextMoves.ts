@@ -4,6 +4,7 @@ import { generateStructured } from "@/gemini/structured";
 import type { GeminiClient } from "@/gemini/client";
 import { validateNextMoveText } from "./verdict/validate";
 import { versionQuestion } from "./versionCheck";
+import { gbp } from "./util";
 
 export const MAX_QUESTIONS = 3;
 
@@ -132,6 +133,25 @@ const BEFORE_YOU_PAY = [
   { id: "byp_save", ask: "Save the listing and screenshots in case it changes.", fallback: "Save the listing and your screenshots in case the listing changes later." },
 ];
 
+export const BUY_NEW_MOVE_ID = "nm_buy_new";
+
+/**
+ * "Consider buying new": only when the price check found the listing costs as much as new (that needs 3+ retailers).
+ * Fixed wording (prices must be exact); the panel shows the retailer offer cards under it.
+ */
+export function buyNewMove(checks: CheckResult[]): NextMove | null {
+  const d = checks.find((c) => c.check === "price")?.details as Details;
+  const offers = (d?.newOffers as { offers?: { priceGBP: number }[] } | undefined)?.offers ?? [];
+  if (d?.position !== "at_or_above_new" || !offers.length) return null;
+  const lowest = Math.min(...offers.map((o) => o.priceGBP));
+  return {
+    id: BUY_NEW_MOVE_ID,
+    kind: "before_you_pay",
+    text: `Consider buying new: ${offers.length} UK retailer${offers.length === 1 ? "" : "s"} sell this model new, from ${gbp(lowest)}.`,
+    relatesTo: ["price"],
+  };
+}
+
 const PhrasingWireSchema = z.object({
   questions: z.array(z.object({ gapId: z.string(), text: z.string() })).default([]),
   beforeYouPay: z.array(z.object({ id: z.string(), text: z.string() })).default([]),
@@ -148,7 +168,8 @@ export async function generateNextMoves(
 ): Promise<NextMove[]> {
   const gaps = computeGaps({ ...args, answered: args.answered ?? [] });
   const byp = args.label === "hidden_gem" || args.label === "worth_a_look" ? BEFORE_YOU_PAY : [];
-  if (!gaps.length && !byp.length) return [];
+  const buyNew = buyNewMove(args.checks);
+  if (!gaps.length && !byp.length) return buyNew ? [buyNew] : [];
 
   let phrased: z.infer<typeof PhrasingWireSchema> = { questions: [], beforeYouPay: [] };
   if (gemini) {
@@ -184,5 +205,6 @@ export async function generateNextMoves(
     const text = candidate && validateNextMoveText(candidate, "before_you_pay").length === 0 ? candidate : b.fallback;
     moves.push({ id: `nm_pay_${i + 1}`, kind: "before_you_pay", text, relatesTo: [] });
   });
+  if (buyNew) moves.push(buyNew);
   return moves;
 }
