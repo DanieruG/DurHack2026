@@ -1,9 +1,10 @@
-import { caseNumber, CHECK_NAMES, elapsed } from "../../lib/format";
+import { CHECK_NAMES, elapsed } from "../../lib/format";
+import { caseLabel } from "../../lib/history";
 import { segments, type Investigation } from "../../lib/progress";
 import { Button, Notice } from "../ui";
 
 export function Investigating(props: {
-  number: number;
+  caseId: string;
   title: string;
   inv: Investigation;
   lost?: boolean;
@@ -17,7 +18,7 @@ export function Investigating(props: {
   return (
     <div className="screen">
       <p className="kicker">{props.title}</p>
-      <h1 className="h1 case-no">{caseNumber(props.number)}</h1>
+      <h1 className="h1 case-no">{caseLabel(props.caseId)}</h1>
       <p className="status-line">
         {status}
         {segs.length ? ` · ${doneCount} of ${segs.length}` : ""}

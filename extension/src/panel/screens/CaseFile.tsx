@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { CaseDetail } from "@/schemas/api";
 import type { CheckName, CheckResult } from "@/schemas/domain";
-import { caseNumber, CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
+import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
+import { caseLabel } from "../../lib/history";
 import { conditionView, evidenceLines, priceView, sourceRefs, type SourceRef } from "../../lib/evidence";
 import { Button, CopyButton, Label, Notice, StatusMark, Verdict } from "../ui";
 
@@ -12,7 +13,7 @@ type RowKey = CheckName | "reasoning";
 export type EvidenceDraft = { sellerReply: string; files: File[]; tabTitle: string | null };
 
 export function CaseFile(props: {
-  number: number;
+  caseId: string;
   detail: CaseDetail;
   listing: { title: string; priceGBP: number | null };
   initialOpen?: RowKey[];
@@ -47,7 +48,7 @@ export function CaseFile(props: {
   return (
     <div className="screen">
       <div className="file-head">
-        <span className="mono">{caseNumber(props.number)}</span>
+        <span className="mono">{caseLabel(props.caseId)}</span>
         {detail.revision > 1 && <span className="mono dim">Rev {detail.revision}</span>}
       </div>
       <p className="kicker">{[title, price !== null ? gbp(price) : null, PLATFORM_NAMES[detail.platform]].filter(Boolean).join(" · ")}</p>

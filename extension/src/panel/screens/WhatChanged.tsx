@@ -1,12 +1,13 @@
 import type { CaseDiff, CheckStatus } from "@/schemas/domain";
 import { describeDiff } from "../../lib/changes";
-import { caseNumber, STATUS_WORDS } from "../../lib/format";
+import { STATUS_WORDS } from "../../lib/format";
+import { caseLabel } from "../../lib/history";
 import { VERDICTS } from "../../lib/verdicts";
 import { Button, Label, StatusMark, Verdict } from "../ui";
 
 const asStatus = (s: string): CheckStatus => (s in STATUS_WORDS ? (s as CheckStatus) : "unknown");
 
-export function WhatChanged(props: { number: number; diff: CaseDiff; headline?: string; onOpenFile: () => void }) {
+export function WhatChanged(props: { caseId: string; diff: CaseDiff; headline?: string; onOpenFile: () => void }) {
   const { diff } = props;
   const { line, changes } = describeDiff(diff);
   const moved = diff.verdict.before !== diff.verdict.after;
@@ -14,7 +15,7 @@ export function WhatChanged(props: { number: number; diff: CaseDiff; headline?: 
   return (
     <div className="screen">
       <div className="file-head">
-        <span className="mono">{caseNumber(props.number)}</span>
+        <span className="mono">{caseLabel(props.caseId)}</span>
         <span className="mono dim">Rev {diff.toRevision}</span>
       </div>
       <p className="kicker">What changed</p>

@@ -108,11 +108,11 @@ function App() {
           />
         </Panel>
         <Panel n="03" name="Investigation in progress" nav={<NavLink onClick={noop}>New case</NavLink>}>
-          <Investigating number={42} title="Nike Pegasus 40 · £42" inv={inv} />
+          <Investigating caseId="cmpreview000042" title="Nike Pegasus 40 · £42" inv={inv} />
         </Panel>
         <Panel n="04" name="Case file" nav={<NavLink onClick={noop}>New case</NavLink>}>
           <CaseFile
-            number={42}
+            caseId="cmpreview000042"
             detail={CASE_FILE}
             listing={{ title: LISTING.title, priceGBP: 42 }}
             initialOpen={["condition"]}
@@ -120,7 +120,7 @@ function App() {
           />
         </Panel>
         <Panel n="05" name="What changed" nav={<NavLink onClick={noop}>New case</NavLink>}>
-          <WhatChanged number={42} diff={DIFF} onOpenFile={noop} />
+          <WhatChanged caseId="cmpreview000042" diff={DIFF} onOpenFile={noop} />
         </Panel>
       </div>
 

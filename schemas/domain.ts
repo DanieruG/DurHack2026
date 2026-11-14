@@ -238,6 +238,10 @@ export const CaseSummarySchema = z.object({
   platform: PlatformSchema,
   verdictLabel: VerdictLabelSchema.optional(),
   thumbnailUrl: z.string().optional(),
+  /** The listing the case was opened from ("View listing"). */
+  pageUrl: z.string().nullable().default(null),
+  status: z.enum(["open", "investigating", "closed", "error"]).default("closed"),
+  createdAt: z.string().optional(),
   updatedAt: z.string(),
 });
 export type CaseSummary = z.infer<typeof CaseSummarySchema>;

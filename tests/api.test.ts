@@ -218,7 +218,9 @@ describe("case endpoints", () => {
     const sum = await summariesRoute.GET(new Request(`${BASE}/api/cases/summaries?ids=${caseId},cmissingcase000000000`));
     const list = CaseSummariesResponseSchema.parse(await sum.json());
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: caseId, verdictLabel: "hidden_gem", priceGBP: 38, platform: "other", thumbnailUrl: detail.imageUrls[0] });
+    expect(list[0]).toMatchObject({ id: caseId, verdictLabel: "hidden_gem", priceGBP: 38, platform: "other", thumbnailUrl: detail.imageUrls[0], status: "closed", revision: 1 });
+    expect(list[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(list[0]).toHaveProperty("pageUrl"); // "View listing"
     const tooMany = Array.from({ length: 51 }, (_, i) => `c${String(i).padStart(10, "0")}`).join(",");
     expect((await summariesRoute.GET(new Request(`${BASE}/api/cases/summaries?ids=${tooMany}`))).status).toBe(400);
   });

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { prepareCapture, redactPageText, type RawCapture } from "@/extension/src/lib/capture";
 import { describeDiff } from "@/extension/src/lib/changes";
 import { boxStyle, conditionView, findingCaption, priceView, sourceRefs } from "@/extension/src/lib/evidence";
-import { caseNumber, firstSentence, shortDate } from "@/extension/src/lib/format";
+import { firstSentence, shortDate } from "@/extension/src/lib/format";
+import { addEntry, caseForUrl, caseLabel, historyRows, HISTORY_LIMIT, keepFound, normaliseHistory, removeEntry, type HistoryEntry } from "@/extension/src/lib/history";
+import type { CaseSummary } from "@/schemas/domain";
 import { applyEvent, newInvestigation, parseEvent, revisionOf, segments, type IncomingEvent } from "@/extension/src/lib/progress";
 import { VERDICTS, VERDICT_ORDER } from "@/extension/src/lib/verdicts";
 import { CASE_FILE, DIFF, investigationInProgress } from "@/extension/src/preview/fixtures";
@@ -155,7 +157,7 @@ describe("preview fixtures follow the API contract", () => {
 
 describe("format", () => {
   it("formats case numbers, dates and sentences", () => {
-    expect(caseNumber(42)).toBe("Case 0042");
+    expect(caseLabel("cmabcdef12x7f3kq2")).toBe("Case 7F3KQ2");
     expect(shortDate("2026-11-10")).toBe("10 Nov");
     expect(firstSentence("Listed UK 9. Your Nike size.")).toBe("Listed UK 9.");
   });
@@ -173,5 +175,37 @@ describe("capture: full eBay gallery", () => {
     const { capture, preview } = prepareCapture(raw({ pageUrl: "https://www.ebay.co.uk/itm/100000000001", images }));
     expect(capture.imageUrls).toEqual(ids.map((id) => `https://i.ebayimg.com/images/g/${id}/s-l1600.webp`));
     expect(preview.photoCount).toBe(6);
+  });
+});
+
+describe("history (stored on this device: caseId and createdAt only)", () => {
+  const at = (d: number) => new Date(Date.UTC(2026, 10, d)).toISOString();
+  const e = (id: string, d: number): HistoryEntry => ({ caseId: id, createdAt: at(d) });
+  const summary = (id: string, over: Partial<CaseSummary> = {}): CaseSummary => ({ id, revision: 1, platform: "vinted", pageUrl: null, status: "closed", updatedAt: at(1), ...over });
+
+  it("keeps the newest 50, newest first, one entry per case", () => {
+    let list: HistoryEntry[] = [];
+    for (let i = 1; i <= 55; i++) list = addEntry(list, e(`case${String(i).padStart(8, "0")}`, (i % 28) + 1));
+    expect(list).toHaveLength(HISTORY_LIMIT);
+    expect([...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt))).toEqual(list);
+    expect(addEntry([e("caseaaaaaaaa", 1)], e("caseaaaaaaaa", 2))).toEqual([e("caseaaaaaaaa", 2)]);
+    expect(Object.keys(list[0]).sort()).toEqual(["caseId", "createdAt"]);
+  });
+
+  it("removes locally, drops cases the server can't find, and migrates the old rich store to ids and dates only", () => {
+    const list = [e("caseaaaaaaaa", 3), e("casebbbbbbbb", 2), e("casecccccccc", 1)];
+    expect(removeEntry(list, "casebbbbbbbb").map((x) => x.caseId)).toEqual(["caseaaaaaaaa", "casecccccccc"]);
+    expect(keepFound(list, [{ id: "casecccccccc" }, { id: "caseaaaaaaaa" }]).map((x) => x.caseId)).toEqual(["caseaaaaaaaa", "casecccccccc"]);
+    const legacy = { casedddddddd: { id: "casedddddddd", number: 4, title: "Old", pageUrl: "https://x.test", createdAt: at(5), diffs: {} } };
+    expect(normaliseHistory(undefined, legacy)).toEqual([e("casedddddddd", 5)]);
+    expect(normaliseHistory([{ caseId: "bad id!", createdAt: at(1) }, { caseId: "caseaaaaaaaa" }])).toEqual([]);
+  });
+
+  it("rows come from server summaries; the case for the open listing is found by its URL", () => {
+    const list = [e("caseaaaaaaaa", 3), e("casebbbbbbbb", 2)];
+    const sums = { casebbbbbbbb: summary("casebbbbbbbb", { pageUrl: "https://www.vinted.co.uk/items/1-x?ref=y" }) };
+    expect(historyRows(list, sums).map((r) => r.entry.caseId)).toEqual(["casebbbbbbbb"]);
+    expect(caseForUrl(list, sums, "https://www.vinted.co.uk/items/1-x#photos")?.id).toBe("casebbbbbbbb");
+    expect(caseForUrl(list, sums, "https://www.vinted.co.uk/items/2-y")).toBeNull();
   });
 });

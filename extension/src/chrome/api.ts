@@ -1,12 +1,13 @@
 import {
   CaseCreatedSchema,
   CaseDetailSchema,
+  CaseSummariesResponseSchema,
   ErrorResponseSchema,
   ReopenAcceptedSchema,
   SseEventSchemas,
   type CaseDetail,
 } from "@/schemas/api";
-import type { Capture, Profile } from "@/schemas/domain";
+import type { Capture, CaseSummary, Profile } from "@/schemas/domain";
 import { parseEvent, revisionOf, type IncomingEvent } from "../lib/progress";
 
 export class ApiError extends Error {
@@ -61,6 +62,13 @@ export function createApi(base: string) {
       for (const [i, s] of (args.screenshots ?? []).slice(0, MAX_SCREENSHOTS).entries()) form.append("screenshots", s, s instanceof File ? s.name : `evidence-${i + 1}.png`);
       const res = await send(u(`/api/cases/${encodeURIComponent(id)}/reopen`), { method: "POST", body: form });
       return read(res, ReopenAcceptedSchema);
+    },
+
+    /** Summaries for up to 50 ids; ids the server can't find are simply absent from the result. */
+    async getSummaries(ids: string[]): Promise<CaseSummary[]> {
+      if (!ids.length) return [];
+      const res = await send(u(`/api/cases/summaries?ids=${ids.slice(0, 50).map(encodeURIComponent).join(",")}`), { method: "GET" });
+      return read(res, CaseSummariesResponseSchema);
     },
 
     async getCase(id: string): Promise<CaseDetail> {

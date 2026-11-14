@@ -58,6 +58,9 @@ export async function caseSummaries(deps: Deps, ids: string[], origin: string): 
         platform: c.platform,
         verdictLabel: c.verdict?.label,
         thumbnailUrl: images.length ? imageUrl(origin, c.id, 0) : undefined,
+        pageUrl: c.pageUrl,
+        status: c.status,
+        createdAt: c.createdAt.toISOString(),
         updatedAt: c.updatedAt.toISOString(),
       };
     }),

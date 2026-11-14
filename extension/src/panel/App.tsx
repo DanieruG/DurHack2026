@@ -1,25 +1,15 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { CaseDetail } from "@/schemas/api";
-import type { Capture, CaseDiff, Profile } from "@/schemas/domain";
+import type { Capture, CaseDiff, CaseSummary, Profile } from "@/schemas/domain";
 import { ApiError, createApi } from "../chrome/api";
-import {
-  caseForUrl,
-  DEFAULT_API_BASE,
-  loadCases,
-  loadProfile,
-  loadSettings,
-  saveCase,
-  saveProfile,
-  saveSettings,
-  takeCaseNumber,
-  updateCase,
-  type StoredCase,
-} from "../chrome/storage";
+import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, rememberCase, saveHistory, saveProfile, saveSettings } from "../chrome/storage";
+import { caseForUrl, historyRows, keepFound, type HistoryEntry } from "../lib/history";
 import { captureActiveTab, onActiveListingChange, requestSiteAccess } from "../chrome/tab";
 import { prepareCapture, type ListingPreview } from "../lib/capture";
 import { applyEvent, newInvestigation, type IncomingEvent, type Investigation } from "../lib/progress";
 import { CaseFile, type EvidenceDraft } from "./screens/CaseFile";
 import { CaseReady, type ReadyState } from "./screens/CaseReady";
+import { History } from "./screens/History";
 import { Investigating } from "./screens/Investigating";
 import { ProfileScreen } from "./screens/Profile";
 import { WhatChanged } from "./screens/WhatChanged";
@@ -29,12 +19,14 @@ type View =
   | { name: "boot" }
   | { name: "profile"; firstRun: boolean }
   | { name: "ready" }
+  | { name: "history" }
   | { name: "investigating" }
   | { name: "file" }
   | { name: "changed"; diff: CaseDiff };
 
 type Captured = { capture: Capture; preview: ListingPreview; screenshot: Blob | null };
-type Active = { stored: StoredCase; detail: CaseDetail | null };
+/** The case on screen. Title and price come from the capture (new case) or the server, never from local storage. */
+type Active = { caseId: string; title: string; priceGBP: number | null; detail: CaseDetail | null };
 
 type InvAction = { type: "reset"; revision: number; at: number } | { type: "event"; e: IncomingEvent };
 const invReducer = (s: Investigation, a: InvAction) => (a.type === "reset" ? newInvestigation(a.revision, a.at) : applyEvent(s, a.e));
@@ -46,7 +38,9 @@ export function App() {
   const [view, setView] = useState<View>({ name: "boot" });
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [cases, setCases] = useState<Record<string, StoredCase>>({});
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [summaries, setSummaries] = useState<Record<string, CaseSummary>>({});
+  const [historyState, setHistoryState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [ready, setReady] = useState<ReadyState>({ kind: "loading" });
   const [captured, setCaptured] = useState<Captured | null>(null);
   const [active, setActive] = useState<Active | null>(null);
@@ -63,14 +57,45 @@ export function App() {
   // ---------- boot ----------
   useEffect(() => {
     void (async () => {
-      const [settings, p, c] = await Promise.all([loadSettings(), loadProfile(), loadCases()]);
+      const [settings, p, h] = await Promise.all([loadSettings(), loadProfile(), loadHistory()]);
       setApiBase(settings.apiBase);
       setProfile(p);
-      setCases(c);
+      setHistory(h);
       setView(p ? { name: "ready" } : { name: "profile", firstRun: true });
     })();
     return () => unsub.current?.();
   }, []);
+
+  // ---------- history: summaries come from the server; cases it can't find are dropped silently ----------
+  const refreshSummaries = useCallback(
+    async (list: HistoryEntry[]) => {
+      if (!list.length) {
+        setSummaries({});
+        setHistoryState({ loading: false, error: null });
+        return;
+      }
+      setHistoryState((s) => ({ ...s, loading: true }));
+      try {
+        const found = await api.getSummaries(list.map((e) => e.caseId));
+        setSummaries(Object.fromEntries(found.map((s) => [s.id, s])));
+        const kept = keepFound(list, found);
+        if (kept.length !== list.length) setHistory(await saveHistory(kept));
+        setHistoryState({ loading: false, error: null });
+      } catch (err) {
+        // Server unreachable: keep local history as it is.
+        setHistoryState({ loading: false, error: message(err) });
+      }
+    },
+    [api],
+  );
+
+  // Refresh when the History or Case ready screen opens (or the server changes), not on every local history edit.
+  const wantsSummaries = view.name === "history" || view.name === "ready";
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  useEffect(() => {
+    if (wantsSummaries) void refreshSummaries(historyRef.current);
+  }, [wantsSummaries, refreshSummaries]);
 
   // ---------- capture the active tab while on Case ready ----------
   const refreshCapture = useCallback(async () => {
@@ -110,23 +135,16 @@ export function App() {
 
   useEffect(() => {
     if (view.name !== "investigating" || !inv.done || !active) return;
-    const key = `${active.stored.id}:${inv.revision}`;
+    const key = `${active.caseId}:${inv.revision}`;
     if (finished.current === key) return;
     finished.current = key;
     unsub.current?.();
     unsub.current = null;
     void (async () => {
       try {
-        const detail = await api.getCase(active.stored.id);
+        const detail = await api.getCase(active.caseId);
         const diff = inv.revision > 1 ? inv.diff : null;
-        const stored =
-          (await updateCase(active.stored.id, {
-            revision: detail.revision,
-            verdictLabel: detail.verdict?.label,
-            diffs: diff ? { [String(diff.toRevision)]: diff } : {},
-          })) ?? active.stored;
-        setCases(await loadCases());
-        setActive({ stored, detail });
+        setActive({ ...active, detail });
         setView(diff ? { name: "changed", diff } : { name: "file" });
       } catch (err) {
         setError(message(err));
@@ -151,22 +169,8 @@ export function App() {
         screenshots: now.screenshot ? [now.screenshot] : [],
       });
       const p = now.preview;
-      const stored: StoredCase = {
-        id: caseId,
-        number: await takeCaseNumber(),
-        pageUrl: p.pageUrl,
-        title: p.title,
-        priceGBP: p.priceGBP,
-        platform: p.platform,
-        photoCount: p.photoCount,
-        thumbnail: p.thumbnail,
-        createdAt: new Date().toISOString(),
-        revision: 1,
-        diffs: {},
-      };
-      await saveCase(stored);
-      setCases(await loadCases());
-      setActive({ stored, detail: null });
+      setHistory(await rememberCase({ caseId, createdAt: new Date().toISOString() }));
+      setActive({ caseId, title: p.title, priceGBP: p.priceGBP, detail: null });
       follow(caseId, 1);
       setView({ name: "investigating" });
     } catch (err) {
@@ -176,23 +180,34 @@ export function App() {
     }
   };
 
-  const openCase = async (stored: StoredCase) => {
+  const openCase = async (caseId: string) => {
     setBusy(true);
     setError(null);
     try {
-      const detail = await api.getCase(stored.id);
-      setActive({ stored, detail });
+      const detail = await api.getCase(caseId);
+      const s = summaries[caseId];
+      setActive({ caseId, title: detail.listingFacts?.title ?? s?.title ?? "Untitled listing", priceGBP: detail.listingFacts?.priceGBP ?? s?.priceGBP ?? null, detail });
       if (detail.status === "investigating") {
-        follow(stored.id, detail.revision);
+        follow(caseId, detail.revision);
         setView({ name: "investigating" });
       } else {
         setView({ name: "file" });
       }
     } catch (err) {
-      setError(message(err));
+      if (err instanceof ApiError && err.status === 404) {
+        // The server no longer has this case: drop it from local history silently.
+        setHistory(await forgetCase(caseId));
+      } else {
+        setError(message(err));
+        setHistoryState((h) => ({ ...h, error: message(err) }));
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const removeFromHistory = async (caseId: string) => {
+    setHistory(await forgetCase(caseId));
   };
 
   const captureForEvidence = async (): Promise<string | null> => {
@@ -212,13 +227,13 @@ export function App() {
     setBusy(true);
     setError(null);
     try {
-      const { revision } = await api.reopen(active.stored.id, {
+      const { revision } = await api.reopen(active.caseId, {
         sellerReply: d.sellerReply,
         screenshots: d.files,
         ...(d.tabTitle && evidenceCapture.current ? { capture: evidenceCapture.current } : {}),
       });
       evidenceCapture.current = null;
-      follow(active.stored.id, revision);
+      follow(active.caseId, revision);
       setView({ name: "investigating" });
     } catch (err) {
       setError(err instanceof ApiError && err.status === 409 ? "This case is still being investigated." : message(err));
@@ -247,6 +262,18 @@ export function App() {
     setError(null);
     setView({ name: "profile", firstRun: false });
   };
+  const toHistory = () => {
+    unsub.current?.();
+    unsub.current = null;
+    setError(null);
+    setView({ name: "history" });
+  };
+  const mainNav = (
+    <>
+      <NavLink onClick={toHistory}>History</NavLink>
+      <NavLink onClick={toProfile}>Profile</NavLink>
+    </>
+  );
 
   let nav = null;
   let body = null;
@@ -259,8 +286,8 @@ export function App() {
       body = <ProfileScreen profile={profile} apiBase={apiBase} firstRun={view.firstRun} onSave={saveAll} />;
       break;
     case "ready": {
-      const onFile = ready.kind === "listing" ? caseForUrl(cases, ready.preview.pageUrl) : null;
-      nav = <NavLink onClick={toProfile}>Profile</NavLink>;
+      const onFile = ready.kind === "listing" ? caseForUrl(history, summaries, ready.preview.pageUrl) : null;
+      nav = mainNav;
       body = profile && (
         <CaseReady
           key={ready.kind === "listing" ? ready.preview.pageUrl : ready.kind}
@@ -270,7 +297,7 @@ export function App() {
           busy={busy}
           error={error}
           onInvestigate={investigate}
-          onOpenCase={openCase}
+          onOpenCase={(c) => void openCase(c.id)}
           onEditProfile={toProfile}
           onAllow={async (origin) => {
             if (await requestSiteAccess(origin)) void refreshCapture();
@@ -279,33 +306,55 @@ export function App() {
       );
       break;
     }
+    case "history":
+      nav = (
+        <>
+          <NavLink onClick={goNew}>New case</NavLink>
+          <NavLink onClick={toProfile}>Profile</NavLink>
+        </>
+      );
+      body = (
+        <History
+          rows={historyRows(history, summaries)}
+          loading={historyState.loading}
+          error={historyState.error ?? error}
+          onOpen={(id) => void openCase(id)}
+          onRemove={(id) => void removeFromHistory(id)}
+        />
+      );
+      break;
     case "investigating":
       nav = <NavLink onClick={goNew}>New case</NavLink>;
       body = active && (
         <Investigating
-          number={active.stored.number}
-          title={active.stored.title}
+          caseId={active.caseId}
+          title={active.title}
           inv={inv}
           lost={lost}
-          onRetry={() => follow(active.stored.id, inv.revision)}
+          onRetry={() => follow(active.caseId, inv.revision)}
         />
       );
       break;
     case "file":
-      nav = <NavLink onClick={goNew}>New case</NavLink>;
+      nav = (
+        <>
+          <NavLink onClick={goNew}>New case</NavLink>
+          <NavLink onClick={toHistory}>History</NavLink>
+        </>
+      );
       body = active?.detail && (
         <CaseFile
-          key={`${active.stored.id}:${active.detail.revision}`}
-          number={active.stored.number}
+          key={`${active.caseId}:${active.detail.revision}`}
+          caseId={active.caseId}
           detail={active.detail}
-          listing={{ title: active.stored.title, priceGBP: active.stored.priceGBP }}
+          listing={{ title: active.title, priceGBP: active.priceGBP }}
           addEvidence={{ busy, error, onCaptureTab: captureForEvidence, onSubmit: submitEvidence }}
         />
       );
       break;
     case "changed":
       nav = <NavLink onClick={goNew}>New case</NavLink>;
-      body = active && <WhatChanged number={active.stored.number} diff={view.diff} onOpenFile={() => setView({ name: "file" })} />;
+      body = active && <WhatChanged caseId={active.caseId} diff={view.diff} onOpenFile={() => setView({ name: "file" })} />;
       break;
   }
 

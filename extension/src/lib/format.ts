@@ -28,11 +28,6 @@ export function gbp(n: number): string {
   return `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
 }
 
-/** Local case numbers are shown as "Case 0042". */
-export function caseNumber(n: number): string {
-  return `Case ${String(n).padStart(4, "0")}`;
-}
-
 export function firstSentence(s: string): string {
   const m = s.match(/^.*?[.!?](?=\s|$)/);
   return (m ? m[0] : s).trim();

@@ -1,29 +1,17 @@
-import { ProfileSchema, type CaseDiff, type Platform, type Profile, type VerdictLabel } from "@/schemas/domain";
+import { ProfileSchema, type Profile } from "@/schemas/domain";
+import { addEntry, normaliseHistory, removeEntry, type HistoryEntry } from "../lib/history";
 
 export const DEFAULT_API_BASE = "http://localhost:3000";
 
 export type Settings = { apiBase: string };
 
-export type StoredCase = {
-  id: string;
-  number: number;
-  pageUrl: string;
-  title: string;
-  priceGBP: number | null;
-  platform: Platform;
-  photoCount: number;
-  thumbnail: string | null;
-  createdAt: string;
-  revision: number;
-  verdictLabel?: VerdictLabel;
-  /** Diffs by target revision, so "What changed" can be reopened later. */
-  diffs: Record<string, CaseDiff>;
-};
-
 type Shape = {
   profile?: unknown;
   settings?: Settings;
-  cases?: Record<string, StoredCase>;
+  /** { caseId, createdAt } only, newest first, max 50. */
+  history?: HistoryEntry[];
+  /** Older versions only: migrated into `history`, then removed. */
+  cases?: unknown;
   nextCaseNumber?: number;
 };
 
@@ -58,45 +46,26 @@ export async function saveSettings(s: Settings): Promise<void> {
   await set("settings", { apiBase: s.apiBase.replace(/\/+$/, "") || DEFAULT_API_BASE });
 }
 
-export async function loadCases(): Promise<Record<string, StoredCase>> {
-  return (await get("cases")) ?? {};
-}
-
-export async function saveCase(c: StoredCase): Promise<void> {
-  const all = await loadCases();
-  all[c.id] = c;
-  await set("cases", all);
-}
-
-export async function updateCase(id: string, patch: Partial<StoredCase>): Promise<StoredCase | null> {
-  const all = await loadCases();
-  if (!all[id]) return null;
-  all[id] = { ...all[id], ...patch, diffs: { ...all[id].diffs, ...(patch.diffs ?? {}) } };
-  await set("cases", all);
-  return all[id];
-}
-
-export async function takeCaseNumber(): Promise<number> {
-  const n = (await get("nextCaseNumber")) ?? 1;
-  await set("nextCaseNumber", n + 1);
-  return n;
-}
-
-/** The most recent case opened for this listing URL (ignoring query and hash). */
-export function caseForUrl(cases: Record<string, StoredCase>, url: string): StoredCase | null {
-  const key = normaliseUrl(url);
-  return (
-    Object.values(cases)
-      .filter((c) => normaliseUrl(c.pageUrl) === key)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
-  );
-}
-
-function normaliseUrl(u: string): string {
-  try {
-    const x = new URL(u);
-    return `${x.origin}${x.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return u;
+export async function loadHistory(): Promise<HistoryEntry[]> {
+  const r = await chrome.storage.local.get(["history", "cases"]);
+  const list = normaliseHistory(r.history, r.cases);
+  if (r.cases !== undefined) {
+    await set("history", list);
+    await chrome.storage.local.remove(["cases", "nextCaseNumber"]);
   }
+  return list;
+}
+
+export async function saveHistory(list: HistoryEntry[]): Promise<HistoryEntry[]> {
+  await set("history", list);
+  return list;
+}
+
+export async function rememberCase(entry: HistoryEntry): Promise<HistoryEntry[]> {
+  return saveHistory(addEntry(await loadHistory(), entry));
+}
+
+/** Removes the entry from this device only; nothing is deleted on the server. */
+export async function forgetCase(caseId: string): Promise<HistoryEntry[]> {
+  return saveHistory(removeEntry(await loadHistory(), caseId));
 }

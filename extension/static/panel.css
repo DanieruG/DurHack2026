@@ -296,6 +296,30 @@ p, h1, h2, ol, ul, dl, dd, figure { margin: 0; padding: 0; }
 .ch-move { display: flex; align-items: center; gap: 7px; font-size: 14px; }
 .arrow { color: var(--muted); margin: 0 4px; }
 
+/* ---------- history ---------- */
+.history { list-style: none; margin-top: 22px; border-top: 1px solid var(--line); }
+.history-empty { margin-top: 22px; }
+.h-item { border-bottom: 1px solid var(--line); padding: 12px 0 8px; }
+.h-open {
+  width: 100%; display: grid; grid-template-columns: 64px 1fr; gap: 14px; align-items: start;
+  background: none; border: 0; padding: 0; text-align: left; cursor: pointer; color: inherit; font: inherit;
+}
+.h-open:hover .h-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--mid); }
+.h-text { display: grid; gap: 4px; min-width: 0; }
+.h-title { font-size: 15.5px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-meta { font-size: 13px; color: var(--muted); }
+.h-stamps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
+.stamp { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 6px; box-shadow: inset 0 0 0 1px var(--mid); }
+.stamp.t-block-light { background: var(--light); color: var(--charcoal); box-shadow: none; padding: 3px 6px; }
+.stamp.t-block-red { background: var(--red); color: var(--light); box-shadow: none; padding: 3px 6px; }
+.stamp.t-frame-red { box-shadow: inset 0 0 0 1.5px var(--red); padding: 3px 6px; }
+.stamp.t-bar-light, .stamp.t-broken-light { box-shadow: inset 3px 0 0 var(--light); padding-left: 9px; }
+.stamp.t-hollow, .stamp.t-pending { color: var(--mid); }
+.stamp-note { color: var(--muted); font-size: 10.5px; }
+.h-actions { display: flex; gap: 18px; margin: 6px 0 0 78px; }
+.h-actions .btn-text { font-size: 12.5px; color: var(--muted); text-decoration: none; }
+.h-actions .btn-text:hover { color: var(--text); }
+
 @media (prefers-reduced-motion: reduce) {
   .log-line { animation: none; }
   .seg { transition: none; }

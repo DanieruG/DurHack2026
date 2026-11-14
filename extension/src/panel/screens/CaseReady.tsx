@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { Profile } from "@/schemas/domain";
 import type { ListingPreview } from "../../lib/capture";
-import { caseNumber, gbp, PLATFORM_NAMES, WEAR_NAMES } from "../../lib/format";
+import type { CaseSummary } from "@/schemas/domain";
+import { gbp, PLATFORM_NAMES, WEAR_NAMES } from "../../lib/format";
+import { caseLabel } from "../../lib/history";
 import { VERDICTS } from "../../lib/verdicts";
-import type { StoredCase } from "../../chrome/storage";
 import { Button, Label, Notice } from "../ui";
 
 export type ReadyState =
@@ -38,12 +39,12 @@ export function relevantSizes(profile: Profile, title: string): string {
 export function CaseReady(props: {
   state: ReadyState;
   profile: Profile;
-  onFile: StoredCase | null;
+  onFile: CaseSummary | null;
   busy: boolean;
   error: string | null;
   defaultNote?: string;
   onInvestigate: (note: string) => void;
-  onOpenCase: (c: StoredCase) => void;
+  onOpenCase: (c: CaseSummary) => void;
   onEditProfile: () => void;
   onAllow: (origin: string) => void;
 }) {
@@ -88,7 +89,7 @@ export function CaseReady(props: {
 
       {props.onFile && (
         <button type="button" className="on-file" onClick={() => props.onOpenCase(props.onFile!)}>
-          <span className="mono">{caseNumber(props.onFile.number)}</span>
+          <span className="mono">{caseLabel(props.onFile.id)}</span>
           <span>{props.onFile.verdictLabel ? VERDICTS[props.onFile.verdictLabel].title : "In progress"}</span>
           <span className="on-file-go">Open</span>
         </button>
