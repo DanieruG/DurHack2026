@@ -107,6 +107,14 @@ export function conditionStatus(findings: ConditionFinding[], contradictions: st
   return status;
 }
 
+export const SOLE_NOT_VISIBLE_CONFIDENCE_CAP = 0.5;
+const SOLE_AREA = /\b(out ?soles?|soles?|tread|heels?|heel (counter|tab|wear)|bottoms?|underside)\b/i;
+
+/** The not-visible areas that are the outsole or heel. */
+export function soleAreas(notVisible: string[]): string[] {
+  return notVisible.filter((a) => SOLE_AREA.test(a) && !/\binsoles?\b/i.test(a));
+}
+
 export function describeFinding(f: ConditionFinding): string {
   const possible = f.confidence < POSSIBLE_BELOW;
   return `${possible ? "Possible" : capitalise(f.severity)} ${LABEL_WORDS[f.label]} (photo ${f.photoIndex + 1})`;
@@ -152,14 +160,17 @@ export function finaliseCondition(args: {
 
   const avgConf = findings.length ? findings.reduce((s, f) => s + f.confidence, 0) / findings.length : 0.75;
   const coverage = Math.min(1, 0.45 + 0.1 * args.photosChecked);
+  // Trainers wear out at the sole and heel first: if no photo shows them, condition can't be more than a guess.
+  const soleNotVisible = soleAreas(args.notVisible);
+  const cap = soleNotVisible.length ? SOLE_NOT_VISIBLE_CONFIDENCE_CAP : 0.9;
   return {
     check: "condition",
     status,
     summary: summary.replace(/\.\./g, "."),
     evidence,
-    confidence: round2(clamp01(Math.min(avgConf, coverage, 0.9))),
+    confidence: round2(clamp01(Math.min(avgConf, coverage, cap))),
     geminiFeatures: ["vision", "object_detection", "structured_output"],
-    details: { findings, notVisible: args.notVisible, contradictions, photosChecked: args.photosChecked },
+    details: { findings, notVisible: args.notVisible, soleNotVisible, contradictions, photosChecked: args.photosChecked },
   };
 }
 
@@ -214,7 +225,7 @@ export async function checkCondition(args: {
 }): Promise<CheckResult> {
   if (args.images.length === 0) {
     return unknownCheck("condition", "There are no usable photos, so I can't check the condition.", {
-      details: { findings: [], notVisible: ["all areas"], contradictions: [], photosChecked: 0 },
+      details: { findings: [], notVisible: ["all areas"], soleNotVisible: ["outsole", "heel"], contradictions: [], photosChecked: 0 },
     });
   }
   const { data } = await generateStructured(args.gemini, ConditionWireSchema, {

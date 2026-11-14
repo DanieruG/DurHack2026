@@ -87,7 +87,18 @@ export function computeGaps(args: { checks: CheckResult[]; leads: Lead[]; label:
     if (g) gaps.set(lead.relatesTo, { ...g, id: `gap_lead_${lead.id}`, ask: `${g.ask} Context: ${lead.reason}` });
   }
   const condition = args.checks.find((c) => c.check === "condition");
-  const notVisible = ((condition?.details as Details)?.notVisible as string[] | undefined) ?? [];
+  const soleHidden = ((condition?.details as Details)?.soleNotVisible as string[] | undefined) ?? [];
+  const notVisible = (((condition?.details as Details)?.notVisible as string[] | undefined) ?? []).filter((a) => !soleHidden.includes(a));
+  // Trainers: always ask for the outsole/heel when no photo shows them, whatever the verdict.
+  const soleGap: Gap | null = soleHidden.length
+    ? {
+        id: "gap_sole_photos",
+        check: "condition",
+        priority: PRIORITY.condition - 0.5,
+        ask: `Ask for clear photos of the ${soleHidden.slice(0, 3).join(", ")}: the listing doesn't show them, and that's where trainers wear first.`,
+        fallback: "Could you share clear photos of the soles and heels, please?",
+      }
+    : null;
   if (notVisible.length && !gaps.has("condition") && condition?.status !== "fail" && args.label !== "wrong_fit" && args.label !== "not_enough_evidence") {
     const areas = notVisible.slice(0, 3).join(", ");
     gaps.set("notVisible", {
@@ -98,10 +109,13 @@ export function computeGaps(args: { checks: CheckResult[]; leads: Lead[]; label:
       fallback: `Could you share photos of the ${areas}?`,
     });
   }
-  return [...gaps.values()]
-    .filter((g) => !args.answered.includes(g.check))
-    .sort((a, b) => a.priority - b.priority)
-    .slice(0, MAX_QUESTIONS);
+  if (soleGap && /\bsoles?\b/i.test(gaps.get("condition")?.ask ?? "")) gaps.delete("condition"); // same question twice
+  const ordered = [...gaps.values()].filter((g) => !args.answered.includes(g.check));
+  if (soleGap) ordered.push(soleGap); // not dropped by `answered`: it clears only when new photos show the sole
+  ordered.sort((a, b) => a.priority - b.priority);
+  const top = ordered.slice(0, MAX_QUESTIONS);
+  if (soleGap && !top.includes(soleGap)) top[top.length - 1] = soleGap; // always asked
+  return top;
 }
 
 const BEFORE_YOU_PAY = [

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { conditionStatus, finaliseCondition, gradeFromClaims, wireToFindings } from "@/pipeline/checks/condition";
 import { comfortFromPoints, comfortFromSnippets, comfortResult } from "@/pipeline/checks/comfort";
+import { computeGaps } from "@/pipeline/nextMoves";
 import { resolveSegment, supportedSegments } from "@/gemini/groundedSearch";
 import { classifySource, groundingSources, sourceDomain } from "@/gemini/grounding";
 import type { ConditionFinding, ListingFacts, UserNeeds } from "@/schemas/domain";
@@ -121,5 +122,41 @@ describe("comfort structuring: sentence references", () => {
     expect(resolveSegment(segs, "Comfortable all day, says RunRepeat.")?.id).toBe("S1");
     expect(resolveSegment(segs, "S1: Comfortable all day, says RunRepeat. (sources: runrepeat.com, runnersworld.com)")?.id).toBe("S1");
     expect(resolveSegment(segs, "Something the search never said.")).toBeUndefined();
+  });
+});
+
+describe("condition: outsole or heel not visible", () => {
+  const facts = { platform: "ebay" as const, photoCount: 4, conditionClaims: ["Pre-owned - Good"], evidence: [] };
+  const needs = { sizes: [], priorities: [], wearTolerance: "light" as const, extraPriorities: [], assumptions: [] };
+  const run = (notVisible: string[]) => finaliseCondition({ findings: [], notVisible, modelContradictions: [], facts, needs, photosChecked: 4 });
+
+  it("caps confidence at 0.5 and records the hidden sole areas", () => {
+    const r = run(["outsole", "heel tread", "insole"]);
+    expect(r.confidence).toBe(0.5);
+    expect(r.details).toMatchObject({ soleNotVisible: ["outsole", "heel tread"] });
+    expect(run(["insole", "size label"]).confidence).toBeGreaterThan(0.5); // insoles don't count
+  });
+
+  it("always generates a seller question for those photos, whatever the verdict", () => {
+    const condition = run(["outsole", "heel tread"]);
+    for (const label of ["hidden_gem", "proceed_with_caution", "wrong_fit", "not_enough_evidence"] as const) {
+      const gaps = computeGaps({ checks: [condition], leads: [], label, answered: ["condition"] });
+      expect(gaps.map((g) => g.id), label).toContain("gap_sole_photos");
+      expect(gaps.find((g) => g.id === "gap_sole_photos")!.ask).toMatch(/outsole, heel tread/);
+    }
+    // Still asked when three other questions are open.
+    const busy = computeGaps({
+      checks: [
+        { ...condition },
+        { check: "identify", status: "warn", summary: "", evidence: [], confidence: 0.5, geminiFeatures: [] },
+        { check: "fit", status: "unknown", summary: "", evidence: [], confidence: 0, geminiFeatures: [], details: { listed: null, match: null } },
+        { check: "price", status: "warn", summary: "", evidence: [], confidence: 0.5, geminiFeatures: [], details: { position: "suspiciously_low" } },
+      ],
+      leads: [],
+      label: "proceed_with_caution",
+      answered: [],
+    });
+    expect(busy).toHaveLength(3);
+    expect(busy.map((g) => g.id)).toContain("gap_sole_photos");
   });
 });
