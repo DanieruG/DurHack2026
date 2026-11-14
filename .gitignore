@@ -9,3 +9,4 @@ generated/
 coverage/
 eval/report.md
 .neon
+extension/dist/

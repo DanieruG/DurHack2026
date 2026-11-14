@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Detective Sleuth",
+  "short_name": "Sleuth",
+  "description": "A sceptical second opinion on a second-hand listing before you buy.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2cYIGBZpcmZZb4E4MQxhEsPaAmyTHUq/i70pZPGZLHlLplNuesatFZwSO9BEkjeQf0VjPgP1tXXTHKZW36Jji2EajaqLKf4IMnJD8Ruznf0F2IAOpYESH5r43LKrdINoFfyjndUhly9a/r2G/6exjQ1JwObHHFHVWZYgdid9D5/X6fQmdFnf6gC/JbJgIZGrVDnzV6jPWdlWBVjRmzd8LfywZYZYzxDSTzbwSFGseELLFPqcalV0lF5RVgrBXaNEpUgrgXpodQr/EO9wegAwlv+9BF0/co6Yf/cRqxg5Z0/MHHTQFKL2If2YpPk0OmU5lovKPW1Qyl0gAGCseSj9gQIDAQAB",
+  "action": { "default_title": "Open Sleuth" },
+  "side_panel": { "default_path": "panel.html" },
+  "background": { "service_worker": "background.js" },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "permissions": ["sidePanel", "storage", "scripting", "activeTab", "tabs"],
+  "host_permissions": [
+    "https://www.vinted.co.uk/*",
+    "https://www.vinted.com/*",
+    "https://www.ebay.co.uk/*",
+    "https://www.ebay.com/*",
+    "https://www.facebook.com/*",
+    "https://www.depop.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*"]
+}
