@@ -38,6 +38,27 @@ npm run db:migrate:https                                   # apply pending migra
 `db:migrate:https` records each migration in `_prisma_migrations` with Prisma's checksum, so `prisma migrate deploy/status` agree
 afterwards. The seed script also runs over 443.
 
+## Chrome extension (side panel)
+
+`extension/` is the side panel client. It imports the Zod schemas from `schemas/` and validates every response and SSE event against
+them, so a contract change shows up as a type error in the extension.
+
+```bash
+npm run ext:build              # or ext:watch; output in extension/dist
+```
+
+1. In Chrome, open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and select `extension/dist`.
+2. The manifest `key` fixes the ID at `appjiengjbolgmppilkllgmnmoogpiej`. Put `chrome-extension://appjiengjbolgmppilkllgmnmoogpiej` in
+   `ALLOWED_EXTENSION_ORIGINS`, or the API answers `403`.
+3. Click the toolbar icon to open the panel. The server address (default `http://localhost:3000`) is under **Profile → Server**.
+
+Flow: Profile (stored in `chrome.storage.local`) → Case ready (reads the active tab only via `chrome.scripting`) → `POST /api/cases` →
+live log from `/stream` → `GET /api/cases/:id` for the case file → **Add evidence** posts to `/reopen` and shows what changed from the `diff` event.
+Vinted, eBay, Facebook and Depop are pre-permitted. Other sites ask for access on first use.
+
+`extension/dist/preview.html` shows the five screens and all six verdict treatments side by side, rendered from fixture data with
+the shipping components. It opens straight from disk.
+
 ## Scripts
 
 | Script | What it does |
