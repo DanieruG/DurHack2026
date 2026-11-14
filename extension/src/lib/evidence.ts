@@ -1,4 +1,5 @@
-import type { CheckResult, ConditionFinding, DefectLabel, Evidence, SampleStats } from "@/schemas/domain";
+import type { CaseDetail } from "@/schemas/api";
+import type { CheckResult, ConditionFinding, DefectLabel, Evidence, Lead, SampleStats } from "@/schemas/domain";
 import { domainOf, gbp, shortDate } from "./format";
 
 const DEFECT_WORDS: Record<DefectLabel, string> = {
@@ -123,4 +124,34 @@ export function evidenceLines(check: CheckResult): string[] {
   const lines = check.evidence.filter((e) => e.kind !== "source").map((e) => (e.quote ? `${e.label}: “${e.quote}”` : e.label));
   if (d.reviewSizingNote) lines.push(d.reviewSizingNote);
   return lines;
+}
+
+// ---------- leads followed ----------
+
+const LEAD_ACTIONS: Record<Lead["type"], string> = {
+  deeper_price_comparison: "Compared the price more carefully",
+  recheck_identification: "Took a second look at the model",
+  recheck_condition_photo: "Looked at a photo again",
+  flag_for_seller: "Noted a question for the seller",
+};
+
+export type LeadsView = {
+  items: { id: string; action: string; reason: string; outcome: string; state: "done" | "problem" }[];
+  /** One line: why leads were skipped, or that nothing needed following up. */
+  note: string | null;
+};
+
+/** Null when no leads were considered (the section is hidden). */
+export function leadsView(detail: Pick<CaseDetail, "leads" | "leadsReport">): LeadsView | null {
+  const report = detail.leadsReport ?? { considered: detail.leads.length > 0 };
+  if (!report.considered && !detail.leads.length) return null;
+  const items = detail.leads.map((l) => ({
+    id: l.id,
+    action: LEAD_ACTIONS[l.type],
+    reason: l.reason,
+    outcome: l.outcome ?? (l.status === "failed" ? "Couldn't complete this." : l.status === "skipped" ? "Skipped." : "Done."),
+    state: l.status === "failed" ? ("problem" as const) : ("done" as const),
+  }));
+  const note = report.skipped ?? (items.length ? null : "Nothing needed following up.");
+  return { items, note };
 }

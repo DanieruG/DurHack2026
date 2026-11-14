@@ -45,6 +45,7 @@ describe("schemas round-trip fixtures", () => {
       check_done: check,
       lead_started: { id: "lead_1", type: "deeper_price_comparison", reason: "r", status: "pending" },
       lead_done: { id: "lead_1", type: "deeper_price_comparison", reason: "r", status: "done", outcome: "o" },
+      leads_skipped: { reason: "Skipped: the review search was unavailable." },
       verdict,
       next_moves: [],
       case_reopened: { caseId: "c1", revision: 2 },

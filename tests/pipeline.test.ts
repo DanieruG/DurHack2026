@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCase } from "@/pipeline";
+import { caseDetail } from "@/pipeline/views";
 import { startReopen } from "@/pipeline/reopen";
 import { IDENTIFY_SYSTEM } from "@/pipeline/identify";
 import { CaseDiffSchema, CheckResultSchema, SseEventSchemas, VerdictSchema } from "@/schemas";
@@ -50,7 +51,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
 
     const stored = (await deps.store.getCase(caseId))!;
     expect(stored).toMatchObject({ status: "closed", platform: "vinted", pageUrl: "https://www.vinted.co.uk/items/123-nike-pegasus", revision: 1 });
-    expect(stored.history).toEqual([{ revision: 1, verdictLabel: "hidden_gem", at: "2026-11-14T12:00:00.000Z" }]);
+    expect(stored.history).toEqual([{ revision: 1, verdictLabel: "hidden_gem", at: "2026-11-14T12:00:00.000Z", leads: { considered: false } }]);
     expect((await deps.store.getInputs(caseId, { kinds: ["image"] })).length).toBe(2);
   });
 
@@ -181,10 +182,25 @@ describe("investigation pipeline (mocked Gemini)", () => {
       reference: { ...ref, reviews: [] }, // no saved reviews to fall back on
       webSearch: { fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }) }, // SerpApi is down
     });
-    const { events } = await investigate(deps);
+    const { caseId, events } = await investigate(deps);
     const checks = checksFrom(events);
     expect(checks.comfort).toMatchObject({ status: "unknown", details: { searchFailed: true } });
     expect(stageCalls(deps, "leads")).toBe(0);
+    // ...and says why, in the stream and in the case file.
+    expect(events.find((e) => e.event === "leads_skipped")?.data).toEqual({ reason: "Skipped: the review search was unavailable." });
+    const detail = await caseDetail(deps, (await deps.store.getCase(caseId))!, "http://x.test");
+    expect(detail.leadsReport).toEqual({ considered: true, skipped: "Skipped: the review search was unavailable." });
+  });
+
+  it("leads: hidden when everything is clear; a missing brand is a stated skip", async () => {
+    const clear = makeDeps();
+    const a = await investigate(clear);
+    expect(a.events.some((e) => e.event === "leads_skipped")).toBe(false);
+    expect((await caseDetail(clear, (await clear.store.getCase(a.caseId))!, "http://x.test")).leadsReport).toEqual({ considered: false });
+
+    const noBrand = makeDeps({ handlers: { identify: () => json({ brand: null, brandConfidence: 0, modelName: null, catalogueModelId: null, confidence: 0.1, reasons: "Unclear", evidence: [] }) } });
+    const b = await investigate(noBrand);
+    expect(b.events.find((e) => e.event === "leads_skipped")?.data).toEqual({ reason: expect.stringMatching(/^Skipped: the brand couldn't be identified/) });
   });
 
   it("identify is told to use only this listing, never other listings on the page", () => {
@@ -251,6 +267,11 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(deps.shoppingRequests).toEqual(["Nike Pegasus 40"]);
     expect(stageCalls(deps, "identify")).toBe(0); // identified inside the merged extract call; the recheck lead (3rd) wasn't executed
     expect((await deps.store.getLeads(caseId, 1))).toHaveLength(2);
+    // Persisted and returned by GET /api/cases/:id, with the per-revision report.
+    const detail = await caseDetail(deps, (await deps.store.getCase(caseId))!, "http://x.test");
+    expect(detail.leads.map((l) => [l.type, l.status, typeof l.outcome])).toEqual([["flag_for_seller", "done", "string"], ["deeper_price_comparison", "done", "string"]]);
+    expect(detail.leadsReport).toEqual({ considered: true });
+    expect(started.map((e) => (e.data as { id: string }).id)).toEqual(["lead_1", "lead_2"]);
     const moves = (await deps.store.getCase(caseId))!.nextMoves as NextMove[];
     expect(moves.some((m) => m.kind === "ask_seller" && m.relatesTo.includes("comfort"))).toBe(true);
     expect(moves.filter((m) => m.kind === "ask_seller").length).toBeLessThanOrEqual(3);

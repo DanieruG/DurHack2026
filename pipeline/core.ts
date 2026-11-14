@@ -1,4 +1,4 @@
-import type { CheckName, CheckResult, IdentifyResult, Lead, Verdict } from "@/schemas/domain";
+import type { CheckName, CheckResult, IdentifyResult, Lead, LeadsReport, Verdict } from "@/schemas/domain";
 import { withCallLog, type CallLogEntry } from "@/gemini/client";
 import type { CaseRow } from "@/lib/store";
 import type { Deps } from "./deps";
@@ -55,6 +55,8 @@ export async function finalise(
   args: {
     checks: CheckResult[];
     leads: Lead[];
+    /** Whether leads were considered for this revision and, if skipped, why. Defaults to "considered" when there are leads. */
+    leadsReport?: LeadsReport;
     row: CaseRow;
     inputHashImages: CaseImage[];
     answered?: CheckName[];
@@ -87,7 +89,7 @@ export async function finalise(
     identify,
     verdict,
     nextMoves,
-    history: [...args.row.history.filter((h) => h.revision !== revision), { revision, verdictLabel: verdict.label, at: deps.now().toISOString() }],
+    history: [...args.row.history.filter((h) => h.revision !== revision), { revision, verdictLabel: verdict.label, at: deps.now().toISOString(), leads: args.leadsReport ?? { considered: args.leads.length > 0 } }],
     inputHash: inputHashFor(args.inputHashImages, ctx.pageText, ctx.needs, deps.config.pipelineVersion),
     ...(args.answered ? { answered: args.answered } : {}),
   });

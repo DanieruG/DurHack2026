@@ -18,6 +18,8 @@ export type Investigation = {
   /** Checks this revision is expected to (re)run; drives the progress strip. */
   expected: CheckName[];
   leads: Lead[];
+  /** Why follow-up leads were skipped, when they were. */
+  leadsSkipped: string | null;
   verdict: Verdict | null;
   nextMoves: NextMove[];
   diff: CaseDiff | null;
@@ -37,6 +39,7 @@ export function newInvestigation(revision: number, at: number): Investigation {
     checks: {},
     expected: revision <= 1 ? [...ALL_CHECKS] : [],
     leads: [],
+    leadsSkipped: null,
     verdict: null,
     nextMoves: [],
     diff: null,
@@ -191,6 +194,14 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
           kind: "followup",
           at: e.at,
         }),
+      };
+    }
+    case "leads_skipped": {
+      const { reason } = e.data as SseEventData<"leads_skipped">;
+      return {
+        ...s,
+        leadsSkipped: reason,
+        log: upsert(s.log, { key: "leads:skipped", text: "No follow-ups", note: reason.replace(/^Skipped:\s*/, ""), state: "done", kind: "followup", at: e.at }),
       };
     }
     case "capture_warning": {

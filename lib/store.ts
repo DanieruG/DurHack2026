@@ -5,6 +5,7 @@ import type {
   CheckResult,
   IdentifyResult,
   Lead,
+  LeadsReport,
   ListingFacts,
   NextMove,
   Platform,
@@ -14,7 +15,7 @@ import type {
 } from "@/schemas/domain";
 import type { ReferenceData } from "./seedData";
 
-export type HistoryEntry = { revision: number; verdictLabel: VerdictLabel; at: string };
+export type HistoryEntry = { revision: number; verdictLabel: VerdictLabel; at: string; leads?: LeadsReport };
 
 export type CaseRow = {
   id: string;

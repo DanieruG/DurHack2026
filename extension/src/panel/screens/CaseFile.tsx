@@ -3,7 +3,7 @@ import type { CaseDetail } from "@/schemas/api";
 import type { CheckName, CheckResult } from "@/schemas/domain";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
-import { conditionView, evidenceLines, priceView, sourceRefs, type SourceRef } from "../../lib/evidence";
+import { conditionView, evidenceLines, leadsView, priceView, sourceRefs, type SourceRef } from "../../lib/evidence";
 import { Button, CopyButton, Label, Notice, StatusMark, Verdict } from "../ui";
 
 const ORDER: CheckName[] = ["condition", "fit", "comfort", "price"];
@@ -42,6 +42,7 @@ export function CaseFile(props: {
   const rows = [...(identify && identify.status !== "pass" ? [identify] : []), ...ORDER.map((n) => byName.get(n)).filter((c): c is CheckResult => !!c)];
   const questions = detail.nextMoves.filter((m) => m.kind === "ask_seller");
   const beforePay = detail.nextMoves.filter((m) => m.kind === "before_you_pay");
+  const leads = leadsView(detail);
   const price = props.listing.priceGBP ?? detail.listingFacts?.priceGBP ?? null;
   const title = detail.listingFacts?.title || props.listing.title;
 
@@ -76,6 +77,24 @@ export function CaseFile(props: {
           </div>
         )}
       </section>
+
+      {leads && (
+        <section className="block leads" aria-label="Leads followed">
+          <h2 className="h2">Leads followed</h2>
+          {leads.items.length > 0 && (
+            <ol className="lead-list">
+              {leads.items.map((l) => (
+                <li key={l.id} className={`lead ${l.state}`}>
+                  <p className="lead-reason">{l.reason}</p>
+                  <p className="lead-action">{l.action}</p>
+                  <p className="lead-outcome">{l.outcome}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+          {leads.note && <p className="note lead-note">{leads.note}</p>}
+        </section>
+      )}
 
       {(questions.length > 0 || beforePay.length > 0) && (
         <section className="block next">

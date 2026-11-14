@@ -5,7 +5,7 @@ import { examineListing } from "./examine";
 import { buildNeeds } from "./needs";
 import { brandKnown } from "./identify";
 import { inputHashFor, intakeImages, prepareText, type CaseRequest } from "./intake";
-import { followLeads } from "./leads";
+import { followLeads, NO_BRAND_SKIP, skipLeads } from "./leads";
 import { buildCtx, runDownstream, runIdentify, toIdentifyCheck } from "./runChecks";
 import { runStage } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
@@ -104,10 +104,9 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     // Each check runs on whatever identify established (brand / model / catalogue); condition runs on photos alone.
     const downstream = await runDownstream(ctx);
     // Without a brand the verdict is R1 whatever the leads find, so don't spend calls on them.
-    const { checks, leads } = brandKnown(identify, config.identifyConfidenceMin, ref.catalogue)
-      ? await followLeads(ctx, [identifyCheck, ...downstream])
-      : { checks: [identifyCheck, ...downstream], leads: [] };
-    await finalise(ctx, { checks, leads, row: c, inputHashImages: images });
+    const all = [identifyCheck, ...downstream];
+    const { checks, leads, report } = brandKnown(identify, config.identifyConfidenceMin, ref.catalogue) ? await followLeads(ctx, all) : skipLeads(ctx, all, NO_BRAND_SKIP);
+    await finalise(ctx, { checks, leads, leadsReport: report, row: c, inputHashImages: images });
   });
 }
 

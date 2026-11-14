@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { prepareCapture, redactPageText, type RawCapture } from "@/extension/src/lib/capture";
 import { describeDiff } from "@/extension/src/lib/changes";
-import { boxStyle, conditionView, findingCaption, priceView, sourceRefs } from "@/extension/src/lib/evidence";
+import { boxStyle, conditionView, findingCaption, leadsView, priceView, sourceRefs } from "@/extension/src/lib/evidence";
 import { firstSentence, shortDate } from "@/extension/src/lib/format";
 import { addEntry, caseForUrl, caseLabel, historyRows, HISTORY_LIMIT, keepFound, normaliseHistory, removeEntry, type HistoryEntry } from "@/extension/src/lib/history";
 import type { CaseSummary } from "@/schemas/domain";
@@ -207,5 +207,30 @@ describe("history (stored on this device: caseId and createdAt only)", () => {
     expect(historyRows(list, sums).map((r) => r.entry.caseId)).toEqual(["casebbbbbbbb"]);
     expect(caseForUrl(list, sums, "https://www.vinted.co.uk/items/1-x#photos")?.id).toBe("casebbbbbbbb");
     expect(caseForUrl(list, sums, "https://www.vinted.co.uk/items/2-y")).toBeNull();
+  });
+});
+
+describe("leads followed", () => {
+  const lead = { id: "lead_1", type: "deeper_price_comparison" as const, reason: "Price looked low.", status: "done" as const, outcome: "Compared with like new listings: no change." };
+  it("hidden when no leads were considered; one line when skipped or none were needed", () => {
+    expect(leadsView({ leads: [], leadsReport: { considered: false } })).toBeNull();
+    expect(leadsView({ leads: [], leadsReport: { considered: true, skipped: "Skipped: the review search was unavailable." } })).toEqual({ items: [], note: "Skipped: the review search was unavailable." });
+    expect(leadsView({ leads: [], leadsReport: { considered: true } })!.note).toBe("Nothing needed following up.");
+  });
+  it("lists each lead's reason, what was done and the outcome", () => {
+    const v = leadsView({ leads: [lead, { ...lead, id: "lead_2", type: "recheck_identification", status: "failed", outcome: undefined }], leadsReport: { considered: true } })!;
+    expect(v.items[0]).toEqual({ id: "lead_1", action: "Compared the price more carefully", reason: "Price looked low.", outcome: "Compared with like new listings: no change.", state: "done" });
+    expect(v.items[1]).toMatchObject({ action: "Took a second look at the model", outcome: "Couldn't complete this.", state: "problem" });
+    expect(v.note).toBeNull();
+  });
+  it("the log shows leads as they happen, and a skip as one line", () => {
+    let s = newInvestigation(1, 0);
+    s = applyEvent(s, { name: "check_done", data: { check: "price", status: "warn", summary: "", evidence: [], confidence: 0.5, geminiFeatures: [], details: { position: "suspiciously_low" } }, revision: 1, at: 1 });
+    s = applyEvent(s, { name: "lead_started", data: { ...lead, status: "pending", outcome: undefined }, revision: 1, at: 2 });
+    expect(s.log.at(-1)).toMatchObject({ text: "Price looked low. Comparing more carefully.", state: "active", kind: "followup" });
+    s = applyEvent(s, { name: "lead_done", data: lead, revision: 1, at: 3 });
+    expect(s.log.at(-1)).toMatchObject({ state: "done", note: lead.outcome });
+    s = applyEvent(s, { name: "leads_skipped", data: { reason: "Skipped: the review search was unavailable." }, revision: 1, at: 4 });
+    expect(s.log.at(-1)).toMatchObject({ text: "No follow-ups", note: "the review search was unavailable." });
   });
 });

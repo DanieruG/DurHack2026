@@ -6,6 +6,7 @@ import {
   type CheckResult,
   type ConditionFinding,
   type Lead,
+  type LeadsReport,
 } from "@/schemas/domain";
 import { generateStructured } from "@/gemini/structured";
 import { functionTool } from "@/gemini/tools";
@@ -108,20 +109,41 @@ async function proposeLeads(ctx: RunCtx, checks: CheckResult[]): Promise<LeadWir
   return data.leads;
 }
 
-export type LeadsOutcome = { checks: CheckResult[]; leads: Lead[]; usedFunctionCalling: boolean };
+export type LeadsOutcome = { checks: CheckResult[]; leads: Lead[]; usedFunctionCalling: boolean; report: LeadsReport };
+
+/** "Skipped: the review search was unavailable" when the only open checks are unknown because a search failed. */
+export function searchSkipReason(checks: CheckResult[]): string | null {
+  const failed = checks.filter(unknownFromSearch).map((c) => c.check);
+  if (!failed.length) return null;
+  const what = failed.includes("comfort") && failed.includes("price") ? "the review and price searches were" : failed.includes("comfort") ? "the review search was" : "the price search was";
+  return `Skipped: ${what} unavailable.`;
+}
+
+export const NO_BRAND_SKIP = "Skipped: the brand couldn't be identified, so no follow-up could change the verdict.";
+export const PLAN_FAILED_SKIP = "Skipped: couldn't plan follow-ups this time.";
+
+/** Record (and stream) why leads were skipped. */
+export function skipLeads(ctx: Pick<RunCtx, "emit">, checks: CheckResult[], reason: string): LeadsOutcome {
+  ctx.emit("leads_skipped", { reason });
+  return { checks, leads: [], usedFunctionCalling: false, report: { considered: true, skipped: reason } };
+}
 
 /** Gemini decides (up to MAX_LEADS), code executes. Leads change results only through executors. */
 export async function followLeads(ctx: RunCtx, checks: CheckResult[]): Promise<LeadsOutcome> {
   const max = ctx.deps.config.maxLeads;
-  if (max <= 0 || !needsLeads(checks)) return { checks, leads: [], usedFunctionCalling: false };
+  if (max <= 0) return { checks, leads: [], usedFunctionCalling: false, report: { considered: false } };
+  if (!needsLeads(checks)) {
+    const reason = searchSkipReason(checks);
+    return reason ? skipLeads(ctx, checks, reason) : { checks, leads: [], usedFunctionCalling: false, report: { considered: false } };
+  }
 
   let proposed: LeadWire[] = [];
   try {
-    proposed = await runStage("leads", { emit: ctx.emit, timeoutMs: ctx.deps.config.stageTimeoutMs, geminiFeatures: ["function_calling", "structured_output"] }, () =>
+    proposed = await runStage("leads", { emit: ctx.emit, timeoutMs: ctx.deps.config.stageTimeoutMs, geminiFeatures: ["structured_output"] }, () =>
       proposeLeads(ctx, checks),
     );
   } catch {
-    return { checks, leads: [], usedFunctionCalling: false };
+    return skipLeads(ctx, checks, PLAN_FAILED_SKIP);
   }
   const leads = sanitiseLeads(proposed, { maxLeads: max, photoCount: ctx.images.length });
 
@@ -142,7 +164,7 @@ export async function followLeads(ctx: RunCtx, checks: CheckResult[]): Promise<L
     ctx.emit("lead_done", finished);
     done.push(finished);
   }
-  return { checks: current, leads: done, usedFunctionCalling: true };
+  return { checks: current, leads: done, usedFunctionCalling: true, report: { considered: true } };
 }
 
 const replace = (checks: CheckResult[], next: CheckResult) => checks.map((c) => (c.check === next.check ? next : c));

@@ -274,6 +274,16 @@ p, h1, h2, ol, ul, dl, dd, figure { margin: 0; padding: 0; }
 .range-ends { position: relative; height: 14px; margin-top: 4px; }
 .range-ends span { position: absolute; transform: translateX(-50%); font-size: 10.5px; }
 
+/* ---------- leads followed ---------- */
+.leads { margin-top: 34px; }
+.lead-list { list-style: none; margin-top: 14px; }
+.lead { padding: 10px 0 10px 14px; border-left: 2px solid var(--light); margin-top: 10px; }
+.lead.problem { border-left-color: var(--red); }
+.lead-reason { font-size: 15px; line-height: 1.35; }
+.lead-action { font: 500 10.5px/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+.lead-outcome { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+.lead-note { color: var(--muted); }
+
 /* ---------- next move ---------- */
 .next { margin-top: 38px; }
 .ask { display: grid; gap: 12px; justify-items: start; margin-top: 16px; }

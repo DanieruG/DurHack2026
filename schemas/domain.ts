@@ -212,6 +212,16 @@ export const LeadSchema = z.object({
 });
 export type Lead = z.infer<typeof LeadSchema>;
 
+/**
+ * Whether follow-up leads were considered for a revision, and if they were skipped, why (one plain line).
+ * Not considered: every check was clear (or leads are turned off), so the case file hides the section.
+ */
+export const LeadsReportSchema = z.object({
+  considered: z.boolean(),
+  skipped: z.string().optional(),
+});
+export type LeadsReport = z.infer<typeof LeadsReportSchema>;
+
 export const NextMoveSchema = z.object({
   id: z.string(),
   kind: z.enum(["ask_seller", "before_you_pay"]),

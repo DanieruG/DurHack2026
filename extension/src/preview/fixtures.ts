@@ -123,7 +123,11 @@ export const CASE_FILE: CaseDetail = {
   needs: { sizes: [{ brand: "Nike", size: 9, system: "UK" }], priorities: ["all-day comfort"], budgetGBP: 60, wearTolerance: "light", extraPriorities: [], assumptions: [] },
   identify: null,
   checks: [identify, condition, fit, comfort, price],
-  leads: [],
+  leads: [
+    { id: "lead_1", type: "recheck_condition_photo", reason: "The heel wear in photo 2 was uncertain.", status: "done", outcome: "Rechecked photo 2 for heel wear: condition is warn." },
+    { id: "lead_2", type: "flag_for_seller", reason: "The inside lining isn't shown.", status: "done", outcome: "Added a question for the seller about condition.", relatesTo: "condition" },
+  ],
+  leadsReport: { considered: true },
   verdict: {
     label: "proceed_with_caution",
     ruleId: "R5",
