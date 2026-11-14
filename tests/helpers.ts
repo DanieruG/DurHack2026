@@ -3,11 +3,12 @@ import path from "node:path";
 import { testConfig, type Config } from "@/lib/config";
 import type { CacheMode } from "@/lib/cache";
 import { createNewPriceClient, type RawShoppingResult } from "@/lib/newPrices";
+import { createWebSearchClient, type WebSearchFetch } from "@/lib/webSearch";
 import { MemoryStore } from "@/lib/store";
 import { RateLimiter } from "@/lib/rateLimit";
 import type { ReferenceData } from "@/lib/seedData";
 import type { FetchedImage } from "@/lib/safeFetch";
-import { createGeminiClient, type GenRequest, type GenResponse, type GroundingMeta } from "@/gemini/client";
+import { createGeminiClient, type GenRequest, type GenResponse } from "@/gemini/client";
 import { EventHub, type SseEvent } from "@/pipeline/events";
 import type { Deps } from "@/pipeline/deps";
 import type { CheckResult, Profile } from "@/schemas/domain";
@@ -76,29 +77,34 @@ You may also like: Nike Air Max 90 £60`;
 
 export const json = (obj: unknown): GenResponse => ({ text: JSON.stringify(obj), functionCalls: [] });
 
-/** Build grounded text + metadata: each line is supported by the given domains. */
-export function grounded(lines: [string, string[]][], extra = ""): GenResponse {
-  const domains = [...new Set(lines.flatMap(([, d]) => d))];
-  const chunks = domains.map((d) => ({ web: { uri: `https://vertexaisearch.cloud.google.com/grounding-api-redirect/${d}`, title: d } }));
-  const supports: NonNullable<GroundingMeta["groundingSupports"]> = lines
-    .filter(([, d]) => d.length)
-    .map(([line, d]) => ({ segment: { text: line }, groundingChunkIndices: d.map((x) => domains.indexOf(x)) }));
-  return { text: lines.map(([l]) => l).join("\n") + (extra ? `\n${extra}` : ""), functionCalls: [], groundingMetadata: { groundingChunks: chunks, groundingSupports: supports } };
-}
+/** SerpApi organic results returned by the fake web search for any comfort query (real ones often link via Google redirects). */
+export const COMFORT_RESULTS = [
+  { position: 1, title: "Nike Pegasus 40 review | RunRepeat", link: "https://runrepeat.com/nike-pegasus-40", snippet: "Comfortable for long days on your feet. Our testers say it fits true to size." },
+  { position: 2, title: "Nike Pegasus 40 review", link: "https://www.runnersworld.com/uk/nike-pegasus-40", snippet: "A comfortable everyday trainer that our testers happily wore all day." },
+  { position: 3, title: "Nike Pegasus 40 Men's Road Running Shoes", link: "https://www.nike.com/gb/pegasus-40", snippet: "Our most comfortable Pegasus yet, with responsive cushioning." },
+  { position: 4, title: "Pegasus 40 comfort? : r/RunningShoeGeeks", link: "https://www.reddit.com/r/RunningShoeGeeks/pegasus40", snippet: "Mine feel great for walking all day, though the toe box is a bit narrow." },
+  { position: 5, title: "Nike Pegasus 40 | SportsShoes.com", link: "https://www.sportsshoes.com/product/nike-pegasus-40", snippet: "Free delivery on Nike Pegasus 40 running shoes." },
+  { position: 6, title: "Nike Pegasus 40 Review", link: "https://www.google.com/goto?url=CAESabc", displayed_link: "https://believeintherun.com › nike-pegasus-40", snippet: "Firm underfoot at first but it softens after a few runs." },
+];
 
-/**
- * Step 2 of the comfort search, as the model would do it for mock sentences written as
- * "PRIORITY | <priority> | <assessment> | <text>" or "SIZING | <advice> | <text>" (listed as "S1: ... (sources: ...)").
- */
-export function mockComfortPoints(prompt: string) {
-  const points: { segment: string; topic: string; assessment?: string; sizing?: string }[] = [];
-  for (const line of prompt.split("\n")) {
-    const p = /^(S\d+): PRIORITY \| (.+?) \| (positive|negative|mixed|unclear) \|/i.exec(line);
-    if (p) points.push({ segment: p[1], topic: p[2], assessment: p[3].toLowerCase() });
-    const z = /^(S\d+): SIZING \| (runs_small|runs_large|true_to_size|unclear) \|/i.exec(line);
-    if (z) points.push({ segment: z[1], topic: "sizing", sizing: z[2].toLowerCase() });
-  }
-  return { points, sourceTypes: [] };
+export type ComfortMockPoint = { topic: string; assessment?: string; sizing?: string; summary?: string; cite: string[] };
+
+/** The comfort summary as the model would write it: each point cites the results whose link has one of `cite`'s domains. */
+export function comfortSummary(points: ComfortMockPoint[]): Handler {
+  return (req) => {
+    const text = promptText(req);
+    const results = [...text.matchAll(/^\[(\d+)\] .*\n\s+site: (\S+)\n\s+(.*)$/gm)].map((m) => ({ index: Number(m[1]), domain: m[2], snippet: m[3] }));
+    return json({
+      points: points.map((p) => ({
+        topic: p.topic,
+        assessment: p.assessment,
+        sizing: p.sizing,
+        summary: p.summary ?? `Reviewers on ${p.cite.join(" and ")} discuss ${p.topic}.`,
+        citations: results.filter((r) => p.cite.includes(r.domain)).map((r) => ({ result: r.index, quote: r.snippet.split(/[.;,]/)[0] })),
+      })),
+      sourceTypes: [],
+    });
+  };
 }
 
 export type Handler = (req: GenRequest & { model: string }) => GenResponse | Promise<GenResponse>;
@@ -130,23 +136,10 @@ export function happyHandlers(): Record<string, Handler> {
     needs: () => json({ extraPriorities: ["wide fit"], budgetGBP: null, wearTolerance: null, sizes: [] }),
     identify: () =>
       json({ catalogueModelId: "nike-pegasus-40", confidence: 0.92, reasons: "Title and swoosh/sole pattern match.", evidence: [{ kind: "quote", label: "Title names the model", quote: "Nike Air Zoom Pegasus 40" }] }),
-    price: () => grounded([["PRICE | none | none", []]]),
-    comfort: () =>
-      grounded([
-        ["Reviewers find it comfortable for long days.", ["runrepeat.com", "runnersworld.com"]],
-        ["Most reviewers say it fits true to size.", ["runrepeat.com"]],
-      ]),
-    comfort_parse: (req) => {
-      const text = promptText(req);
-      const piped = mockComfortPoints(text);
-      if (piped.points.length) return json(piped);
-      const id = (sentence: string) => new RegExp(`^(S\\d+): ${sentence}`, "m").exec(text)?.[1];
-      const points = [
-        { segment: id("Reviewers find it comfortable"), topic: "all-day comfort", assessment: "positive" },
-        { segment: id("Most reviewers say it fits true to size"), topic: "sizing", sizing: "true_to_size" },
-      ].filter((p) => p.segment);
-      return json({ points, sourceTypes: [] });
-    },
+    comfort: comfortSummary([
+      { topic: "all-day comfort", assessment: "positive", summary: "RunRepeat and Runner's World find it comfortable for long days.", cite: ["runrepeat.com", "runnersworld.com"] },
+      { topic: "sizing", sizing: "true_to_size", summary: "Most reviewers say it fits true to size.", cite: ["runrepeat.com"] },
+    ]),
     condition: () => json({ findings: [{ label: "upper_creasing", photoIndex: 0, box2d: [400, 300, 520, 600], severity: "minor", confidence: 0.8, note: "Light creasing at the toe box." }], notVisible: [], contradictions: [] }),
     leads: () => json({ leads: [] }),
     verdict: () =>
@@ -160,7 +153,7 @@ export function happyHandlers(): Record<string, Handler> {
   };
 }
 
-export type Recorded = { calls: GenRequest[]; shoppingRequests: string[] };
+export type Recorded = { calls: GenRequest[]; shoppingRequests: string[]; webSearchRequests: string[] };
 
 /** Saved SerpApi google_shopping results (tests/fixtures/shopping/<name>.json). */
 export function shoppingFixture(name: string): RawShoppingResult[] {
@@ -189,10 +182,40 @@ export function fakeNewPrices(byQuery: Record<string, RawShoppingResult[]> = {},
   return { client, requests };
 }
 
+/**
+ * A real WebSearchClient whose network is a stub: every query gets `results` (default COMFORT_RESULTS), unless a custom
+ * `fetch` is given (to fail or hang). Requests are recorded (query only).
+ */
+export function fakeWebSearch(opts: { results?: unknown[]; fetch?: WebSearchFetch; store?: MemoryStore; now?: () => Date } = {}) {
+  const requests: string[] = [];
+  const client = createWebSearchClient({
+    apiKey: "test-key",
+    mode: "off",
+    store: opts.store ?? null,
+    now: opts.now ?? (() => new Date("2026-11-14T12:00:00Z")),
+    logger: () => undefined,
+    retryBackoffMs: 1,
+    fetch: async (url, init) => {
+      requests.push(new URL(url).searchParams.get("q") ?? "");
+      if (opts.fetch) return opts.fetch(url, init);
+      return { ok: true, status: 200, json: async () => ({ organic_results: opts.results ?? COMFORT_RESULTS }) };
+    },
+  });
+  return { client, requests };
+}
+
 export function makeDeps(
-  opts: { handlers?: Record<string, Handler>; config?: Partial<Config>; reference?: ReferenceData; images?: Record<string, Uint8Array>; shopping?: Record<string, RawShoppingResult[]> } = {},
+  opts: {
+    handlers?: Record<string, Handler>;
+    config?: Partial<Config>;
+    reference?: ReferenceData;
+    images?: Record<string, Uint8Array>;
+    shopping?: Record<string, RawShoppingResult[]>;
+    webSearch?: Parameters<typeof fakeWebSearch>[0];
+  } = {},
 ): Deps & Recorded {
   const shopping = fakeNewPrices(opts.shopping);
+  const web = fakeWebSearch(opts.webSearch);
   const handlers = { ...happyHandlers(), ...(opts.handlers ?? {}) };
   const calls: GenRequest[] = [];
   const config = testConfig(opts.config);
@@ -233,6 +256,8 @@ export function makeDeps(
     gemini,
     newPrices: shopping.client,
     shoppingRequests: shopping.requests,
+    webSearch: web.client,
+    webSearchRequests: web.requests,
     hub: new EventHub(),
     fetchImage,
     readReferenceImage: async () => null,

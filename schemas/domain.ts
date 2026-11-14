@@ -88,6 +88,8 @@ export const EvidenceSchema = z.object({
   box2d: Box2dSchema.optional(),
   value: z.union([z.string(), z.number()]).optional(),
   url: z.string().optional(),
+  /** The source's own site, when `url` is a redirect that doesn't show it (SerpApi web results). */
+  domain: z.string().optional(),
   title: z.string().optional(),
   sourceType: EvidenceSourceTypeSchema.optional(),
   observedOn: z.string().optional(),

@@ -66,7 +66,7 @@ export function sourceRefs(check: CheckResult): SourceRef[] {
     .map((e, i) => ({
       n: i + 1,
       title: e.title ?? e.label,
-      domain: domainOf(e.url),
+      domain: e.domain ?? domainOf(e.url),
       url: e.url,
       quote: e.quote,
       type: e.sourceType,

@@ -32,7 +32,7 @@ const EnvSchema = z.object({
 export type Config = {
   databaseUrl?: string;
   geminiApiKey?: string;
-  /** SerpApi key for Google Shopping new prices (never logged). */
+  /** SerpApi key for Google Shopping new prices and the comfort web search (never logged). */
   shoppingApiKey?: string;
   /** Model names come from env only; never hard-coded. */
   models: { fast?: string; strong?: string };
@@ -40,7 +40,7 @@ export type Config = {
   identifyConfidenceMin: number;
   maxLeads: number;
   stageTimeoutMs: number;
-  /** Cap on the comfort check's Google Search grounded step; past it, saved review snippets are used. */
+  /** Cap on the comfort check's SerpApi web search; past it, saved review snippets are used. */
   searchTimeoutMs: number;
   maxImages: number;
   maxImageBytes: number;

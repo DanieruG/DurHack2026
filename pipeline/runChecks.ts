@@ -106,7 +106,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
   const features = {
     fit: [],
     price: [],
-    comfort: ["search_grounding"],
+    comfort: ["structured_output"],
     condition: ["vision", "object_detection", "structured_output"],
   } as const;
   try {
@@ -128,6 +128,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
         case "comfort":
           return checkComfort({
             gemini: deps.gemini,
+            webSearch: deps.webSearch,
             model: { brand: subject.brand!, name: subject.modelName! },
             needs: ctx.needs,
             today: ctx.today,

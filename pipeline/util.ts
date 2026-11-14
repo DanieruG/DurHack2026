@@ -10,7 +10,7 @@ export class StageTimeoutError extends Error {
   }
 }
 
-/** A Google Search grounded call exceeded SEARCH_TIMEOUT_MS; the check falls back to saved data. */
+/** A web search exceeded SEARCH_TIMEOUT_MS; the check falls back to saved data. */
 export class SearchTimeoutError extends Error {
   constructor(ms: number) {
     super(`search took longer than ${Math.round(ms / 1000)}s`);
@@ -18,7 +18,7 @@ export class SearchTimeoutError extends Error {
   }
 }
 
-/** Cap a search-grounded step at `ms` (SEARCH_TIMEOUT_MS). No cap when ms is undefined. */
+/** Cap a search step at `ms` (SEARCH_TIMEOUT_MS). No cap when ms is undefined. */
 export function withSearchBudget<T>(ms: number | undefined, fn: () => Promise<T>): Promise<T> {
   return ms ? withDeadline(ms, () => new SearchTimeoutError(ms), fn) : fn();
 }

@@ -1,15 +1,15 @@
-import type { CheckResult, CheckStatus, Evidence, GeminiFeature, UserNeeds } from "@/schemas/domain";
+import type { CheckResult, CheckStatus, Evidence, EvidenceSourceType, GeminiFeature, UserNeeds } from "@/schemas/domain";
 import type { ReviewSnippet } from "@/schemas/seed";
 import type { GeminiClient } from "@/gemini/client";
 import { z } from "zod";
 import { classifySource, sourceToEvidence, type GroundedSource } from "@/gemini/grounding";
-import { groundedSearch, resolveSegment, segmentList, type Segment } from "@/gemini/groundedSearch";
 import { generateStructured } from "@/gemini/structured";
-import type { ToolExecutor } from "@/gemini/tools";
+import { functionTool, type ToolExecutor } from "@/gemini/tools";
+import { comfortQuery, type WebResult, type WebSearchClient } from "@/lib/webSearch";
 import { containsBanned } from "../verdict/validate";
 import { allPriorities } from "../needs";
 import type { SizingAdvice } from "./fit";
-import { evidenceIds, round2, unknownCheck, withSearchBudget } from "../util";
+import { evidenceIds, round2, textContains, unknownCheck, withSearchBudget } from "../util";
 
 export const FALLBACK_CONFIDENCE_CAP = 0.6;
 const DEFAULT_PRIORITIES = ["all-day comfort", "durability"];
@@ -19,15 +19,49 @@ type Assessment = "positive" | "negative" | "mixed" | "unclear";
 export type ModelRef = { brand: string; name: string };
 
 /**
- * Step 1 (grounded): plain prose. A rigid "PRIORITY | ... |" line format made Gemini 3 return no grounding chunks or
- * supports (it searched, but attached no sources); plain sentences keep them.
+ * Comfort from a SerpApi web search ("{brand} {model} review comfort", UK, top 6 organic results).
+ * Gemini gets the results as numbered text, with no search tool, and summarises comfort against the buyer's
+ * priorities, citing results by index and quoting the snippet. Each cited result becomes source evidence.
  */
-export function comfortPrompt(model: ModelRef, priorities: string[]): string {
-  return (
-    `What do independent reviewers and wearers say about the ${model.brand} ${model.name} trainers on ` +
-    `${priorities.join(", ")}, and do they run small, large or true to size? Search for reviews and answer in short plain ` +
-    `sentences, one point per sentence, saying who said it. Treat manufacturer and retailer marketing as claims, not reviews.`
-  );
+
+const ASSESSMENTS = ["positive", "negative", "mixed", "unclear"] as const;
+const SIZINGS = ["runs_small", "runs_large", "true_to_size", "unclear"] as const;
+const SOURCE_TYPES = ["independent_review", "manufacturer", "retailer", "other"] as const;
+
+export const ComfortSummarySchema = z.object({
+  points: z
+    .array(
+      z.object({
+        /** One of the buyer's priorities (as given), or "sizing". */
+        topic: z.string(),
+        assessment: z.enum(ASSESSMENTS).nullish(),
+        sizing: z.enum(SIZINGS).nullish(),
+        /** One plain sentence saying what the cited results say, and who says it. */
+        summary: z.string(),
+        citations: z.array(z.object({ result: z.number().int(), quote: z.string().default("") })).default([]),
+      }),
+    )
+    .default([]),
+  sourceTypes: z.array(z.object({ result: z.number().int(), type: z.enum(SOURCE_TYPES) })).default([]),
+});
+export type ComfortSummary = z.infer<typeof ComfortSummarySchema>;
+
+export const COMFORT_SYSTEM = `You summarise web search results about a trainer model for a second-hand buyer.
+Each result is numbered [1], [2], ... with its title, site and snippet. Use ONLY what the titles and snippets say.
+For each of the buyer's priorities that the results speak to, return one point: {topic: <the priority exactly as given>,
+assessment: positive|negative|mixed|unclear, summary: one short plain sentence saying what reviewers say and who says it,
+citations}. If the results say whether the model runs small, large or true to size, add a point {topic: "sizing",
+sizing: runs_small|runs_large|true_to_size|unclear, summary, citations}. Skip priorities the results don't mention.
+citations: one {result: <its number>, quote: <a short phrase copied word for word from that result's snippet>} for each result
+that supports the point. Never cite a result for something it doesn't say. Also classify every result as independent_review,
+manufacturer, retailer or other: marketing from the brand or a shop is a claim, not an independent review; forum posts and
+wearer reviews count as independent.`;
+
+export function comfortPrompt(model: ModelRef, priorities: string[], results: WebResult[]): string {
+  const list = results
+    .map((r) => `[${r.index}] ${r.title}\n    site: ${r.domain || r.source || "unknown"}\n    ${r.snippet || "(no snippet)"}`)
+    .join("\n");
+  return `Model: ${model.brand} ${model.name}\nBuyer's priorities: ${priorities.join("; ")}\nSearch results:\n${list}`;
 }
 
 export type ComfortParse = {
@@ -36,43 +70,22 @@ export type ComfortParse = {
   sources: GroundedSource[];
 };
 
-const ASSESSMENTS = ["positive", "negative", "mixed", "unclear"] as const;
-const SIZINGS = ["runs_small", "runs_large", "true_to_size", "unclear"] as const;
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
 
-export const ComfortPointsSchema = z.object({
-  points: z
-    .array(
-      z.object({
-        segment: z.string(),
-        /** One of the buyer's priorities (as given), or "sizing". */
-        topic: z.string(),
-        assessment: z.enum(ASSESSMENTS).nullish(),
-        sizing: z.enum(SIZINGS).nullish(),
-      }),
-    )
-    .default([]),
-  sourceTypes: z.array(z.object({ domain: z.string(), type: z.enum(["independent_review", "manufacturer", "retailer", "other"]) })).default([]),
-});
-export type ComfortPoints = z.infer<typeof ComfortPointsSchema>;
-
-const COMFORT_PARSE_SYSTEM = `You turn review-search sentences into data. Each sentence has an id (S1, S2, ...) and its source domains.
-"segment" is always the sentence id only, e.g. "S3", never the sentence text.
-For every sentence about one of the buyer's priorities, return {segment, topic: <the priority exactly as given>, assessment:
-positive|negative|mixed|unclear}. For every sentence about sizing, return {segment, topic: "sizing", sizing: runs_small|runs_large|
-true_to_size|unclear}. Skip sentences about anything else. Also classify each source domain as independent_review, manufacturer,
-retailer or other (marketing from the brand or a shop is not an independent review). Use only what the sentences say.`;
-
-/** Step 2 (no tools): structure the supported sentences. */
-export async function structureComfort(gemini: GeminiClient, segments: Segment[], priorities: string[]): Promise<ComfortPoints> {
-  const { data } = await generateStructured(gemini, ComfortPointsSchema, {
-    stage: "comfort_parse",
-    tier: "fast",
-    system: COMFORT_PARSE_SYSTEM,
-    parts: [{ text: `Buyer's priorities: ${priorities.join("; ")}\nSentences:\n${segmentList(segments)}` }],
-    temperature: 0,
-    thinking: "LOW",
-  });
-  return data;
+/**
+ * A search result as a source. `segments` holds the verbatim snippet phrases Gemini quoted from it. With no known site
+ * (domain ""), only the model's hint can classify it, and never as better than "other" unless the hint says so.
+ */
+export function resultSource(r: WebResult, hint?: EvidenceSourceType): GroundedSource {
+  const sourceType = r.domain ? classifySource(r.domain, hint) : hint && hint !== "price_sample" ? hint : "other";
+  // Domain stands in for "who": results with no site get a per-result key so they never merge.
+  return { chunkIndex: r.index, url: r.link, title: r.title, domain: r.domain || `result-${r.index}`, sourceType, segments: [] };
 }
 
 function combine(assessments: Assessment[]): Assessment {
@@ -83,44 +96,63 @@ function combine(assessments: Assessment[]): Assessment {
 }
 
 /**
- * One entry per priority (and one for sizing), each carrying only the sources of its own sentences. Points that
- * reference no real sentence, or a topic that isn't one of the priorities, are dropped.
+ * The quote shown for a cited result: Gemini's phrase if it really is in the snippet (or title), else the snippet itself.
+ * Quotes are never invented text.
  */
-export function comfortFromPoints(points: ComfortPoints, segments: Segment[], priorities: string[]): ComfortParse {
-  const hints = Object.fromEntries(points.sourceTypes.map((t) => [t.domain.toLowerCase().replace(/^www\./, ""), t.type]));
-  for (const seg of segments) for (const src of seg.sources) src.sourceType = classifySource(src.domain, hints[src.domain]);
+export function verifiedQuote(r: WebResult, quote: string): string | null {
+  const q = quote.trim().replace(/^["“”']+|["“”']+$/g, "").trim();
+  if (q.length >= 8 && (textContains(r.snippet, q) || textContains(r.title, q))) return q;
+  return r.snippet || null;
+}
+
+/**
+ * One entry per priority (and one for sizing), each carrying only the results it cites. Citations of results that
+ * don't exist, and topics that aren't one of the priorities, are dropped.
+ */
+export function comfortFromSummary(summary: ComfortSummary, results: WebResult[], priorities: string[]): ComfortParse {
+  const hints = new Map(summary.sourceTypes.map((t) => [t.result, t.type]));
+  const sources = new Map(results.map((r) => [r.index, resultSource(r, hints.get(r.index))]));
+  const byIndex = new Map(results.map((r) => [r.index, r]));
   const lower = new Map(priorities.map((p) => [p.toLowerCase(), p]));
-  const groups = new Map<string, { assessments: Assessment[]; segs: Segment[] }>();
-  const sizing: { advice: SizingAdvice; seg: Segment }[] = [];
-  for (const pt of points.points) {
-    const seg = resolveSegment(segments, pt.segment);
-    if (!seg) continue;
+
+  const cite = (citations: ComfortSummary["points"][number]["citations"]) => {
+    const out: GroundedSource[] = [];
+    for (const c of citations) {
+      const r = byIndex.get(c.result);
+      const src = sources.get(c.result);
+      if (!r || !src) continue;
+      const quote = verifiedQuote(r, c.quote);
+      if (quote && !src.segments.includes(quote)) src.segments.push(quote);
+      if (!out.includes(src)) out.push(src);
+    }
+    return out;
+  };
+
+  const groups = new Map<string, { assessments: Assessment[]; sentence: string; sources: GroundedSource[] }>();
+  const sizing: { advice: SizingAdvice; sentence: string; sources: GroundedSource[] }[] = [];
+  for (const pt of summary.points) {
+    const cited = cite(pt.citations);
+    if (!cited.length) continue;
     const topic = pt.topic.trim().toLowerCase();
     if (topic === "sizing") {
-      if (pt.sizing) sizing.push({ advice: pt.sizing, seg });
+      if (pt.sizing) sizing.push({ advice: pt.sizing, sentence: pt.summary.trim(), sources: cited });
       continue;
     }
     const priority = lower.get(topic);
     if (!priority) continue;
-    const g = groups.get(priority) ?? { assessments: [], segs: [] };
+    const g = groups.get(priority) ?? { assessments: [], sentence: pt.summary.trim(), sources: [] };
     g.assessments.push(pt.assessment ?? "unclear");
-    if (!g.segs.includes(seg)) g.segs.push(seg);
+    for (const s of cited) if (!g.sources.includes(s)) g.sources.push(s);
     groups.set(priority, g);
   }
   const uniq = (xs: GroundedSource[]) => [...new Set(xs)];
-  const parsedPriorities = [...groups.entries()].map(([priority, g]) => ({
-    priority,
-    assessment: combine(g.assessments),
-    sentence: g.segs[0].text,
-    sources: uniq(g.segs.flatMap((s) => s.sources)),
-  }));
   const decided = sizing.filter((x) => x.advice !== "unclear");
   const pick = decided.length ? decided : sizing;
   const advice = pick.length ? (pick.every((x) => x.advice === pick[0].advice) ? pick[0].advice : "unclear") : null;
   return {
-    priorities: parsedPriorities,
-    sizing: advice ? { advice, sentence: pick[0].seg.text, sources: uniq(pick.flatMap((x) => x.seg.sources)) } : null,
-    sources: uniq(segments.flatMap((s) => s.sources)),
+    priorities: [...groups.entries()].map(([priority, g]) => ({ priority, assessment: combine(g.assessments), sentence: g.sentence, sources: g.sources })),
+    sizing: advice ? { advice, sentence: pick[0].sentence, sources: uniq(pick.flatMap((x) => x.sources)) } : null,
+    sources: [...sources.values()],
   };
 }
 
@@ -128,27 +160,33 @@ export type ComfortDetails = {
   reviewSizing: SizingAdvice;
   reviewSizingNote?: string;
   independentSources: number;
-  priorities: { priority: string; assessment: Assessment; evidenceIds: string[] }[];
+  priorities: { priority: string; assessment: Assessment; summary?: string; evidenceIds: string[] }[];
   fallback: boolean;
+  /** The web search behind this result (absent on the saved-snippet fallback). */
+  search?: { provider: "serpapi"; query: string; fetchedOn: string; results: number; fromCache: boolean };
 };
 
-/** Build the CheckResult from parsed grounded lines (shared by the separate and combined-tools paths). */
-export function comfortResult(parsed: ComfortParse, args: { today: string; features: GeminiFeature[] }): CheckResult {
+/** Build the CheckResult from the parsed summary. Each cited result is one source evidence item, quoting its snippet. */
+export function comfortResult(
+  parsed: ComfortParse,
+  args: { today: string; features: GeminiFeature[]; search?: ComfortDetails["search"] },
+): CheckResult {
   const nextId = evidenceIds("comf");
   const evidence: Evidence[] = [];
-  const evByChunk = new Map<number, string>();
-  const evFor = (src: GroundedSource, quote: string) => {
-    const existing = evByChunk.get(src.chunkIndex);
+  const evBySource = new Map<number, string>();
+  const evFor = (src: GroundedSource, fallbackQuote: string) => {
+    const existing = evBySource.get(src.chunkIndex);
     if (existing) return existing;
-    const e = sourceToEvidence(src, nextId(), args.today, safe(quote));
+    const e = sourceToEvidence(src, nextId(), args.today, safe(src.segments[0] ?? fallbackQuote));
     evidence.push(e);
-    evByChunk.set(src.chunkIndex, e.id);
+    evBySource.set(src.chunkIndex, e.id);
     return e.id;
   };
 
   const priorityDetails = parsed.priorities.map((p) => ({
     priority: p.priority,
     assessment: p.assessment,
+    summary: safe(p.sentence),
     evidenceIds: p.sources.map((s) => evFor(s, p.sentence)),
   }));
   const sizingIds = parsed.sizing?.sources.map((s) => evFor(s, parsed.sizing!.sentence)) ?? [];
@@ -163,6 +201,7 @@ export function comfortResult(parsed: ComfortParse, args: { today: string; featu
     independentSources: independent,
     priorities: priorityDetails,
     fallback: false,
+    ...(args.search ? { search: args.search } : {}),
   };
 
   if (supporting.length === 0) {
@@ -204,7 +243,7 @@ export function comfortResult(parsed: ComfortParse, args: { today: string; featu
   };
 }
 
-/** Fallback when grounding fails: seeded ReviewSnippet rows (same Evidence shape, confidence capped at 0.6). */
+/** Fallback when the web search fails: seeded ReviewSnippet rows (same Evidence shape, confidence capped at 0.6). */
 export function comfortFromSnippets(snippets: ReviewSnippet[], needs: UserNeeds, today: string): CheckResult {
   const nextId = evidenceIds("comf");
   if (snippets.length === 0) {
@@ -255,11 +294,21 @@ export function comfortFromSnippets(snippets: ReviewSnippet[], needs: UserNeeds,
   };
 }
 
+/** The web search failed (error, timeout, no key, or no results): comfort uses the saved review snippets. */
+export class ComfortSearchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ComfortSearchError";
+  }
+}
+
 export async function checkComfort(args: {
   gemini: GeminiClient;
+  webSearch: WebSearchClient;
   model: ModelRef;
   needs: UserNeeds;
   today: string;
+  /** GEMINI_COMBINED_TOOLS: offer convertSize to the summarising call (function calling, same output shape). */
   combinedTools: boolean;
   executors: Partial<Record<string, ToolExecutor>>;
   snippets: ReviewSnippet[];
@@ -271,6 +320,7 @@ export async function checkComfort(args: {
     return await searchComfort(args, priorities);
   } catch (err) {
     if ((err as Error)?.name === "StageTimeoutError") throw err;
+    if (!process.env.VITEST) console.warn(`[comfort] web search failed, using saved reviews: ${(err as Error)?.name}: ${(err as Error)?.message}`);
     const fallback = comfortFromSnippets(args.snippets, args.needs, args.today);
     // Unknown only because the search failed (no saved reviews to fall back on): leads can't fix that.
     return fallback.status === "unknown" ? { ...fallback, details: { ...fallback.details, searchFailed: true } } : fallback;
@@ -278,27 +328,30 @@ export async function checkComfort(args: {
 }
 
 async function searchComfort(args: Parameters<typeof checkComfort>[0], priorities: string[]): Promise<CheckResult> {
-  // SEARCH_TIMEOUT_MS caps the grounded search only; structuring the cited sentences is bounded by the stage timeout.
-  const answer = await withSearchBudget(args.searchTimeoutMs, () => groundedSearch(args.gemini, {
-    stage: "comfort",
-    prompt: comfortPrompt(args.model, priorities),
-    temperature: 0.2,
-    combinedTools: args.combinedTools,
-    functions: ["convertSize"],
-    executors: args.executors,
-  }));
-  const features: GeminiFeature[] = ["search_grounding"];
-  if (answer.calledFunctions.length) features.push("function_calling");
-  const parsed = comfortFromPoints(await structureComfort(args.gemini, answer.segments, priorities), answer.segments, priorities);
-  return comfortResult(parsed, { today: args.today, features });
-}
+  // SEARCH_TIMEOUT_MS caps the web search only; summarising the results is bounded by the stage timeout.
+  const query = comfortQuery(args.model.brand, args.model.name);
+  const search = await withSearchBudget(args.searchTimeoutMs, () => args.webSearch.search(query));
+  if (!search.results.length) throw new ComfortSearchError(`no results for "${query}"`);
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
+  const tools = args.combinedTools ? [functionTool(["convertSize"])] : undefined;
+  const { data, calledFunctions } = await generateStructured(args.gemini, ComfortSummarySchema, {
+    stage: "comfort",
+    tier: "fast",
+    system: COMFORT_SYSTEM,
+    parts: [{ text: comfortPrompt(args.model, priorities, search.results) }],
+    tools,
+    executors: args.executors,
+    temperature: 0,
+    thinking: "LOW",
+  });
+  const features: GeminiFeature[] = ["structured_output"];
+  if (calledFunctions.length) features.push("function_calling");
+  const parsed = comfortFromSummary(data, search.results, priorities);
+  return comfortResult(parsed, {
+    today: args.today,
+    features,
+    search: { provider: "serpapi", query, fetchedOn: search.fetchedOn, results: search.results.length, fromCache: search.fromCache },
+  });
 }
 
 function safe(s: string): string {

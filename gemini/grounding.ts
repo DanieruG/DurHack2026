@@ -1,13 +1,13 @@
 import type { Evidence, EvidenceSourceType } from "@/schemas/domain";
-import type { GroundingMeta } from "./client";
 
+/** A cited web source (for comfort: one SerpApi search result, chunkIndex = its 1-based result number). */
 export type GroundedSource = {
   chunkIndex: number;
   url: string;
   title: string;
   domain: string;
   sourceType: EvidenceSourceType;
-  /** Exact response text segments this source supports. */
+  /** Verbatim text quoted from this source (comfort: phrases from its search snippet). */
   segments: string[];
 };
 
@@ -43,17 +43,6 @@ function matchesDomain(domain: string, list: string[]): boolean {
   return list.some((d) => domain === d || domain.endsWith("." + d));
 }
 
-/** Gemini API grounding chunks give a redirect URI; the title is usually the source domain. */
-export function sourceDomain(chunk: { uri?: string; title?: string; domain?: string }): string {
-  const candidates = [chunk.domain, chunk.title, chunk.uri];
-  for (const c of candidates) {
-    if (!c) continue;
-    const m = /([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i.exec(c.replace(/^https?:\/\//, ""));
-    if (m && !/vertexaisearch|googleusercontent|grounding-api-redirect/.test(m[1])) return m[1].toLowerCase().replace(/^www\./, "");
-  }
-  return (chunk.title ?? "").toLowerCase();
-}
-
 /**
  * Domain heuristics first; the model's own hint is only used when the heuristic says "other",
  * and can never upgrade a known manufacturer/retailer domain to "independent_review".
@@ -66,41 +55,13 @@ export function classifySource(domain: string, modelHint?: EvidenceSourceType): 
   return "other";
 }
 
-/** Parse grounding metadata into sources with the exact text segments each one supports. */
-export function groundingSources(
-  meta: GroundingMeta | undefined,
-  hints: Record<string, EvidenceSourceType> = {},
-): GroundedSource[] {
-  const chunks = meta?.groundingChunks ?? [];
-  const sources: GroundedSource[] = chunks.map((c, i) => {
-    const web = c.web ?? {};
-    const domain = sourceDomain(web);
-    return {
-      chunkIndex: i,
-      url: web.uri ?? "",
-      title: web.title ?? domain,
-      domain,
-      sourceType: classifySource(domain, hints[domain]),
-      segments: [],
-    };
-  });
-  for (const s of meta?.groundingSupports ?? []) {
-    const text = s.segment?.text?.trim();
-    if (!text) continue;
-    for (const idx of s.groundingChunkIndices ?? []) {
-      const src = sources[idx];
-      if (src && !src.segments.includes(text)) src.segments.push(text);
-    }
-  }
-  return sources.filter((s) => s.url);
-}
-
 export function sourceToEvidence(src: GroundedSource, id: string, observedOn: string, quote?: string): Evidence {
   return {
     id,
     kind: "source",
     label: `${labelFor(src.sourceType)}: ${src.title}`,
     url: src.url,
+    ...(src.domain && !/^result-\d+$/.test(src.domain) ? { domain: src.domain } : {}),
     title: src.title,
     sourceType: src.sourceType,
     quote: quote ?? src.segments[0],

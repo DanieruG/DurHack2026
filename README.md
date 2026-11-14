@@ -18,12 +18,20 @@ npm test                       # unit, schema, pipeline and API tests (mocked Ge
 ```
 
 Model names are never hard-coded. Set `GEMINI_MODEL_FAST` (extraction, checks, wording, next moves) and `GEMINI_MODEL_STRONG`
-(identification, recheck leads) to current Gemini model ids. `GEMINI_COMBINED_TOOLS=true` runs price Source B and comfort as one call
-with Google Search plus function calling (Gemini 3 tool combination, sent with `includeServerSideToolInvocations`). Both paths produce
-identical output shapes; a test checks this.
+(identification, recheck leads) to current Gemini model ids. `GEMINI_COMBINED_TOOLS=true` offers the `convertSize` function to the comfort summary
+call (function calling plus structured output). Both paths produce identical output shapes; a test checks this.
 
-`SEARCH_TIMEOUT_MS` (default `10000`) caps the comfort check's Google Search grounded step. Past the cap the search is
-aborted and comfort falls back to the saved review snippets. `STAGE_TIMEOUT_MS` still bounds each stage as a whole.
+Comfort reviews come from a SerpApi Google web search (`lib/webSearch.ts`, same `SHOPPING_API_KEY`), not from Gemini's
+built-in search tool. The query is `"{brand} {model} review comfort"`, with UK results, and the top 6 organic results are kept.
+Their titles, sites and snippets go to Gemini as numbered text, with no search tool. Gemini summarises comfort against the
+buyer's priorities, citing results by number and quoting each one. A quote is kept only if it appears word for word in that
+result's snippet; otherwise the snippet itself is shown. Each cited result becomes a source evidence item, classified by its
+site (independent review, manufacturer, retailer or other). SerpApi now links results through Google redirects, so the site
+comes from `displayed_link` and is stored on the evidence as `domain`. Search results are cached in `CacheEntry` per model
+for 7 days. Each live call is logged as `[websearch] q=... results=N`.
+
+`SEARCH_TIMEOUT_MS` (default `10000`) caps the comfort web search. If the search fails, times out or finds nothing, comfort
+falls back to the saved `ReviewSnippet` rows (confidence capped at 0.6). `STAGE_TIMEOUT_MS` still bounds each stage as a whole.
 
 The price check's current new price (Source B) comes from Google Shopping via SerpApi (`SHOPPING_API_KEY`), not from
 grounding. `lib/newPrices.ts` queries `"{brand} {model}"` with UK results, then filters in code: retailers only (no

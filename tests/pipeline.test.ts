@@ -4,7 +4,7 @@ import { startReopen } from "@/pipeline/reopen";
 import { IDENTIFY_SYSTEM } from "@/pipeline/identify";
 import { CaseDiffSchema, CheckResultSchema, SseEventSchemas, VerdictSchema } from "@/schemas";
 import type { CheckResult, NextMove, Verdict } from "@/schemas/domain";
-import { checksFrom, eventNames, fixtureReference, grounded, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, shoppingFixture, type Handler } from "./helpers";
+import { checksFrom, comfortSummary, eventNames, fixtureReference, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, shoppingFixture, type Handler } from "./helpers";
 
 const capture = {
   pageUrl: "https://www.vinted.co.uk/items/123-nike-pegasus?referrer=x",
@@ -122,6 +122,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checks.price.details).toMatchObject({ newPrice: { gbp: 100, sources: 3 } });
     expect(deps.shoppingRequests).toEqual(["Nike Pegasus 39"]); // Shopping query "{brand} {modelName}"
     expect(stageCalls(deps, "price")).toBe(0); // no Gemini call for price any more
+    expect(deps.webSearchRequests).toEqual(["Nike Pegasus 39 review comfort"]); // SerpApi query "{brand} {model} review comfort"
     expect(deps.calls.filter((c) => c.stage === "comfort").map(promptText).join("\n")).toContain("Nike Pegasus 39");
     expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
   });
@@ -166,7 +167,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
   it("the recheck_identification lead is the only Pro call", async () => {
     const deps = makeDeps({
       handlers: {
-        comfort: () => grounded([["PRIORITY | all-day comfort | mixed | Some find it firm.", ["runrepeat.com"]]]),
+        comfort: comfortSummary([{ topic: "all-day comfort", assessment: "mixed", summary: "Some find it firm.", cite: ["runrepeat.com"] }]),
         leads: () => json({ leads: [{ type: "recheck_identification", reason: "Pegasus 40 vs 41.", photoIndex: 0 }] }),
       },
     });
@@ -178,7 +179,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     const ref = fixtureReference();
     const deps = makeDeps({
       reference: { ...ref, reviews: [] }, // no saved reviews to fall back on
-      handlers: { comfort: () => grounded([["No sources at all.", []]]) }, // the search returns no cited sentences
+      webSearch: { fetch: async () => ({ ok: false, status: 500, json: async () => ({}) }) }, // SerpApi is down
     });
     const { events } = await investigate(deps);
     const checks = checksFrom(events);
@@ -209,7 +210,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
 
   it("a slow search hits SEARCH_TIMEOUT_MS and falls back to saved reviews, well inside the stage timeout", async () => {
     const hang: Handler = () => new Promise(() => undefined);
-    const deps = makeDeps({ config: { stageTimeoutMs: 2000, searchTimeoutMs: 100 }, handlers: { comfort: hang } });
+    const deps = makeDeps({ config: { stageTimeoutMs: 2000, searchTimeoutMs: 100 }, webSearch: { fetch: () => new Promise(() => undefined) }, handlers: { comfort: hang } });
     const started = Date.now();
     const { events } = await investigate(deps);
     expect(Date.now() - started).toBeLessThan(1500);
@@ -220,7 +221,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
   it("follows at most MAX_LEADS leads; executors update checks; flag_for_seller adds a question", async () => {
     const deps = makeDeps({
       handlers: {
-        comfort: () => grounded([["PRIORITY | all-day comfort | mixed | Some find it firm.", ["runrepeat.com"]]]),
+        comfort: comfortSummary([{ topic: "all-day comfort", assessment: "mixed", summary: "Some find it firm.", cite: ["runrepeat.com"] }]),
         leads: (req) =>
           req.contents.length === 1
             ? { text: "", functionCalls: [{ id: "f1", name: "getNewPrices", args: { brand: "Nike", modelName: "Pegasus 40" } }] }
@@ -343,8 +344,11 @@ describe("investigation pipeline (mocked Gemini)", () => {
       expect(b.evidence.map((e) => Object.keys(e).sort())).toEqual(a.evidence.map((e) => Object.keys(e).sort()));
     }
     expect(separate.checks.price.details).toMatchObject({ newPrice: { gbp: 89.99 } });
-    expect(combined.checks.comfort.geminiFeatures).toEqual(["search_grounding", "function_calling"]);
-    expect(separate.checks.comfort.geminiFeatures).toEqual(["search_grounding"]);
-    expect(combined.deps.calls.find((c) => c.stage === "comfort")?.config?.toolConfig).toMatchObject({ includeServerSideToolInvocations: true });
+    expect(combined.checks.comfort.geminiFeatures).toEqual(["structured_output", "function_calling"]);
+    expect(separate.checks.comfort.geminiFeatures).toEqual(["structured_output"]);
+    // Comfort never offers Gemini's built-in search tool: the results come from SerpApi.
+    for (const run of [separate, combined]) {
+      for (const c of run.deps.calls.filter((x) => x.stage === "comfort")) expect(JSON.stringify(c.config?.tools ?? [])).not.toMatch(/googleSearch/);
+    }
   });
 });

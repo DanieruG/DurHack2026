@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { conditionStatus, finaliseCondition, gradeFromClaims, wireToFindings } from "@/pipeline/checks/condition";
-import { comfortFromPoints, comfortFromSnippets, comfortResult } from "@/pipeline/checks/comfort";
+import { checkComfort, comfortFromSnippets, comfortFromSummary, comfortResult, verifiedQuote, type ComfortDetails, type ComfortSummary } from "@/pipeline/checks/comfort";
+import { comfortQuery, resultDomain, topOrganic, type WebResult } from "@/lib/webSearch";
+import { MemoryStore } from "@/lib/store";
 import { computeGaps } from "@/pipeline/nextMoves";
-import { resolveSegment, supportedSegments } from "@/gemini/groundedSearch";
-import { classifySource, groundingSources, sourceDomain } from "@/gemini/grounding";
+import { classifySource } from "@/gemini/grounding";
 import type { ConditionFinding, ListingFacts, UserNeeds } from "@/schemas/domain";
-import { fixtureReference, grounded } from "./helpers";
+import { COMFORT_RESULTS, fakeWebSearch, fixtureReference } from "./helpers";
 
 const f = (severity: ConditionFinding["severity"], confidence = 0.8): ConditionFinding => ({ label: "outsole_wear", photoIndex: 0, box2d: [1, 2, 3, 4], severity, confidence, note: "", evidenceId: "ev_cond_1" });
 const needs: UserNeeds = { sizes: [], priorities: ["all-day comfort", "wide fit"], wearTolerance: "light", extraPriorities: [], assumptions: [] };
@@ -58,53 +59,100 @@ describe("condition status", () => {
   });
 });
 
-describe("grounding + comfort", () => {
+describe("source classification", () => {
   it("classifies sources by domain; model hints never upgrade manufacturer/retailer", () => {
     expect(classifySource("runrepeat.com")).toBe("independent_review");
     expect(classifySource("nike.com", "independent_review")).toBe("manufacturer");
     expect(classifySource("sportsshoes.com")).toBe("retailer");
     expect(classifySource("someblog.net", "independent_review")).toBe("independent_review");
     expect(classifySource("someblog.net")).toBe("other");
-    expect(sourceDomain({ uri: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc", title: "www.runnersworld.com" })).toBe("runnersworld.com");
   });
-  it("keeps the exact segment each source supports", () => {
-    const g = grounded([["PRIORITY | comfort | positive | Very comfy.", ["runrepeat.com"]]]);
-    expect(groundingSources(g.groundingMetadata)[0].segments).toEqual(["PRIORITY | comfort | positive | Very comfy."]);
+});
+
+describe("comfort from SerpApi results", () => {
+  const results: WebResult[] = topOrganic(COMFORT_RESULTS);
+  const priorities = ["all-day comfort", "wide fit"];
+  type Point = ComfortSummary["points"][number];
+  const run = (points: Point[], sourceTypes: ComfortSummary["sourceTypes"] = []) =>
+    comfortResult(comfortFromSummary({ points, sourceTypes }, results, priorities), { today: "2026-11-14", features: ["structured_output"] });
+
+  it("keeps the top 6 organic results in rank order, numbered from 1", () => {
+    const raw = [{ position: 2, title: "B", link: "https://b.test" }, { position: 1, title: "A", link: "https://a.test" }, { position: 3, title: "no link" }];
+    expect(topOrganic([...raw, ...COMFORT_RESULTS.map((r) => ({ ...r, position: r.position + 3 }))]).map((r) => [r.index, r.title])).toEqual([
+      [1, "A"], [2, "B"], [3, COMFORT_RESULTS[0].title], [4, COMFORT_RESULTS[1].title], [5, COMFORT_RESULTS[2].title], [6, COMFORT_RESULTS[3].title],
+    ]);
   });
-  type Point = { text: string; domains: string[]; topic: string; assessment?: "positive" | "negative" | "mixed" | "unclear"; sizing?: "runs_small" | "runs_large" | "true_to_size" | "unclear" };
-  const run = (ps: Point[]) => {
-    const g = grounded(ps.map((p) => [p.text, p.domains] as [string, string[]]));
-    const segs = supportedSegments(g.groundingMetadata);
-    const points = { points: ps.map((p) => ({ segment: segs.find((s) => s.text === p.text)?.id ?? "S99", topic: p.topic, assessment: p.assessment, sizing: p.sizing })), sourceTypes: [] };
-    return comfortResult(comfortFromPoints(points, segs, ["all-day comfort", "wide fit"]), { today: "2026-11-14", features: ["search_grounding"] });
-  };
-  it("passes with >= 2 independent sources and positive priorities; quotes the cited sentence", () => {
-    const r = run([{ text: "RunRepeat and Runner's World find it comfortable all day.", domains: ["runrepeat.com", "runnersworld.com"], topic: "all-day comfort", assessment: "positive" }]);
+
+  it("each cited result becomes one source evidence item with its real link, quoting its snippet verbatim", () => {
+    const r = run([
+      { topic: "all-day comfort", assessment: "positive", summary: "RunRepeat and Runner's World find it comfortable all day.", citations: [{ result: 1, quote: "Comfortable for long days on your feet" }, { result: 2, quote: "happily wore all day" }] },
+    ]);
     expect(r.status).toBe("pass");
     expect(r.evidence).toHaveLength(2);
-    expect(r.evidence[0]).toMatchObject({ kind: "source", sourceType: "independent_review", observedOn: "2026-11-14", quote: "RunRepeat and Runner's World find it comfortable all day." });
+    expect(r.evidence[0]).toMatchObject({ kind: "source", url: "https://runrepeat.com/nike-pegasus-40", sourceType: "independent_review", observedOn: "2026-11-14", quote: "Comfortable for long days on your feet" });
+    expect(r.evidence[1]).toMatchObject({ url: "https://www.runnersworld.com/uk/nike-pegasus-40", quote: "happily wore all day" });
+    expect((r.details as ComfortDetails).priorities[0]).toMatchObject({ priority: "all-day comfort", summary: "RunRepeat and Runner's World find it comfortable all day.", evidenceIds: ["ev_comf_1", "ev_comf_2"] });
   });
-  it("warns with fewer than 2 independent sources; manufacturer claims alone never pass", () => {
-    expect(run([{ text: "Comfortable.", domains: ["runrepeat.com", "nike.com"], topic: "all-day comfort", assessment: "positive" }]).status).toBe("warn");
-    expect(run([{ text: "Comfortable.", domains: ["nike.com"], topic: "all-day comfort", assessment: "positive" }]).status).toBe("warn");
+
+  it("takes the site from displayed_link when SerpApi links through a Google redirect", () => {
+    expect(resultDomain({ link: "https://www.google.com/goto?url=CAES", displayed_link: "https://runbryanrun.com › 2023-hoka-clifton-9-review" })).toBe("runbryanrun.com");
+    expect(resultDomain({ link: "https://www.google.co.uk/goto?url=CAES", displayed_link: "https://www.runnersworld.com › uk › gear" })).toBe("runnersworld.com");
+    expect(resultDomain({ link: "https://www.google.com/goto?url=CAES", displayed_link: "30+ reactions", source: "zone2.uk" })).toBe("zone2.uk");
+    expect(resultDomain({ link: "https://www.google.com/goto?url=CAES", displayed_link: "30+ reactions", source: "Facebook · A Runner" })).toBe("");
+    expect(resultDomain({ link: "https://runrepeat.com/x" })).toBe("runrepeat.com");
+    const r = run([{ topic: "all-day comfort", assessment: "positive", summary: "x", citations: [{ result: 1, quote: "" }, { result: 6, quote: "softens after a few runs" }] }]);
+    expect(r.evidence[1]).toMatchObject({ url: "https://www.google.com/goto?url=CAESabc", domain: "believeintherun.com", sourceType: "independent_review", quote: "softens after a few runs" });
+    expect(r.status).toBe("pass"); // a redirect is never mistaken for google.com (a "retailer")
   });
-  it("warns on a negative priority and is unknown with no sources", () => {
-    expect(run([{ text: "The toe box is narrow.", domains: ["runrepeat.com", "runnersworld.com"], topic: "wide fit", assessment: "negative" }]).summary).toMatch(/wide fit/);
-    expect(run([{ text: "Not sure.", domains: [], topic: "wide fit", assessment: "unclear" }]).status).toBe("unknown");
+
+  it("a result with no known site is only what the model says it is, and never merges with another", () => {
+    const anon = (index: number): WebResult => ({ index, title: "Post", link: "https://www.google.com/goto?url=x" + index, domain: "", snippet: "Comfy all day." });
+    const parsed = comfortFromSummary({ points: [{ topic: "all-day comfort", assessment: "positive", summary: "x", citations: [{ result: 1, quote: "" }, { result: 2, quote: "" }] }], sourceTypes: [{ result: 1, type: "independent_review" }] }, [anon(1), anon(2)], priorities);
+    expect(parsed.priorities[0].sources.map((x) => [x.domain, x.sourceType])).toEqual([["result-1", "independent_review"], ["result-2", "other"]]);
+    const r = comfortResult(parsed, { today: "2026-11-14", features: [] });
+    expect(r.evidence[0]).not.toHaveProperty("domain");
   });
-  it("drops points that cite no real sentence or an unknown topic (attribution stays exact)", () => {
-    const g = grounded([["Comfortable all day.", ["runrepeat.com", "runnersworld.com"]]]);
-    const segs = supportedSegments(g.groundingMetadata);
-    const parsed = comfortFromPoints({ points: [{ segment: "S7", topic: "all-day comfort", assessment: "positive" }, { segment: "S1", topic: "style", assessment: "positive" }], sourceTypes: [] }, segs, ["all-day comfort"]);
+
+  it("a quote that isn't in the snippet is replaced by the snippet itself (no invented quotes)", () => {
+    expect(verifiedQuote(results[0], "the most comfortable shoe ever made")).toBe(results[0].snippet);
+    expect(verifiedQuote(results[0], "“Comfortable for long days”")).toBe("Comfortable for long days");
+  });
+
+  it("drops citations of results that don't exist and topics that aren't priorities", () => {
+    const parsed = comfortFromSummary(
+      { points: [{ topic: "all-day comfort", assessment: "positive", summary: "x", citations: [{ result: 9, quote: "" }] }, { topic: "style", assessment: "positive", summary: "x", citations: [{ result: 1, quote: "" }] }], sourceTypes: [] },
+      results,
+      priorities,
+    );
     expect(parsed.priorities).toEqual([]);
   });
+
+  it("warns with fewer than 2 independent sources; manufacturer and retailer claims alone never pass", () => {
+    expect(run([{ topic: "all-day comfort", assessment: "positive", summary: "x", citations: [{ result: 1, quote: "" }, { result: 3, quote: "" }] }]).status).toBe("warn");
+    const r = run([{ topic: "all-day comfort", assessment: "positive", summary: "x", citations: [{ result: 3, quote: "" }, { result: 5, quote: "" }] }]);
+    expect(r.status).toBe("warn");
+    expect(r.evidence.map((e) => e.sourceType)).toEqual(["manufacturer", "retailer"]);
+  });
+
+  it("uses the model's source type only for unknown domains", () => {
+    const blog: WebResult = { index: 1, title: "Blog", link: "https://someblog.net/review", domain: "someblog.net", snippet: "Comfy." };
+    const parsed = comfortFromSummary({ points: [{ topic: "all-day comfort", assessment: "positive", summary: "x", citations: [{ result: 1, quote: "" }] }], sourceTypes: [{ result: 1, type: "independent_review" }] }, [blog], priorities);
+    expect(parsed.priorities[0].sources[0].sourceType).toBe("independent_review");
+  });
+
+  it("warns on a negative priority and is unknown when nothing is cited", () => {
+    expect(run([{ topic: "wide fit", assessment: "negative", summary: "Narrow toe box.", citations: [{ result: 4, quote: "the toe box is a bit narrow" }, { result: 2, quote: "" }] }]).summary).toMatch(/wide fit/);
+    expect(run([{ topic: "wide fit", assessment: "unclear", summary: "Not sure.", citations: [] }]).status).toBe("unknown");
+  });
+
   it("passes review sizing advice through details", () => {
     const r = run([
-      { text: "Comfortable.", domains: ["runrepeat.com", "runnersworld.com"], topic: "all-day comfort", assessment: "positive" },
-      { text: "Size up half.", domains: ["runrepeat.com"], topic: "sizing", sizing: "runs_small" },
+      { topic: "all-day comfort", assessment: "positive", summary: "Comfortable.", citations: [{ result: 1, quote: "" }, { result: 2, quote: "" }] },
+      { topic: "sizing", sizing: "true_to_size", summary: "RunRepeat says it fits true to size.", citations: [{ result: 1, quote: "fits true to size" }] },
     ]);
-    expect(r.details).toMatchObject({ reviewSizing: "runs_small", reviewSizingNote: "Size up half." });
+    expect(r.details).toMatchObject({ reviewSizing: "true_to_size", reviewSizingNote: "RunRepeat says it fits true to size." });
   });
+
   it("snippet fallback caps confidence at 0.6", () => {
     const r = comfortFromSnippets(fixtureReference().reviews, needs, "2026-11-14");
     expect(r.status).toBe("pass");
@@ -114,14 +162,41 @@ describe("grounding + comfort", () => {
   });
 });
 
-describe("comfort structuring: sentence references", () => {
-  it("accepts the sentence id or the sentence text echoed back", () => {
-    const g = grounded([["Comfortable all day, says RunRepeat.", ["runrepeat.com", "runnersworld.com"]], ["Runs half a size small.", ["runrepeat.com"]]]);
-    const segs = supportedSegments(g.groundingMetadata);
-    expect(resolveSegment(segs, "S2")?.text).toBe("Runs half a size small.");
-    expect(resolveSegment(segs, "Comfortable all day, says RunRepeat.")?.id).toBe("S1");
-    expect(resolveSegment(segs, "S1: Comfortable all day, says RunRepeat. (sources: runrepeat.com, runnersworld.com)")?.id).toBe("S1");
-    expect(resolveSegment(segs, "Something the search never said.")).toBeUndefined();
+describe("comfort web search client", () => {
+  it("queries SerpApi google with UK results and caches per model for 7 days", async () => {
+    const store = new MemoryStore(fixtureReference());
+    let now = new Date("2026-11-14T12:00:00Z");
+    const urls: URL[] = [];
+    const { client, requests } = fakeWebSearch({
+      store,
+      now: () => now,
+      fetch: async (url) => {
+        urls.push(new URL(url));
+        return { ok: true, status: 200, json: async () => ({ organic_results: COMFORT_RESULTS }) };
+      },
+    });
+    const q = comfortQuery("Nike", "Pegasus 40");
+    expect(q).toBe("Nike Pegasus 40 review comfort");
+    const first = await client.search(q);
+    expect(first).toMatchObject({ fromCache: false, fetchedOn: "2026-11-14" });
+    expect(first.results).toHaveLength(6);
+    expect(Object.fromEntries(urls[0].searchParams)).toMatchObject({ engine: "google", q, gl: "uk", google_domain: "google.co.uk" });
+    now = new Date("2026-11-20T12:00:00Z");
+    expect(await client.search(q)).toMatchObject({ fromCache: true, fetchedOn: "2026-11-14" });
+    now = new Date("2026-11-21T12:00:01Z");
+    expect(await client.search(q)).toMatchObject({ fromCache: false, fetchedOn: "2026-11-21" });
+    expect(requests).toEqual([q, q]);
+  });
+
+  it("falls back to saved review snippets when the search fails, and never offers Gemini's search tool", async () => {
+    const gemini = { calls: 0 };
+    const base = { model: { brand: "Nike", name: "Pegasus 40" }, needs, today: "2026-11-14", combinedTools: false, executors: {}, snippets: fixtureReference().reviews };
+    const down = fakeWebSearch({ fetch: async () => ({ ok: false, status: 403, json: async () => ({}) }) }).client;
+    const r = await checkComfort({ ...base, webSearch: down, gemini: { generate: async () => { gemini.calls++; throw new Error("unused"); } } as never });
+    expect(r.details).toMatchObject({ fallback: true });
+    expect(gemini.calls).toBe(0);
+    const empty = fakeWebSearch({ results: [] }).client;
+    expect((await checkComfort({ ...base, webSearch: empty, gemini: {} as never })).details).toMatchObject({ fallback: true });
   });
 });
 
