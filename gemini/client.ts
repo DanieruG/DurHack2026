@@ -201,7 +201,8 @@ export function createLiveTransport(apiKey: string | undefined): GeminiTransport
     if (!apiKey) throw new GeminiError("GEMINI_API_KEY is not set");
     if (!ai) {
       const { GoogleGenAI } = await import("@google/genai");
-      ai = new GoogleGenAI({ apiKey });
+      // SDK 3.x defaults to v1, which lacks preview models (e.g. gemini-3.1-pro-preview).
+      ai = new GoogleGenAI({ apiKey, apiVersion: "v1beta" });
     }
     try {
       const res = await ai.models.generateContent({
