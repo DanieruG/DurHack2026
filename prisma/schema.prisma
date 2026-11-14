@@ -1,0 +1,121 @@
+// Prisma 7: no `url` here. The CLI connection is configured in prisma.config.ts,
+// the runtime client is created with the Neon driver adapter in lib/db.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Case {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  status       String // "open" | "investigating" | "closed" | "error"
+  platform     String
+  pageUrl      String?
+  revision     Int      @default(1)
+  inputHash    String
+  needs        Json // UserNeeds snapshot for this case
+  listingFacts Json?
+  identify     Json?
+  verdict      Json?
+  nextMoves    Json?
+  shareOptIn   Boolean  @default(false)
+  // Additions beyond the v2 spec schema (needed by GET /api/cases/:id and reopen):
+  history      Json? // { revision, verdictLabel, at }[]
+  answered     Json? // CheckName[] the seller has already answered (drops repeat questions)
+  inputs       CaseInput[]
+  checks       CheckRecord[]
+  leads        LeadRecord[]
+
+  @@index([updatedAt])
+}
+
+model CaseInput {
+  id        String   @id @default(cuid())
+  caseId    String
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  revision  Int
+  kind      String // "image" | "page_text" | "seller_reply" | "screenshot"
+  mimeType  String?
+  data      Bytes? // image bytes (demo scale; move to object storage later)
+  text      String?
+  sourceUrl String? // original image URL if downloaded
+  position  Int      @default(0) // explicit ordering of images within a case (photoIndex)
+  createdAt DateTime @default(now())
+
+  @@index([caseId, revision])
+}
+
+model CheckRecord {
+  id        String   @id @default(cuid())
+  caseId    String
+  case      Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  revision  Int
+  check     String
+  result    Json // CheckResult
+  createdAt DateTime @default(now())
+
+  @@index([caseId, revision])
+}
+
+model LeadRecord {
+  id       String @id @default(cuid())
+  caseId   String
+  case     Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  revision Int
+  lead     Json
+
+  @@index([caseId, revision])
+}
+
+model CatalogueModel {
+  id           String  @id // e.g. "nike-pegasus-40"
+  brand        String
+  name         String
+  aliases      Json // string[]
+  retailGBP    Float?
+  referenceImg String? // path under /data/images/catalogue
+  sizeChartId  String
+}
+
+model SizeChart {
+  id    String @id
+  brand String
+  rows  Json // [{ uk, us, eu, cm }]
+}
+
+model PriceSample {
+  id          String   @id @default(cuid())
+  modelId     String
+  priceGBP    Float
+  condition   String // "new_with_tags" | "like_new" | "good" | "worn"
+  platform    String
+  collectedOn DateTime
+  ruleId      String // which sampling rule produced it (see data/sampling-rules.md)
+
+  @@index([modelId])
+}
+
+model ReviewSnippet {
+  // fallback only, when grounding fails
+  id         String @id @default(cuid())
+  modelId    String
+  text       String
+  url        String
+  title      String
+  sourceType String
+  topics     Json
+
+  @@index([modelId])
+}
+
+model CacheEntry {
+  key       String   @id
+  value     Json
+  createdAt DateTime @default(now())
+}

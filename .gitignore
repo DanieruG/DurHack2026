@@ -1,0 +1,11 @@
+node_modules/
+.next/
+next-env.d.ts
+generated/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+coverage/
+eval/report.md
+.neon
