@@ -1,0 +1,200 @@
+[
+  {
+    "id": "nike-pegasus-40",
+    "brand": "Nike",
+    "name": "Pegasus 40",
+    "aliases": [
+      "Air Zoom Pegasus 40",
+      "Pegasus40",
+      "Peg 40"
+    ],
+    "retailGBP": 119.95,
+    "referenceImg": "nike-pegasus-40.jpg",
+    "sizeChartId": "nike-mens"
+  },
+  {
+    "id": "nike-pegasus-41",
+    "brand": "Nike",
+    "name": "Pegasus 41",
+    "aliases": [
+      "Pegasus41",
+      "Peg 41"
+    ],
+    "retailGBP": 124.99,
+    "referenceImg": "nike-pegasus-41.jpg",
+    "sizeChartId": "nike-mens"
+  },
+  {
+    "id": "nike-air-force-1-07",
+    "brand": "Nike",
+    "name": "Air Force 1 '07",
+    "aliases": [
+      "Air Force 1",
+      "AF1",
+      "Air Force One",
+      "AF1 07"
+    ],
+    "retailGBP": 109.99,
+    "referenceImg": "nike-air-force-1-07.jpg",
+    "sizeChartId": "nike-mens"
+  },
+  {
+    "id": "nike-air-max-90",
+    "brand": "Nike",
+    "name": "Air Max 90",
+    "aliases": [
+      "AM90",
+      "Airmax 90"
+    ],
+    "retailGBP": 139.99,
+    "referenceImg": "nike-air-max-90.jpg",
+    "sizeChartId": "nike-mens"
+  },
+  {
+    "id": "nike-dunk-low",
+    "brand": "Nike",
+    "name": "Dunk Low",
+    "aliases": [
+      "Dunk Low Retro",
+      "Dunks"
+    ],
+    "retailGBP": 109.99,
+    "referenceImg": "nike-dunk-low.jpg",
+    "sizeChartId": "nike-mens"
+  },
+  {
+    "id": "adidas-samba-og",
+    "brand": "Adidas",
+    "name": "Samba OG",
+    "aliases": [
+      "Samba",
+      "Sambas"
+    ],
+    "retailGBP": 100.0,
+    "referenceImg": "adidas-samba-og.jpg",
+    "sizeChartId": "adidas-mens"
+  },
+  {
+    "id": "adidas-gazelle",
+    "brand": "Adidas",
+    "name": "Gazelle",
+    "aliases": [
+      "Gazelles",
+      "Gazelle Indoor"
+    ],
+    "retailGBP": 90.0,
+    "referenceImg": "adidas-gazelle.jpg",
+    "sizeChartId": "adidas-mens"
+  },
+  {
+    "id": "adidas-ultraboost-light",
+    "brand": "Adidas",
+    "name": "Ultraboost Light",
+    "aliases": [
+      "Ultraboost",
+      "Ultra Boost Light",
+      "UB Light"
+    ],
+    "retailGBP": 170.0,
+    "referenceImg": "adidas-ultraboost-light.jpg",
+    "sizeChartId": "adidas-mens"
+  },
+  {
+    "id": "new-balance-550",
+    "brand": "New Balance",
+    "name": "550",
+    "aliases": [
+      "NB 550",
+      "BB550"
+    ],
+    "retailGBP": 120.0,
+    "referenceImg": "new-balance-550.jpg",
+    "sizeChartId": "newbalance-mens"
+  },
+  {
+    "id": "new-balance-574",
+    "brand": "New Balance",
+    "name": "574",
+    "aliases": [
+      "NB 574",
+      "ML574"
+    ],
+    "retailGBP": 90.0,
+    "referenceImg": "new-balance-574.jpg",
+    "sizeChartId": "newbalance-mens"
+  },
+  {
+    "id": "new-balance-1080-v13",
+    "brand": "New Balance",
+    "name": "Fresh Foam X 1080 v13",
+    "aliases": [
+      "1080v13",
+      "1080 v13",
+      "Fresh Foam 1080"
+    ],
+    "retailGBP": 175.0,
+    "referenceImg": "new-balance-1080-v13.jpg",
+    "sizeChartId": "newbalance-mens"
+  },
+  {
+    "id": "asics-gel-kayano-30",
+    "brand": "Asics",
+    "name": "Gel-Kayano 30",
+    "aliases": [
+      "Kayano 30",
+      "Gel Kayano 30"
+    ],
+    "retailGBP": 170.0,
+    "referenceImg": "asics-gel-kayano-30.jpg",
+    "sizeChartId": "asics-mens"
+  },
+  {
+    "id": "asics-novablast-4",
+    "brand": "Asics",
+    "name": "Novablast 4",
+    "aliases": [
+      "Nova Blast 4",
+      "Novablast4"
+    ],
+    "retailGBP": 140.0,
+    "referenceImg": "asics-novablast-4.jpg",
+    "sizeChartId": "asics-mens"
+  },
+  {
+    "id": "hoka-clifton-9",
+    "brand": "Hoka",
+    "name": "Clifton 9",
+    "aliases": [
+      "Hoka One One Clifton 9",
+      "Clifton9"
+    ],
+    "retailGBP": 130.0,
+    "referenceImg": "hoka-clifton-9.jpg",
+    "sizeChartId": "hoka-mens"
+  },
+  {
+    "id": "on-cloudmonster",
+    "brand": "On",
+    "name": "Cloudmonster",
+    "aliases": [
+      "On Running Cloudmonster",
+      "Cloud Monster"
+    ],
+    "retailGBP": 160.0,
+    "referenceImg": "on-cloudmonster.jpg",
+    "sizeChartId": "on-mens"
+  },
+  {
+    "id": "converse-chuck-70-hi",
+    "brand": "Converse",
+    "name": "Chuck 70 Hi",
+    "aliases": [
+      "Chuck Taylor 70",
+      "Chuck 70",
+      "CT70"
+    ],
+    "retailGBP": 85.0,
+    "referenceImg": "converse-chuck-70-hi.jpg",
+    "sizeChartId": "converse-unisex"
+  }
+]
