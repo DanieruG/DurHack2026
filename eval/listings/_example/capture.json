@@ -1,0 +1,8 @@
+{
+  "capture": {
+    "pageUrl": "https://www.vinted.co.uk/items/0000000000-example",
+    "pageText": "Nike Air Zoom Pegasus 40\n£38.00\nSize: UK 9\nCondition: Very good\nWorn twice, no box.",
+    "imageUrls": []
+  },
+  "profile": { "sizes": [{ "brand": "Nike", "size": 9, "system": "UK" }], "priorities": ["all-day comfort"], "wearTolerance": "light" }
+}
