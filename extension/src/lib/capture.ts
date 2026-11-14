@@ -1,4 +1,5 @@
 import { detectPlatform } from "@/lib/platform";
+import { redact } from "@/lib/redact";
 import { MAX_PAGE_TEXT, type Capture, type Platform } from "@/schemas/domain";
 
 /** What the in-page collector returns. Plain data only (it crosses the scripting boundary). */
@@ -97,12 +98,8 @@ const SELLER_LINE = /member since|followers|following|last seen|active \d+\s*(mi
 
 /** First layer of seller-identity redaction (the backend runs a second). */
 export function redactPageText(text: string): string {
-  return text
-    .split("\n")
-    .filter((line) => !SELLER_LINE.test(line))
-    .join("\n")
-    .trim()
-    .slice(0, MAX_PAGE_TEXT);
+  // Same rules as the backend (seller cards, usernames, handles), plus a few extra line filters.
+  return redact(text.split("\n").filter((line) => !SELLER_LINE.test(line)).join("\n")).text.slice(0, MAX_PAGE_TEXT);
 }
 
 const SITE_SUFFIX = /\s+[|·–—-]\s+[^|·–—-]{2,40}$/;
