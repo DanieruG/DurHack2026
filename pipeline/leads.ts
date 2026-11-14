@@ -39,9 +39,14 @@ Allowed lead types:
 - flag_for_seller: a gap only the seller can fill; set relatesTo to the check it concerns.
 Return {"leads": []} when nothing needs following up. Each lead needs a one-sentence reason.`;
 
-/** Something "looks off": any non-pass check, or a low-confidence one. */
+/** Unknown only because a search (comfort grounding, Shopping) failed: no lead can recover it. */
+export function unknownFromSearch(c: CheckResult): boolean {
+  return c.status === "unknown" && (c.details as { searchFailed?: boolean } | undefined)?.searchFailed === true;
+}
+
+/** Something "looks off": any non-pass check, or a low-confidence one, ignoring checks that are unknown only from a search failure. */
 export function needsLeads(checks: CheckResult[]): boolean {
-  return checks.some((c) => c.status !== "pass" || c.confidence < 0.6);
+  return checks.some((c) => !unknownFromSearch(c) && (c.status !== "pass" || c.confidence < 0.6));
 }
 
 export function compactSummary(checks: CheckResult[]) {
@@ -170,7 +175,7 @@ async function executeLead(
       if (photo === undefined) return { checks, updated: [], status: "skipped", outcome: "No photo to recheck." };
       const min = ctx.deps.config.identifyConfidenceMin;
       const before = subjectOf(ctx.identify, min, ctx.ref.catalogue);
-      const { result, check } = await runIdentify(ctx, { onlyPhotoIndex: photo });
+      const { result, check } = await runIdentify(ctx, { onlyPhotoIndex: photo, tier: "strong" }); // the only Pro call
       const after = subjectOf(result, min, ctx.ref.catalogue);
       const changed = after.displayName !== before.displayName || after.catalogue?.id !== before.catalogue?.id;
       // Adopt the recheck only when it names a model confidently and differs from what we had.

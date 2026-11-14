@@ -220,6 +220,7 @@ export async function checkCondition(args: {
   const { data } = await generateStructured(args.gemini, ConditionWireSchema, {
     stage: "condition",
     tier: "fast",
+    thinking: "LOW",
     system: CONDITION_SYSTEM,
     parts: conditionParts(args.images, args.facts),
     temperature: 0,

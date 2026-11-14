@@ -203,7 +203,20 @@ export function makeDeps(
       calls.push(req);
       const h = handlers[req.stage];
       if (!h) throw new Error(`No mock for stage ${req.stage}`);
-      return h(req);
+      const res = await h(req);
+      // Extract and identify are one call now (examine.ts): the mock's identification comes from the identify handler.
+      if (req.stage === "extract" && handlers.identify && !res.functionCalls.length) {
+        try {
+          const body = JSON.parse(res.text);
+          if (body && typeof body === "object" && !("identification" in body)) {
+            const id = await handlers.identify({ ...req, stage: "identify" });
+            return { ...res, text: JSON.stringify({ ...body, identification: JSON.parse(id.text) }) };
+          }
+        } catch {
+          /* not JSON: return as is */
+        }
+      }
+      return res;
     },
   });
   const images = opts.images ?? { "https://img.example.com/1.jpg": PNG, "https://img.example.com/2.jpg": PNG };

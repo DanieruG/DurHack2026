@@ -129,6 +129,7 @@ export async function extractListing(
   const { data } = await generateStructured(gemini, ExtractWireSchema, {
     stage: "extract",
     tier: "fast",
+    thinking: "LOW",
     system: EXTRACT_SYSTEM,
     parts: extractParts(args.pageText, args.images, args.platform),
   });

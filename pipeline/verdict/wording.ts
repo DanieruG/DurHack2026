@@ -102,6 +102,7 @@ export async function decideAndWordVerdict(
         const { data } = await generateStructured(gemini, WordingWireSchema, {
           stage: "verdict",
           tier: "fast",
+          thinking: "LOW",
           system: WORDING_SYSTEM,
           parts: [{ text: prompt + feedback }],
           temperature: 0.6,

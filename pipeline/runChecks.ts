@@ -2,6 +2,7 @@ import type { CheckName, CheckResult, ConditionGrade, IdentifyResult, ListingFac
 import type { SizeChart } from "@/schemas/seed";
 import type { ReferenceData } from "@/lib/seedData";
 import { makeToolExecutors, type ToolExecutor } from "@/gemini/tools";
+import type { Tier } from "@/gemini/client";
 import type { Deps } from "./deps";
 import type { Emit } from "./events";
 import type { CaseImage } from "./intake";
@@ -63,7 +64,8 @@ export function subjectFor(ctx: RunCtx): Subject {
   return subjectOf(ctx.identify, ctx.deps.config.identifyConfidenceMin, ctx.ref.catalogue);
 }
 
-export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number } = {}): Promise<{ result: IdentifyResult; check: CheckResult }> {
+/** Identify on its own (Flash; the recheck lead passes tier "strong"). New investigations use the merged call instead. */
+export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number; tier?: Tier } = {}): Promise<{ result: IdentifyResult; check: CheckResult }> {
   const { config } = ctx.deps;
   try {
     const result = await runStage("identify", { emit: ctx.emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"] }, () =>
@@ -74,9 +76,10 @@ export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number }
         catalogue: ctx.ref.catalogue,
         readReferenceImage: ctx.deps.readReferenceImage,
         onlyPhotoIndex: opts.onlyPhotoIndex,
+        tier: opts.tier,
       }),
     );
-    return { result, check: identifyCheck(result, { min: config.identifyConfidenceMin, catalogue: ctx.ref.catalogue, hadImages: ctx.images.length > 0 }) };
+    return { result, check: toIdentifyCheck(ctx, result) };
   } catch (err) {
     const result: IdentifyResult = { brand: null, brandConfidence: 0, modelName: null, catalogueModelId: null, inCatalogue: false, confidence: 0, reasons: "Identification failed", evidence: [] };
     return { result, check: unknownCheck("identify", plainError("identify", err), { details: { tier: "none", catalogueModelId: null, inCatalogue: false, gatePassed: false } }) };
@@ -84,6 +87,10 @@ export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number }
 }
 
 export type CheckOpts = { priceCondition?: ConditionGrade; forceSourceB?: boolean };
+
+export function toIdentifyCheck(ctx: RunCtx, result: IdentifyResult): CheckResult {
+  return identifyCheck(result, { min: ctx.deps.config.identifyConfidenceMin, catalogue: ctx.ref.catalogue, hadImages: ctx.images.length > 0 });
+}
 
 /** Run one downstream check as a stage. Errors and timeouts become `unknown` with a plain explanation. */
 export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOpts = {}): Promise<CheckResult> {
@@ -135,7 +142,8 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     });
   } catch (err) {
     ctx.emit("error", { stage: name, message: plainError(name, err) });
-    return unknownCheck(name, plainError(name, err));
+    const searchFailed = name === "price" || name === "comfort";
+    return unknownCheck(name, plainError(name, err), searchFailed ? { details: { searchFailed: true } } : {});
   }
 }
 

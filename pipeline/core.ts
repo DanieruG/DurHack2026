@@ -8,6 +8,7 @@ import { inputHashFor, toCaseImages, type CaseImage } from "./intake";
 import { generateNextMoves } from "./nextMoves";
 import type { RunCtx } from "./runChecks";
 import { decideAndWordVerdict } from "./verdict/wording";
+import { decideVerdict } from "./verdict/rules";
 import { runStage } from "./util";
 
 export async function loadImages(deps: Deps, caseId: string): Promise<CaseImage[]> {
@@ -64,13 +65,17 @@ export async function finalise(
   const timeoutMs = deps.config.stageTimeoutMs;
   const identifyPassed = brandKnown(ctx.identify, deps.config.identifyConfidenceMin, ctx.ref.catalogue);
 
-  const { verdict } = await runStage("verdict", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () =>
-    decideAndWordVerdict(deps.gemini, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence }),
-  ).catch(() => decideAndWordVerdict(null, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence }));
-
-  const nextMoves = await runStage("next_moves", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () =>
-    generateNextMoves(deps.gemini, { checks: args.checks, leads: args.leads, label: verdict.label, answered: args.answered }),
-  ).catch(() => generateNextMoves(null, { checks: args.checks, leads: args.leads, label: verdict.label, answered: args.answered }));
+  // The label is decided by code rules, so wording the verdict and phrasing next moves can run at the same time.
+  const label = decideVerdict(args.checks, identifyPassed).label;
+  const movesArgs = { checks: args.checks, leads: args.leads, label, answered: args.answered };
+  const [{ verdict }, nextMoves] = await Promise.all([
+    runStage("verdict", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () =>
+      decideAndWordVerdict(deps.gemini, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence }),
+    ).catch(() => decideAndWordVerdict(null, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence })),
+    runStage("next_moves", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () => generateNextMoves(deps.gemini, movesArgs)).catch(() =>
+      generateNextMoves(null, movesArgs),
+    ),
+  ]);
 
   const identify: IdentifyResult | null = ctx.identify;
   await deps.store.saveChecks(caseId, revision, args.checks);

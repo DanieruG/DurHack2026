@@ -271,7 +271,9 @@ export async function checkComfort(args: {
     return await withSearchBudget(args.searchTimeoutMs, () => searchComfort(args, priorities));
   } catch (err) {
     if ((err as Error)?.name === "StageTimeoutError") throw err;
-    return comfortFromSnippets(args.snippets, args.needs, args.today);
+    const fallback = comfortFromSnippets(args.snippets, args.needs, args.today);
+    // Unknown only because the search failed (no saved reviews to fall back on): leads can't fix that.
+    return fallback.status === "unknown" ? { ...fallback, details: { ...fallback.details, searchFailed: true } } : fallback;
   }
 }
 

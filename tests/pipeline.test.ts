@@ -4,7 +4,7 @@ import { startReopen } from "@/pipeline/reopen";
 import { IDENTIFY_SYSTEM } from "@/pipeline/identify";
 import { CaseDiffSchema, CheckResultSchema, SseEventSchemas, VerdictSchema } from "@/schemas";
 import type { CheckResult, NextMove, Verdict } from "@/schemas/domain";
-import { checksFrom, eventNames, grounded, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, shoppingFixture, type Handler } from "./helpers";
+import { checksFrom, eventNames, fixtureReference, grounded, happyHandlers, json, makeDeps, PAGE_TEXT, PNG, PROFILE, promptText, shoppingFixture, type Handler } from "./helpers";
 
 const capture = {
   pageUrl: "https://www.vinted.co.uk/items/123-nike-pegasus?referrer=x",
@@ -126,6 +126,66 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
   });
 
+  it("latency: extract + identify is one Flash call at low thinking; verdict and next moves overlap", async () => {
+    let verdictDone = 0;
+    let movesStarted = 0;
+    const base = happyHandlers();
+    const deps = makeDeps({
+      handlers: {
+        verdict: async (req) => {
+          await new Promise((r) => setTimeout(r, 40));
+          verdictDone = Date.now();
+          return base.verdict(req);
+        },
+        next_moves: (req) => {
+          movesStarted ||= Date.now();
+          return base.next_moves(req);
+        },
+      },
+    });
+    const { events } = await investigate(deps);
+    const extract = deps.calls.filter((c) => c.stage === "extract");
+    expect(extract).toHaveLength(1);
+    expect(extract[0]).toMatchObject({ tier: "fast", config: { thinkingConfig: { thinkingLevel: "LOW" } } });
+    expect(stageCalls(deps, "identify")).toBe(0);
+    expect(checksFrom(events).identify).toMatchObject({ status: "pass", details: { catalogueModelId: "nike-pegasus-40" } });
+    for (const stage of ["condition", "verdict", "next_moves"]) {
+      expect(deps.calls.find((c) => c.stage === stage)?.config?.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+    }
+    expect(movesStarted).toBeGreaterThan(0);
+    expect(movesStarted).toBeLessThan(verdictDone); // next moves started before the verdict wording finished
+  });
+
+  it("if the merged call fails, identify runs on its own (Flash) so the case still has a chance", async () => {
+    const deps = makeDeps({ handlers: { extract: () => ({ text: "not json", functionCalls: [] }) } });
+    const { events } = await investigate(deps);
+    expect(deps.calls.filter((c) => c.stage === "identify").map((c) => c.tier)).toEqual(["fast"]);
+    expect(checksFrom(events).identify.status).toBe("pass");
+  });
+
+  it("the recheck_identification lead is the only Pro call", async () => {
+    const deps = makeDeps({
+      handlers: {
+        comfort: () => grounded([["PRIORITY | all-day comfort | mixed | Some find it firm.", ["runrepeat.com"]]]),
+        leads: () => json({ leads: [{ type: "recheck_identification", reason: "Pegasus 40 vs 41.", photoIndex: 0 }] }),
+      },
+    });
+    await investigate(deps);
+    expect(deps.calls.filter((c) => c.tier === "strong").map((c) => c.stage)).toEqual(["identify"]);
+  });
+
+  it("skips leads when the only open checks are unknown because a search failed", async () => {
+    const ref = fixtureReference();
+    const deps = makeDeps({
+      reference: { ...ref, reviews: [] }, // no saved reviews to fall back on
+      handlers: { comfort: () => grounded([["No sources at all.", []]]) }, // the search returns no cited sentences
+    });
+    const { events } = await investigate(deps);
+    const checks = checksFrom(events);
+    expect(checks.comfort).toMatchObject({ status: "unknown", details: { searchFailed: true } });
+    expect(stageCalls(deps, "leads")).toBe(0);
+  });
+
   it("identify is told to use only this listing, never other listings on the page", () => {
     expect(IDENTIFY_SYSTEM).toMatch(/ONLY this listing's own title, item details, description and photos/);
     expect(IDENTIFY_SYSTEM).toMatch(/similar items/);
@@ -188,7 +248,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect((priceEvents[0].data as CheckResult).geminiFeatures).toEqual([]);
     expect((priceEvents[1].data as CheckResult).geminiFeatures).toEqual(["function_calling"]);
     expect(deps.shoppingRequests).toEqual(["Nike Pegasus 40"]);
-    expect(stageCalls(deps, "identify")).toBe(1); // third lead not executed
+    expect(stageCalls(deps, "identify")).toBe(0); // identified inside the merged extract call; the recheck lead (3rd) wasn't executed
     expect((await deps.store.getLeads(caseId, 1))).toHaveLength(2);
     const moves = (await deps.store.getCase(caseId))!.nextMoves as NextMove[];
     expect(moves.some((m) => m.kind === "ask_seller" && m.relatesTo.includes("comfort"))).toBe(true);

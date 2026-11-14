@@ -4,7 +4,7 @@ import type { CatalogueModel } from "@/schemas/seed";
 import { getCatalogueCandidates, MAX_CANDIDATES } from "@/lib/catalogue";
 import type { StoredImage } from "@/lib/images";
 import { generateStructured } from "@/gemini/structured";
-import { imagePart, type GeminiClient, type Part } from "@/gemini/client";
+import { imagePart, type GeminiClient, type Part, type Tier } from "@/gemini/client";
 import type { CaseImage } from "./intake";
 import { clamp01, evidenceIds, textContains } from "./util";
 
@@ -21,7 +21,8 @@ export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listi
 - evidence: what you relied on: kind "quote" with exact text from this listing, or kind "photo_region" with photoIndex and box2d
   [ymin, xmin, ymax, xmax] normalised 0-1000 (e.g. tongue label, logo, sole pattern).`;
 
-function wireSchema(ids: string[]) {
+/** Identification fields (shared by identify and the merged extract+identify call). */
+export function identifyWireSchema(ids: string[]) {
   return z.object({
     brand: z.string().nullish(),
     brandConfidence: z.number().min(0).max(1).nullish(),
@@ -99,49 +100,35 @@ function cleanModelName(brand: string | null, modelName: string | null | undefin
   return name && !/^(unknown|none|n\/a)$/i.test(name) ? name.slice(0, 80) : null;
 }
 
-export async function identifyProduct(
-  gemini: GeminiClient,
-  args: {
-    facts: ListingFacts;
-    images: CaseImage[];
-    pageText: string;
-    catalogue: CatalogueModel[];
-    readReferenceImage: (p: string) => Promise<StoredImage | null>;
-    /** Lead "recheck_identification" sends a single photo. */
-    onlyPhotoIndex?: number;
-  },
-): Promise<IdentifyResult> {
-  const candidates = getCatalogueCandidates(args.facts, args.catalogue);
-  const shortlist = candidates.slice(0, Math.max(MAX_CANDIDATES, Math.min(candidates.length, 20)));
-  const refs = await Promise.all(
-    shortlist.slice(0, MAX_CANDIDATES).map(async (m) => ({ m, img: m.referenceImg ? await args.readReferenceImage(m.referenceImg) : null })),
-  );
-  const photos = args.onlyPhotoIndex !== undefined ? args.images.filter((i) => i.index === args.onlyPhotoIndex) : args.images.slice(0, 6);
+export type IdentifyWire = z.infer<ReturnType<typeof identifyWireSchema>>;
 
-  const parts: Part[] = [
-    {
-      text:
-        `Listing facts: ${JSON.stringify({ title: args.facts.title, brand: args.facts.brandText, model: args.facts.modelText })}\n` +
-        `Listing text:\n"""\n${args.pageText.slice(0, 4000) || "(none)"}\n"""\n` +
-        `Candidate catalogue models (this pair may be none of them):\n${shortlist.map((m) => `- ${m.id}: ${m.brand} ${m.name} (aka ${m.aliases.join(", ") || "-"})`).join("\n")}`,
-    },
-  ];
-  for (const p of photos) parts.push({ text: `Listing photo ${p.index}:` }, imagePart(p));
-  for (const r of refs) if (r.img) parts.push({ text: `Reference image for ${r.m.id}:` }, imagePart(r.img));
+/** Catalogue shortlist for a listing: by extracted brand/model/title, or by the page text when nothing is extracted yet. */
+export function identifyShortlist(hay: { brandText?: string; modelText?: string; title?: string }, catalogue: CatalogueModel[]): CatalogueModel[] {
+  const candidates = getCatalogueCandidates(hay, catalogue);
+  return candidates.slice(0, Math.max(MAX_CANDIDATES, Math.min(candidates.length, 20)));
+}
 
-  const { data } = await generateStructured(gemini, wireSchema(shortlist.map((m) => m.id)), {
-    stage: "identify",
-    tier: "strong",
-    system: IDENTIFY_SYSTEM,
-    parts,
-  });
+export function candidateList(shortlist: CatalogueModel[]): string {
+  return `Candidate catalogue models (this pair may be none of them):\n${shortlist.map((m) => `- ${m.id}: ${m.brand} ${m.name} (aka ${m.aliases.join(", ") || "-"})`).join("\n")}`;
+}
 
+/** Reference images for the top candidates (when the catalogue has them). */
+export async function referenceParts(shortlist: CatalogueModel[], read: (p: string) => Promise<StoredImage | null>): Promise<Part[]> {
+  const refs = await Promise.all(shortlist.slice(0, MAX_CANDIDATES).map(async (m) => ({ m, img: m.referenceImg ? await read(m.referenceImg) : null })));
+  return refs.flatMap((r) => (r.img ? [{ text: `Reference image for ${r.m.id}:` }, imagePart(r.img)] : []));
+}
+
+/** Map the wire identification to IdentifyResult: verify evidence, canonicalise brand, match the catalogue. */
+export function toIdentifyResult(
+  data: IdentifyWire,
+  args: { shortlist: CatalogueModel[]; catalogue: CatalogueModel[]; pageText: string; photoCount: number },
+): IdentifyResult {
   const nextId = evidenceIds("id");
   const evidence: Evidence[] = [];
   for (const e of data.evidence) {
     if (e.kind === "quote" && e.quote && textContains(args.pageText, e.quote)) {
       evidence.push({ id: nextId(), kind: "quote", label: e.label, quote: e.quote });
-    } else if (e.kind === "photo_region" && e.photoIndex != null && e.photoIndex < args.images.length) {
+    } else if (e.kind === "photo_region" && e.photoIndex != null && e.photoIndex < args.photoCount) {
       const box = e.box2d?.map((n) => Math.max(0, Math.min(1000, Math.round(n)))) as [number, number, number, number] | undefined;
       evidence.push({ id: nextId(), kind: "photo_region", label: e.label, photoIndex: e.photoIndex, box2d: box });
     }
@@ -149,7 +136,7 @@ export async function identifyProduct(
   const rawBrand = data.brand?.replace(/\s+/g, " ").trim() || null;
   const brand = rawBrand ? (args.catalogue.find((m) => norm(m.brand) === norm(rawBrand))?.brand ?? rawBrand.slice(0, 60)) : null;
   const modelName = cleanModelName(brand, data.modelName);
-  const picked = data.catalogueModelId ? (shortlist.find((m) => m.id === data.catalogueModelId) ?? null) : null;
+  const picked = data.catalogueModelId ? (args.shortlist.find((m) => m.id === data.catalogueModelId) ?? null) : null;
   const model = picked ?? matchCatalogue(brand, modelName, args.catalogue);
   const confidence = model || modelName ? clamp01(data.confidence) : 0;
   return {
@@ -162,6 +149,45 @@ export async function identifyProduct(
     reasons: data.reasons,
     evidence,
   };
+}
+
+/**
+ * Identify on its own: the recheck_identification lead (tier "strong", one photo) and reopen (tier "fast").
+ * A new investigation identifies inside the merged extract+identify call instead (examine.ts).
+ */
+export async function identifyProduct(
+  gemini: GeminiClient,
+  args: {
+    facts: ListingFacts;
+    images: CaseImage[];
+    pageText: string;
+    catalogue: CatalogueModel[];
+    readReferenceImage: (p: string) => Promise<StoredImage | null>;
+    /** Lead "recheck_identification" sends a single photo. */
+    onlyPhotoIndex?: number;
+    tier?: Tier;
+  },
+): Promise<IdentifyResult> {
+  const shortlist = identifyShortlist(args.facts, args.catalogue);
+  const photos = args.onlyPhotoIndex !== undefined ? args.images.filter((i) => i.index === args.onlyPhotoIndex) : args.images.slice(0, 6);
+  const parts: Part[] = [
+    {
+      text:
+        `Listing facts: ${JSON.stringify({ title: args.facts.title, brand: args.facts.brandText, model: args.facts.modelText })}\n` +
+        `Listing text:\n"""\n${args.pageText.slice(0, 4000) || "(none)"}\n"""\n` +
+        candidateList(shortlist),
+    },
+  ];
+  for (const p of photos) parts.push({ text: `Listing photo ${p.index}:` }, imagePart(p));
+  parts.push(...(await referenceParts(shortlist, args.readReferenceImage)));
+
+  const { data } = await generateStructured(gemini, identifyWireSchema(shortlist.map((m) => m.id)), {
+    stage: "identify",
+    tier: args.tier ?? "fast",
+    system: IDENTIFY_SYSTEM,
+    parts,
+  });
+  return toIdentifyResult(data, { shortlist, catalogue: args.catalogue, pageText: args.pageText, photoCount: args.images.length });
 }
 
 export function identifyCheck(

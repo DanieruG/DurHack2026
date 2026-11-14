@@ -1,11 +1,12 @@
-import type { ListingFacts, UserNeeds } from "@/schemas/domain";
+import type { CheckResult, ListingFacts, UserNeeds } from "@/schemas/domain";
 import type { Deps } from "./deps";
-import { emptyFacts, extractListing } from "./extract";
+import { emptyFacts } from "./extract";
+import { examineListing } from "./examine";
 import { buildNeeds } from "./needs";
 import { brandKnown } from "./identify";
 import { inputHashFor, intakeImages, prepareText, type CaseRequest } from "./intake";
 import { followLeads } from "./leads";
-import { buildCtx, runDownstream, runIdentify } from "./runChecks";
+import { buildCtx, runDownstream, runIdentify, toIdentifyCheck } from "./runChecks";
 import { runStage } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
 import { finalise, instrumented, loadImages, loadPageText } from "./core";
@@ -71,21 +72,33 @@ export async function runInvestigation(deps: Deps, caseId: string, opts: { image
     const [images, pageText, ref] = await Promise.all([loadImages(deps, caseId), loadPageText(deps, caseId), deps.store.getReference()]);
     if (images.length === 0) emit("capture_warning", { message: "No photos available, so condition can't be checked" });
 
-    const [facts, needs] = await Promise.all([
+    // One Flash call reads the listing and identifies the pair (extract + identify merged).
+    const [examined, needs] = await Promise.all([
       runStage("extract", { emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"] }, () =>
-        extractListing(deps.gemini, { pageText, images, platform: c.platform }),
-      ).catch((): ListingFacts => {
-        emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
-        return emptyFacts(c.platform, images.length);
-      }),
+        examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage }),
+      ).catch(() => null),
       c.needs.caseNote
         ? runStage("needs", { emit, timeoutMs: config.stageTimeoutMs }, () => buildNeeds(profileFromNeeds(c.needs), c.needs.caseNote, deps.gemini)).catch(() => c.needs)
         : Promise.resolve(c.needs),
     ]);
+    if (!examined) emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
+    const facts: ListingFacts = examined?.facts ?? emptyFacts(c.platform, images.length);
 
     const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null });
-    const { result: identify, check: identifyCheck } = await runIdentify(ctx);
-    ctx.identify = identify;
+    let identifyCheck: CheckResult;
+    if (examined) {
+      ctx.identify = examined.identify;
+      identifyCheck = toIdentifyCheck(ctx, examined.identify);
+      // The identification came with the merged call; mark the stage so the progress log shows it.
+      emit("stage_started", { stage: "identify", geminiFeatures: ["vision", "structured_output"] });
+      emit("stage_done", { stage: "identify", geminiFeatures: ["vision", "structured_output"] });
+    } else {
+      // The merged call failed: identify on its own so the case still has a chance.
+      const r = await runIdentify(ctx);
+      ctx.identify = r.result;
+      identifyCheck = r.check;
+    }
+    const identify = ctx.identify!;
     emit("check_done", identifyCheck);
 
     // Each check runs on whatever identify established (brand / model / catalogue); condition runs on photos alone.

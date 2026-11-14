@@ -176,6 +176,8 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       conditionGrade: usedGrade ?? null,
       sourceBRun: ranB,
       retailerOffers: offersSeen,
+      // Unknown only because the Shopping lookup failed or found too few retailers.
+      searchFailed: decision.status === "unknown" && ranB && !newPrice,
       inCatalogue,
     },
   };

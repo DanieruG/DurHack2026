@@ -134,6 +134,7 @@ export async function generateNextMoves(
       const { data } = await generateStructured(gemini, PhrasingWireSchema, {
         stage: "next_moves",
         tier: "fast",
+        thinking: "LOW",
         system: PHRASING_SYSTEM,
         parts: [
           {
