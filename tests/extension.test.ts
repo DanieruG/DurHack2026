@@ -116,7 +116,7 @@ describe("case file evidence", () => {
   it("numbers comfort sources and states price sources with dates", () => {
     expect(sourceRefs(CASE_FILE.checks[3]).map((r) => r.n)).toEqual([1, 2, 3]);
     const p = priceView(CASE_FILE.checks[4]);
-    expect(p.lines).toEqual(["Compared with 12 listings sampled 10 Nov.", "New price £75 at 3 retailers."]);
+    expect(p.lines).toEqual(["Compared with 12 listings sampled 10 Nov.", "New price £75, median of 3 UK retailers."]);
     expect(p.strip!.listing).toBeLessThan(p.strip!.p25);
   });
 
