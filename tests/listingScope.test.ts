@@ -30,16 +30,16 @@ describe("listing scope: page text", () => {
 });
 
 describe("listing scope: images", () => {
-  it("eBay: drops other listings' /thumbs/ images and keeps the largest size of each photo, in page order", () => {
+  it("eBay: drops other listings' /thumbs/ images and keeps each photo once, at full size, in page order", () => {
     const urls = [
       "https://i.ebayimg.com/images/g/AS4AAeSw505qR4He/s-l400.jpg",
       "https://i.ebayimg.com/images/g/AS4AAeSw505qR4He/s-l1600.webp",
-      "https://i.ebayimg.com/images/g/yvcAAeSwts9qR4Hg/s-l1600.webp",
+      "https://i.ebayimg.com/images/g/yvcAAeSwts9qR4Hg/s-l64.webp",
       "https://i.ebayimg.com/thumbs/images/g/Rp0AAeSwY-tq4Nzq/s-l500.jpg",
       "https://i.ebayimg.com/images/g/obUAAeSwn0ZqR4Hf/s-l1600.webp",
     ];
     expect(scopeListingImages(urls, "ebay")).toEqual([
-      "https://i.ebayimg.com/images/g/AS4AAeSw505qR4He/s-l1600.webp",
+      "https://i.ebayimg.com/images/g/AS4AAeSw505qR4He/s-l1600.jpg",
       "https://i.ebayimg.com/images/g/yvcAAeSwts9qR4Hg/s-l1600.webp",
       "https://i.ebayimg.com/images/g/obUAAeSwn0ZqR4Hf/s-l1600.webp",
     ]);

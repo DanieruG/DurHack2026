@@ -71,31 +71,37 @@ export function scopeListingText(text: string, platform: Platform): { text: stri
 }
 
 // eBay image URLs: https://i.ebayimg.com/images/g/<id>/s-l1600.webp; other listings' cards use /thumbs/images/g/...
-const EBAY_IMAGE = /^https:\/\/i\.ebayimg\.com\/(thumbs\/)?images\/g\/([^/]+)\/s-l(\d+)\.\w+/i;
+const EBAY_IMAGE = /^https:\/\/i\.ebayimg\.com\/(thumbs\/)?images\/g\/([^/]+)\/s-l(\d+)(\.\w+)/i;
+export const EBAY_FULL_SIZE = 1600;
+
+/** eBay photo id and size, or null for other URLs. `thumb` marks another listing's card image. */
+export function ebayImage(url: string): { id: string; size: number; thumb: boolean; ext: string } | null {
+  const m = EBAY_IMAGE.exec(url);
+  return m ? { id: m[2], size: Number(m[3]), thumb: !!m[1], ext: m[4] } : null;
+}
+
+/** The full-size URL of an eBay gallery photo (gallery thumbnails are s-l64 / s-l140 / s-l500 of the same image). */
+export function ebayFullSizeUrl(url: string): string {
+  const img = ebayImage(url);
+  return img && !img.thumb ? `https://i.ebayimg.com/images/g/${img.id}/s-l${EBAY_FULL_SIZE}${img.ext}` : url;
+}
 
 /**
  * Drop images that belong to other listings and collapse size variants of the same photo, keeping page order.
- * eBay: "/thumbs/" images are other listings' cards; one photo appears as s-l400, s-l1600, ... (keep the largest).
+ * eBay: "/thumbs/" images are other listings' cards; one photo appears as s-l64, s-l400, s-l1600, ... so each id is
+ * kept once, at full size.
  */
 export function scopeListingImages(urls: string[], platform: Platform): string[] {
   if (platform !== "ebay") return [...new Set(urls)];
-  const order: string[] = [];
-  const best = new Map<string, { url: string; size: number }>();
+  const out: string[] = [];
+  const seen = new Set<string>();
   for (const url of urls) {
-    const m = EBAY_IMAGE.exec(url);
-    if (!m) {
-      if (!best.has(url)) {
-        order.push(url);
-        best.set(url, { url, size: 0 });
-      }
-      continue;
-    }
-    if (m[1]) continue; // another listing's thumbnail
-    const id = m[2];
-    const size = Number(m[3]);
-    const prev = best.get(id);
-    if (!prev) order.push(id);
-    if (!prev || size > prev.size) best.set(id, { url, size });
+    const img = ebayImage(url);
+    if (img?.thumb) continue; // another listing's thumbnail
+    const key = img ? img.id : url;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(img ? ebayFullSizeUrl(url) : url);
   }
-  return order.map((k) => best.get(k)!.url);
+  return out;
 }

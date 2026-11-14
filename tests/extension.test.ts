@@ -160,3 +160,18 @@ describe("format", () => {
     expect(firstSentence("Listed UK 9. Your Nike size.")).toBe("Listed UK 9.");
   });
 });
+
+describe("capture: full eBay gallery", () => {
+  it("turns every gallery thumbnail into its full-size photo, one per image id, without other listings", () => {
+    const ids = ["AS4AAeSw505qR4He", "yvcAAeSwts9qR4Hg", "obUAAeSwn0ZqR4Hf", "xoUAAeSwepNqR4Hg", "K1sAAeSwQ2xqR4Hh", "Zz9AAeSw7mVqR4Hi"];
+    const images = [
+      `https://i.ebayimg.com/images/g/${ids[0]}/s-l1600.webp`, // the slide on screen
+      ...ids.map((id) => `https://i.ebayimg.com/images/g/${id}/s-l140.webp`), // filmstrip thumbnails
+      ...ids.map((id) => `https://i.ebayimg.com/images/g/${id}/s-l64.jpg`), // smaller copies
+      "https://i.ebayimg.com/thumbs/images/g/Rp0AAeSwY-tq4Nzq/s-l500.jpg", // "Similar items" card
+    ];
+    const { capture, preview } = prepareCapture(raw({ pageUrl: "https://www.ebay.co.uk/itm/100000000001", images }));
+    expect(capture.imageUrls).toEqual(ids.map((id) => `https://i.ebayimg.com/images/g/${id}/s-l1600.webp`));
+    expect(preview.photoCount).toBe(6);
+  });
+});

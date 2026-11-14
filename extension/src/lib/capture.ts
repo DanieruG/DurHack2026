@@ -1,5 +1,6 @@
 import { detectPlatform } from "@/lib/platform";
 import { redact } from "@/lib/redact";
+import { scopeListingImages } from "@/lib/listingScope";
 import { MAX_PAGE_TEXT, type Capture, type Platform } from "@/schemas/domain";
 
 /** What the in-page collector returns. Plain data only (it crosses the scripting boundary). */
@@ -67,6 +68,16 @@ export function collectListing(): RawCapture {
       return false;
     }
   };
+  // Every photo in the listing's own gallery, including small filmstrip thumbnails and lazy-loaded slides
+  // (prepareCapture swaps eBay thumbnails for the full-size URL and de-duplicates by image id).
+  document
+    .querySelectorAll<HTMLElement>('[class*="ux-image-carousel"], [class*="ux-image-filmstrip"], [class*="ux-image-grid"], #PicturePanel, [data-testid="ux-image-carousel"]')
+    .forEach((root) =>
+      root.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
+        if (otherListing(img)) return;
+        for (const u of [img.getAttribute("data-zoom-src"), img.getAttribute("data-src"), img.srcset ? largestFromSrcset(img.srcset) : null, img.currentSrc || img.src]) push(u);
+      }),
+    );
   document.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
     const r = img.getBoundingClientRect();
     const big = (img.naturalWidth >= 300 && img.naturalHeight >= 300) || (r.width >= 200 && r.height >= 200);
@@ -89,7 +100,7 @@ export function collectListing(): RawCapture {
     h1: document.querySelector("h1")?.textContent?.trim() || null,
     priceMeta: amount ? { amount, currency } : null,
     priceText: priceMatch ? priceMatch[0] : null,
-    images: images.slice(0, 24),
+    images: images.slice(0, 60),
     pageText: text.slice(0, 40_000),
   };
 }
@@ -125,7 +136,9 @@ export function parsePriceGBP(raw: RawCapture): number | null {
 
 /** Turn a raw page capture into the API `Capture` plus what the panel shows before investigating. */
 export function prepareCapture(raw: RawCapture): { capture: Capture; preview: ListingPreview } {
-  const imageUrls = raw.images.filter((u) => /^https:\/\//.test(u) && u.length <= 2048).slice(0, MAX_CAPTURED_IMAGES);
+  const platform = detectPlatform(raw.pageUrl);
+  // Gallery thumbnails -> full-size photos, one per image id, other listings' cards dropped.
+  const imageUrls = scopeListingImages(raw.images.filter((u) => /^https:\/\//.test(u) && u.length <= 2048), platform).slice(0, MAX_CAPTURED_IMAGES);
   const pageText = redactPageText(raw.pageText);
   const pageUrl = /^https?:\/\//.test(raw.pageUrl) && raw.pageUrl.length <= 2048 ? raw.pageUrl : undefined;
   return {
@@ -137,7 +150,7 @@ export function prepareCapture(raw: RawCapture): { capture: Capture; preview: Li
     preview: {
       title: cleanTitle(raw),
       priceGBP: parsePriceGBP(raw),
-      platform: detectPlatform(raw.pageUrl),
+      platform,
       photoCount: imageUrls.length,
       thumbnail: imageUrls[0] ?? null,
       pageUrl: raw.pageUrl,
