@@ -5,6 +5,7 @@ import type { GeminiClient } from "@/gemini/client";
 import { validateNextMoveText } from "./verdict/validate";
 import { versionQuestion } from "./versionCheck";
 import { gbp } from "./util";
+import { SIZE_SYSTEM_QUESTION } from "./checks/fit";
 
 export const MAX_QUESTIONS = 3;
 
@@ -33,11 +34,11 @@ function gapFor(c: CheckResult): Gap | null {
       };
     }
     case "fit": {
+      // Never assumed: ask exactly this.
+      if (d?.sizeSystemUnknown) return { id: "gap_fit", check: "fit", priority: PRIORITY.fit, ask: SIZE_SYSTEM_QUESTION, fallback: SIZE_SYSTEM_QUESTION, exact: true };
+      if (d?.sizeOptions) return null; // the user picks the size; nothing to ask the seller
       if (d?.match === null || d?.listed === null || d?.listed === undefined) {
         return { id: "gap_fit", check: "fit", priority: PRIORITY.fit, ask: "Ask which size these are, including UK, US or EU.", fallback: "Could you confirm the size, and whether it's UK, US or EU?" };
-      }
-      if (d?.listedSystemAssumed) {
-        return { id: "gap_fit", check: "fit", priority: PRIORITY.fit, ask: `Ask whether size ${String(d.listed)} is UK, US or EU.`, fallback: `Is size ${String(d.listed)} UK, US or EU?` };
       }
       return { id: "gap_fit", check: "fit", priority: PRIORITY.fit, ask: "Ask for the insole length in cm to confirm the fit.", fallback: "Could you measure the insole length in cm for me?" };
     }
@@ -134,6 +135,15 @@ const BEFORE_YOU_PAY = [
 ];
 
 export const BUY_NEW_MOVE_ID = "nm_buy_new";
+export const SELECT_SIZE_MOVE_ID = "nm_select_size";
+
+/** Multi-size listing with the user's size in stock: "Select UK 9 before buying." */
+export function selectSizeMove(checks: CheckResult[]): NextMove | null {
+  const fit = checks.find((c) => c.check === "fit");
+  const d = fit?.details as Details;
+  if (!d?.sizeOptions || d.available !== true || typeof d.selectSize !== "string") return null;
+  return { id: SELECT_SIZE_MOVE_ID, kind: "before_you_pay", text: `Select ${d.selectSize} before buying.`, relatesTo: ["fit"] };
+}
 
 const SIGNAL_PROTECTION_MOVE_ID = "nm_signal_protection";
 const AUTHENTICITY_MOVE_ID = "nm_authenticity_check";
@@ -239,6 +249,8 @@ export async function generateNextMoves(
     ? (signals.length ? BEFORE_YOU_PAY.filter((b) => b.id !== "byp_protection") : BEFORE_YOU_PAY)
     : [];
   const buyNew = buyNewMove(args.checks);
+  const selectSize = selectSizeMove(args.checks);
+  if (selectSize) specials.beforeYouPay.unshift(selectSize);
   if (!gaps.length && !byp.length && !specials.beforeYouPay.length && !specials.questions.length) return buyNew ? [buyNew] : [];
 
   let phrased: z.infer<typeof PhrasingWireSchema> = { questions: [], beforeYouPay: [] };

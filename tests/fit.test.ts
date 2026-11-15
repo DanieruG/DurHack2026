@@ -54,10 +54,11 @@ describe("fit check", () => {
   it("no saved sizes is unknown", () => {
     expect(run(facts("UK 9", "UK"), needs([])).status).toBe("unknown");
   });
-  it("unstated listing system is assumed UK and capped at warn", () => {
+  it("an unstated listing system is never assumed: warn, with both readings", () => {
     const r = run(facts("9", "unknown"), nike9);
     expect(r.status).toBe("warn");
-    expect(r.details?.listedSystemAssumed).toBe(true);
+    expect(r.details).toMatchObject({ sizeSystemUnknown: true, listedSystem: null, match: null });
+    expect(r.summary).toBe("Size system not stated: the listing says size 9 without UK, US or EU (as UK 9 it matches your size; as US 9 it is a size smaller).");
   });
   it("review sizing advice turns a pass into warn", () => {
     const r = run(facts("UK 9", "UK"), nike9);

@@ -8,7 +8,11 @@ import { CaptureSchema } from "@/schemas/domain";
 import { mergeListingFacts } from "@/pipeline/listingData";
 import { createCase } from "@/pipeline";
 import { collectFixture, EBAY_FIXTURE } from "./listingFixtures";
-import { json, makeDeps, PROFILE } from "./helpers";
+import { fixtureReference, json, makeDeps, PROFILE } from "./helpers";
+import { checkFit } from "@/pipeline/checks/fit";
+import { generateNextMoves } from "@/pipeline/nextMoves";
+
+const fixtureReferenceCharts = () => fixtureReference().sizeCharts;
 
 let raw: RawCapture;
 beforeAll(() => {
@@ -148,5 +152,35 @@ describe("eBay: page data first, Gemini for the gaps", () => {
     const followed = await run("nike revolution 8", "Revolution 8", 0.9);
     expect(followed.c.identify?.modelName).toBe("Revolution 8");
     expect(followed.c.identify!.confidence).toBeLessThan(followed.gate);
+  });
+});
+
+describe("eBay: fit against the size options", () => {
+  const charts = () => fixtureReferenceCharts();
+  const factsWith = (edit?: (o: { value: string; outOfStock: boolean }[]) => { value: string; outOfStock: boolean }[]) => {
+    const listing = structuredListing(raw)!.listing;
+    const sizeOptions = { ...listing.sizeOptions!, options: edit ? edit(listing.sizeOptions!.options) : listing.sizeOptions!.options };
+    return mergeListingFacts({ platform: "ebay", photoCount: 7, conditionClaims: [], evidence: [] }, { ...listing, sizeOptions });
+  };
+  const fit = (f: ReturnType<typeof factsWith>) =>
+    checkFit({ facts: f, needs: { sizes: [{ brand: "Nike", size: 9, system: "UK" }], priorities: [], wearTolerance: "light", extraPriorities: [], assumptions: [] }, brand: "Nike", chart: charts().find((c) => c.brand === "Nike"), charts: charts() });
+
+  it("UK 9 offered and in stock: pass, and the next move says to select it", async () => {
+    const r = fit(factsWith());
+    expect(r).toMatchObject({ status: "pass", summary: "Your size (UK 9) is available." });
+    expect(r.details).toMatchObject({ sizeOptions: true, available: true, selectSize: "UK 9" });
+    const moves = await generateNextMoves(null, { checks: [r], leads: [], label: "worth_a_look", platform: "ebay" });
+    expect(moves.find((m) => m.id === "nm_select_size")).toEqual({ id: "nm_select_size", kind: "before_you_pay", text: "Select UK 9 before buying.", relatesTo: ["fit"] });
+    expect(moves.some((m) => m.kind === "ask_seller" && m.relatesTo.includes("fit"))).toBe(false);
+  });
+
+  it("UK 9 offered but out of stock: fail", () => {
+    const r = fit(factsWith((o) => o.map((x) => (x.value === "9" ? { ...x, outOfStock: true } : x))));
+    expect(r).toMatchObject({ status: "fail", summary: "Your size (UK 9) is out of stock." });
+  });
+
+  it("UK 9 not offered: fail", () => {
+    const r = fit(factsWith((o) => o.filter((x) => x.value !== "9")));
+    expect(r).toMatchObject({ status: "fail", summary: "Your size (UK 9) isn't offered: this listing has UK 7 to UK 11.5." });
   });
 });

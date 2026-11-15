@@ -140,3 +140,20 @@ describe("Vinted: totals and verification", () => {
     expect(noSignal.some((m) => m.id === "nm_platform_verification")).toBe(false);
   });
 });
+
+describe("Vinted: size system not stated", () => {
+  it("description edited to drop 'US': fit warns and the seller is asked 'Is that a UK or US size?'", async () => {
+    const edited = collectFixture(VINTED_FIXTURE, (html) => html.replaceAll("Mens US 14", "Mens 14"));
+    const { listing } = structuredListing(edited)!;
+    expect(listing.description?.value).toContain("Nike P6000, Mens 14 grey runners.");
+    expect(listing.sizeSystem).toBeUndefined();
+    const facts = mergeListingFacts(geminiFacts(), listing);
+    expect(facts.sizeSystem).toBe("unknown");
+    const fit = checkFit({ facts, needs, brand: "Nike", chart: nikeChart(), charts });
+    expect(fit.status).toBe("warn");
+    expect(fit.summary).toMatch(/^Size system not stated: the listing says size 14 without UK, US or EU/);
+    const moves = await generateNextMoves(null, { checks: [fit], leads: [], label: "proceed_with_caution", platform: "vinted" });
+    expect(moves.find((m) => m.kind === "ask_seller" && m.relatesTo.includes("fit"))?.text).toBe("Is that a UK or US size?");
+    raw = collectFixture(VINTED_FIXTURE); // restore the unedited page for later tests
+  });
+});
