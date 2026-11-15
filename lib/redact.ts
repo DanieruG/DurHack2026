@@ -16,6 +16,12 @@ const DROP_LINE = [
   /^\s*see all feedback\s*$/i,
   /^\s*\w\*{2,}\w\s*\(\d[\d,]*\)\s*$/, // masked feedback handles: "t***n (1058)"
   /^\s*(hi|hello|welcome( back)?),?\s+[^\s!]{1,30}!?\s*$/i, // the viewer's own name in the site header: "Hi Daniel!"
+  /^\s*hi\s+[^\s!]{1,30}!/i, // ...also when the header runs on: "Hi Daniel!Hello. Sign in"
+  /^\s*(frequent uploads|speedy shipping|active lister|regularly lists \d+ or more items\.?|ships (quickly|fast))\s*$/i, // seller badges (Vinted)
+  /\bfeedback (left by buyer|replied to by seller)\b/i,
+  /^\s*reply from:/i,
+  /^\s*located in:/i, // the seller's town
+  /^\s*(vat number|crn|epr numbers?)\b/i, // business seller registration details
   /\blast seen\b/i,
   /\bactive (now|today|\d+ ?(min|hour|day)s? ago)\b/i,
   /\bresponds? (with)?in\b/i,
@@ -45,6 +51,8 @@ const INLINE_SELLER = /^\s*(seller|sold by|listed by|posted by)\s*[:\-]?\s+\S+/i
 const INLINE_LABEL = /\b(seller|sold by|listed by|posted by|username|user)\s*[:\-]\s*[^\s,.;!?]+/gi;
 const HANDLE = /(^|[\s(])@[A-Za-z0-9_.-]{2,}/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// UK postcodes ("sample_identity_15", "SW1A 1AA"): the buyer's delivery postcode appears in eBay's postage line.
+const POSTCODE = /\b(GIR 0AA|[A-PR-UWYZ][A-HK-Y]?\d[A-Z\d]? ?\d[ABD-HJLNP-UW-Z]{2})\b/g;
 const PHONE = /(?:\+\d{1,3}[\s.-]?(?:\(0\)[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b|\b0\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b)/g;
 
 // eBay seller card: avatar initial, username, feedback count, then optional "Private"/"Business".
@@ -123,6 +131,7 @@ export function redact(input: string | undefined | null): RedactResult {
     .replace(INLINE_LABEL, (_, label) => `${label}: [redacted]`)
     .replace(HANDLE, (_, pre) => `${pre}[redacted]`)
     .replace(PHONE, "[phone number removed]")
+    .replace(POSTCODE, "[postcode removed]")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { text, removedLines: removed };

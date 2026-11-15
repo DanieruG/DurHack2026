@@ -14,7 +14,7 @@ export const EBAY_FIXTURE = {
   url: "https://www.ebay.co.uk/itm/206627552126?_skw=nike+revolution+8&itmmeta=01M7EDGMFS9CJSP6HM7CMJX4KY&hash=item301bf63b7e:g:EQkAAeSwZPtqxKQl",
   /** Placeholders standing in for the seller's identity and the signed-in buyer's details. */
   seller: ["sample_shop_01", "sampleshop01", "Sampleshop"],
-  account: ["sample_buyer_01", "Alex", "AB1 2CD"],
+  account: ["sample_buyer_01", "Alex", "AB1 2BD"],
 } as const;
 
 export const VINTED_FIXTURE = {

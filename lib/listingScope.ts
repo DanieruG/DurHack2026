@@ -22,6 +22,12 @@ const FOREIGN_HEADINGS: RegExp[] = [
   /^more to explore:?$/i,
   /^related searches$/i,
   /^about this seller$/i,
+  /^seller business information/i,
+  /^seller contact information/i,
+  /^manufacturer \/ eu responsible person/i,
+  /^detailed seller ratings$/i,
+  /^seller feedback\b/i,
+  /^popular categories from this shop$/i,
   /^shop by category$/i,
   /^today's picks$/i,
 ];
@@ -39,7 +45,7 @@ const OWN_HEADINGS: RegExp[] = [
 
 // eBay's header (account, category menu, search box) ends at the "Search" line.
 const EBAY_NAV_START = /^skip to main content$/i;
-const EBAY_NAV_END = /^search$/i;
+const EBAY_NAV_END = /^search(advanced)?$/i;
 
 /** Text kept only if at least this much survives; otherwise the page layout wasn't recognised and the text is left as is. */
 const MIN_KEPT_CHARS = 200;

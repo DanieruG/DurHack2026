@@ -1,6 +1,7 @@
 import { detectPlatform } from "@/lib/platform";
 import { redact } from "@/lib/redact";
-import { scopeListingImages } from "@/lib/listingScope";
+import { scopeListingImages, scopeListingText } from "@/lib/listingScope";
+import { identifierVariants, pageUrlForCapture, scrubIdentifiers, scrubListingData, scrubUrl } from "@/lib/marketplace/redactSeller";
 import { MAX_PAGE_TEXT, type Capture, type Platform } from "@/schemas/domain";
 import { photosFromEmbedded, photosFromState, type EmbeddedData, type GalleryState } from "./gallery";
 import type { PageFields } from "@/lib/marketplace/common";
@@ -371,11 +372,20 @@ function validListing(listing: ListingData, captured: number): ListingData | und
 export function prepareCapture(raw: RawCapture): { capture: Capture; preview: ListingPreview } {
   const platform = detectPlatform(raw.pageUrl);
   const extracted = structuredListing(raw);
+  // Identities found in the page data (seller and signed-in user): removed from everything sent, never sent themselves.
+  const own = { title: extracted?.listing.title?.value, brand: extracted?.listing.brand?.value, model: extracted?.listing.model?.value };
+  const ids = identifierVariants([...(extracted?.sellerIds ?? []), ...(raw.fields?.account ?? [])], own);
   // eBay: the gallery grid has every photo (JSON-LD lists only some). Elsewhere: page data, then the gallery DOM.
-  const imageUrls = (extracted?.photos.length ? extracted.photos : listingPhotos(raw)).slice(0, MAX_CAPTURED_IMAGES);
-  const listing = extracted ? validListing(extracted.listing, imageUrls.length) : undefined;
-  const pageText = redactPageText(raw.pageText);
-  const pageUrl = /^https?:\/\//.test(raw.pageUrl) && raw.pageUrl.length <= 2048 ? raw.pageUrl : undefined;
+  const imageUrls = (extracted?.photos.length ? extracted.photos : listingPhotos(raw))
+    .map((u) => scrubUrl(u, ids))
+    .filter((u): u is string => !!u)
+    .slice(0, MAX_CAPTURED_IMAGES);
+  const listing = extracted ? validListing(scrubListingData(extracted.listing, ids), imageUrls.length) : undefined;
+  // Only this listing's own text (no seller block, feedback or other listings), then the seller-identity filters.
+  const scoped = scopeListingText(scrubIdentifiers(raw.pageText, ids), platform, own.title).text;
+  const pageText = redactPageText(scoped);
+  const cleanUrl = raw.pageUrl.length <= 2048 ? pageUrlForCapture(raw.pageUrl) : null;
+  const pageUrl = cleanUrl && scrubUrl(cleanUrl, ids) ? cleanUrl : undefined;
   return {
     capture: {
       ...(pageUrl ? { pageUrl } : {}),
@@ -389,7 +399,7 @@ export function prepareCapture(raw: RawCapture): { capture: Capture; preview: Li
       platform,
       photoCount: imageUrls.length,
       thumbnail: imageUrls[0] ?? null,
-      pageUrl: raw.pageUrl,
+      pageUrl: pageUrl ?? raw.pageUrl,
     },
   };
 }
