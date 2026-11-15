@@ -12,7 +12,7 @@ Pipeline summary:
 
 1. Accept a captured listing (page text, image URLs, screenshots, page URL) and the user's needs.
 2. Read the listing with Gemini (no per-site parsers).
-3. Identify the exact product, with a confidence gate.
+3. Identify the product: always a best guess with a confidence level and alternatives; when unsure, ask the buyer to confirm before model-dependent checks.
 4. Run four checks in parallel: **Fit, Price, Comfort, Condition**.
 5. Let Gemini follow up to 2 bounded **leads** when something looks off.
 6. Decide the verdict with **deterministic rules**; Gemini writes the wording, citing evidence.
@@ -412,9 +412,9 @@ async function runInvestigation(caseId, emit) {
   emit("investigation_started")
   const [facts, needs] = await Promise.all([extractListing(c), buildNeeds(c.profile, c.caseNote)])
 
-  const identify = await identifyProduct(facts, images)
+  const identify = await identifyProduct(facts, images)   // always a bestGuess + confidenceLevel (7.5)
   emit("check_done", identifyCheck)
-  if (!passesGate(identify)) return finalise(caseId, [identifyCheck, ...unknownChecks("Couldn't identify the exact model")])
+  // possible / best_guess: run condition and fit, then pause for the buyer to confirm (7.5). Never stop at "unknown model".
 
   // Four checks in parallel. Emit each as it resolves. A rejection becomes an `unknown` result.
   const checks = await settleAndEmit([
@@ -452,8 +452,8 @@ Each stage has `STAGE_TIMEOUT_MS`. Timeouts and errors produce `unknown` results
 ### 7.5 Identify (`identify.ts`): Gemini vision, `GEMINI_MODEL_STRONG`
 1. `getCatalogueCandidates(facts)`: shortlist by brand and alias text match; if none, the whole catalogue (15-20 models).
 2. Send listing images + up to 5 candidate reference images + candidate names.
-3. Output `IdentifyResult`; the model must return `null` when unsure.
-4. **Gate:** `catalogueModelId` null or confidence below `IDENTIFY_CONFIDENCE_MIN` → all other checks `unknown`, verdict `not_enough_evidence`, next moves ask for the model name or a photo of the tongue/size label.
+3. Output `IdentifyResult` with a `bestGuess`, up to 2 `alternatives` and a `confidenceLevel` (`confirmed` | `likely` | `possible` | `best_guess`). The model never returns "no model" when the brand is known; brand-only only when it can't suggest any model, with the reason.
+4. **No gate.** The earlier rule here (unclear → every other check `unknown`, verdict `not_enough_evidence`) is superseded. Low confidence means: Google Lens for more evidence, then pause for the buyer to confirm before model-dependent steps, while condition and fit run. Full rules: "Identification when the model isn't clear" in `CLAUDE.md`. The seller question asks for the tongue or size label photo.
 - `geminiFeatures`: `["vision", "structured_output"]`.
 
 ### 7.6 Checks
@@ -530,7 +530,7 @@ Rules evaluated in order; first match wins.
 
 | ruleId | Condition | Label |
 | --- | --- | --- |
-| R1 | identify not passed | `not_enough_evidence` |
+| R1 | not even the brand is known | `not_enough_evidence` |
 | R2 | fit = fail | `wrong_fit` |
 | R3 | price = fail | `overpriced` |
 | R4 | condition = fail | `proceed_with_caution` |
@@ -654,9 +654,9 @@ The seed script is idempotent (upsert) and validates every file with Zod, failin
 ---
 
 ## 12. Evaluation (`/eval`)
-- `eval/listings/<id>/` holds a captured listing (`capture.json`, images) and `label.json`: `{ catalogueModelId | null, sizeUK?, priceGBP, conditionGrade, expectedVerdict? }`.
+- `eval/listings/<id>/` holds a captured listing (`capture.json`, images) and `label.json` (schema: `eval/labels.ts`; guide: `eval/LABELLING.md`). The label gives the model the pair really is, researched if the listing doesn't say, never `null` to mean "Sleuth should refuse".
 - `eval/run.ts` runs the pipeline (respecting `CACHE_MODE`) and writes `eval/report.md`:
-  - identification accuracy, and how often the gate correctly refuses (`null` labels)
+  - identification accuracy: top-1 and top-3, by confidence level; brand-only counts as wrong. The eval never pauses (it carries on with the best guess) and reports how often it would have paused.
   - fit and price agreement with labels
   - verdict agreement where `expectedVerdict` is set
   - average duration and Gemini calls per case
@@ -680,7 +680,7 @@ The seed script is idempotent (upsert) and validates every file with Zod, failin
 ## 14. Testing
 - **Unit:** `convertSize`, `sampleStats` + outlier rule, price status table, verdict rules (one test per rule plus ordering), badge rule, evidence validator, banned words, `detectPlatform`, `redact`, `safeFetch` address blocking, affected-check mapping for reopen, diff.
 - **Schema:** every Zod schema round-trips fixtures.
-- **Pipeline with fixtures:** a mocked Gemini client with recorded responses; cover the identify gate, a rejected check becoming `unknown`, the lead limit, reopen rerunning only affected checks, and the combined-tools flag producing identical shapes.
+- **Pipeline with fixtures:** a mocked Gemini client with recorded responses; cover every confidence level and the pause for confirmation, a rejected check becoming `unknown`, the lead limit, reopen rerunning only affected checks, and the combined-tools flag producing identical shapes.
 - **API:** CORS preflight, rejection of requests with no capture content, share refused for non-`hidden_gem`.
 - No live Gemini calls in tests.
 
@@ -692,7 +692,7 @@ The seed script is idempotent (upsert) and validates every file with Zod, failin
 2. **Gemini client + `generateStructured`.** Validated JSON from a test call; retry path tested.
 3. **Intake.** Platform detection, safe image download, redaction, hashing; tested.
 4. **Extract + needs.** A captured Vinted page (text + images) produces valid `ListingFacts` and `UserNeeds` with evidence and no seller identity.
-5. **Identify + gate.** Correct model on clear eval listings; `null` on an ambiguous one.
+5. **Identify.** Correct model on clear eval listings; on an ambiguous one, a best guess at `possible` or `best_guess` with alternatives, never `null`.
 6. **Fit + price Source A.** Pure functions with full tests.
 7. **Verdict rules, badge, wording, validator.** All rules tested; template fallback works.
 8. **Orchestrator, SSE, CORS, API routes.** End-to-end run from `POST /api/cases` with the stream delivering events incrementally to a test client.

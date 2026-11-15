@@ -38,6 +38,42 @@ Happy-dom prints iframe stack traces during tests: noise, not failures.
 | `scripts/export-eval-case.ts` | Main DB case → `eval/listings/<platform>-<itemId>/` (read-only on the DB) |
 | `tests/` | Vitest; `tests/helpers.ts` `makeDeps` gives a mocked Gemini + memory store |
 
+## Identification when the model isn't clear
+
+Sleuth never refuses to name a model. The old "confidence gate" (below `IDENTIFY_CONFIDENCE_MIN`: withhold the model,
+mark every other check `unknown`, verdict `not_enough_evidence`) is a misconception: don't build on it or bring it back.
+
+- Identify always returns a `bestGuess` (brand, model, version, colourway), up to 2 `alternatives` with their
+  confidence, a `confidenceLevel`, and the evidence for each. Brand only, with the reason recorded, only when Gemini
+  can't suggest any model at all.
+- Levels: `confirmed` (style code read clearly, or the listing states the exact model and version, consistent with the
+  photos); `likely` (≥ 0.75, no conflicting evidence); `possible` (0.5–0.75, or Flash and Pro disagree: the top two
+  become bestGuess and an alternative); `best_guess` (< 0.5).
+- Vague title, or below `likely` after the first pass: SerpApi Google Lens on the main photo (plus the clearest side
+  profile). Matches go to identify as visual matches, not facts, and are stored as evidence with links. Cache them per
+  image URL and count them against the search quota.
+- `confirmed`, `likely`, `user_confirmed`: carry on with bestGuess. `possible`, `best_guess`: pause before any
+  model-dependent step (comfort, new-price search, observed-listing comparison, alternatives, leads). Case status
+  `awaiting_confirmation`, event `identity_check_needed`. Condition and fit (brand size chart) still run and stream. The
+  buyer answers via `POST /api/cases/:id/confirm-identity` (`best_guess` | `alternative` + index | `custom`, normalised
+  against the catalogue with no search | `skip`). Nothing searches while paused; no timeout; resumable from History. If a
+  clearly read style code or the listing's own data contradicts the buyer's choice, keep the choice and add a warning.
+  Skip: model-dependent checks become `unknown`, no searches.
+- Carrying on with an unconfirmed guess (the eval does): comfort says "Based on our best guess: {model}". Price is
+  conditional ("If this is the {model}, it's £X new"), and its status stays `unknown` unless every candidate's new
+  price is within 15% of the others (then their range, confidence ≤ 0.4).
+- Verdict R1 (`not_enough_evidence`) fires only when not even the brand is known.
+- Eval never pauses: it carries on with bestGuess and records how often it would have paused. Scoring: top-1 and top-3
+  correct, accuracy by level (report it if a lower level is right more often than a higher one); brand only counts as
+  wrong. Cache replay replays the pause and the recorded choice.
+- Labels (`eval/labels.ts`): `listingShowsModel` describes the listing, not what Sleuth may say. `model`/`version` are
+  what the pair really is, researched beyond the listing if need be; `"unknown"` (`UNKNOWN`) only when even that fails,
+  which leaves the case out of model accuracy.
+
+Status (2026-11-15): the labels, labelling tool and eval metrics follow these rules, but the pipeline doesn't yet. It
+still gates (`subjectOf` tiers and `passesGate` in `pipeline/identify.ts`, `IDENTIFY_CONFIDENCE_MIN`): below the
+threshold it drops to the `brand` tier and withholds its guess. Levels, alternatives, Lens and the pause are not built.
+
 ## Databases
 
 - Two Neon databases: main (`DATABASE_URL`) and branch `test-runs` (`TEST_DATABASE_URL`). Eval, reruns and DB tests call
