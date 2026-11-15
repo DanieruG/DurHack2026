@@ -132,6 +132,23 @@ export const EvidenceSchema = z.object({
 });
 export type Evidence = z.infer<typeof EvidenceSchema>;
 
+export const WarningSignalSchema = z.object({
+  id: z.enum([
+    "off_platform",
+    "price_far_below",
+    "new_at_low_price",
+    "stock_photos",
+    "title_photo_mismatch",
+    "expected_photos_missing",
+  ]),
+  strength: z.enum(["strong", "medium", "mild"]),
+  text: z.string(),
+  evidence: z.array(EvidenceSchema),
+  confidence: z.number().min(0).max(1),
+  relatesTo: z.array(CheckNameSchema),
+});
+export type WarningSignal = z.infer<typeof WarningSignalSchema>;
+
 // ---------- pipeline results ----------
 
 export const ListingFactsSchema = z.object({
@@ -165,6 +182,8 @@ export const IdentifyResultSchema = z.object({
   confidence: z.number().min(0).max(1),
   reasons: z.string(),
   evidence: z.array(EvidenceSchema),
+  /** The model the photos alone appear to show, without relying on listing text. */
+  photoModel: z.object({ modelName: z.string(), confidence: z.number().min(0).max(1) }).nullable().optional(),
   /**
    * Set when the model came only from photos and the Gemini Pro recheck disagreed, declined or timed out: the brand and
    * model family are known, the exact version isn't. `options` are the two candidate versions (B is null when Pro gave none).
