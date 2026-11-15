@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CheckName, CheckResult, Evidence, Verdict, VerdictLabel } from "@/schemas/domain";
+import type { CheckName, CheckResult, Evidence, Verdict, VerdictLabel, WarningSignal } from "@/schemas/domain";
 import { generateStructured } from "@/gemini/structured";
 import type { GeminiClient } from "@/gemini/client";
 import { decideBadge, decideVerdict, verdictConfidence, type RuleDecision } from "./rules";
@@ -28,7 +28,7 @@ You do NOT choose the verdict: it has already been decided by rules. Write:
 - citedEvidenceIds: ids of the evidence items you relied on (only ids from the list given).
 Rules: use only facts in the evidence and check summaries; never invent numbers. Mention every check whose status is fail or warn.
 Any price claim must say its source ("compared with N listings sampled on <date>" or "the current new price from retailers").
-Never accuse the seller. Never use these words: scam, fake, fraud, liar, rip-off, guaranteed.`;
+Never accuse the seller. Never use these words: scam, fake, fraud, liar, rip-off, guaranteed, counterfeit, replica, rep or reps.`;
 
 const ORDER: CheckName[] = ["identify", "fit", "price", "condition", "comfort"];
 
@@ -61,7 +61,7 @@ const CLOSERS: Record<VerdictLabel, string> = {
 };
 
 /** Deterministic fallback wording per label; always passes the validator. */
-export function templateVerdictText(label: VerdictLabel, checks: CheckResult[]): GeneratedText {
+export function templateVerdictText(label: VerdictLabel, checks: CheckResult[], signals: WarningSignal[] = []): GeneratedText {
   const byOrder = [...checks].sort((a, b) => ORDER.indexOf(a.check) - ORDER.indexOf(b.check));
   const flagged = byOrder.filter((c) => c.status === "fail" || c.status === "warn");
   let picks: CheckResult[];
@@ -69,33 +69,38 @@ export function templateVerdictText(label: VerdictLabel, checks: CheckResult[]):
   else if (flagged.length) picks = flagged.slice(0, 3);
   else picks = byOrder.filter((c) => c.status !== "unknown" && c.check !== "identify").slice(0, 2);
   const sentences = picks.map((c) => c.summary.trim().replace(/\s+/g, " "));
+  if (label === "proceed_with_caution" && signals.length) sentences.unshift(signals[0].text);
   sentences.push(CLOSERS[label]);
   // Keep within 4 sentences (summaries may contain more than one sentence each).
   let explanation = sentences.join(" ");
   const split = explanation.split(/(?<=[.!?])\s+/);
   if (split.length > 4) explanation = [...split.slice(0, 3), CLOSERS[label]].join(" ");
-  const cited = picks.flatMap((c) => c.evidence.slice(0, 2).map((e) => e.id));
+  const cited = [
+    ...(label === "proceed_with_caution" && signals.length ? signals[0].evidence.map((e) => e.id) : []),
+    ...picks.flatMap((c) => c.evidence.slice(0, 2).map((e) => e.id)),
+  ];
   return { headline: HEADLINES[label], explanation, citedEvidenceIds: [...new Set(cited)] };
 }
 
 export async function decideAndWordVerdict(
   gemini: GeminiClient | null,
   /** identifyPassed: the brand is known (R1 otherwise). */
-  args: { checks: CheckResult[]; identifyPassed: boolean; extraEvidence?: Evidence[] },
+  args: { checks: CheckResult[]; identifyPassed: boolean; signals?: WarningSignal[]; extraEvidence?: Evidence[] },
 ): Promise<{ verdict: Verdict; usedTemplate: boolean }> {
-  const decision: RuleDecision = decideVerdict(args.checks, args.identifyPassed);
-  const evidence = indexEvidence(...args.checks.map((c) => c.evidence), args.extraEvidence);
+  const signals = args.signals ?? [];
+  const decision: RuleDecision = decideVerdict(args.checks, args.identifyPassed, signals);
+  const evidence = indexEvidence(...args.checks.map((c) => c.evidence), args.extraEvidence, ...signals.map((s) => s.evidence));
   const ctx = { checks: args.checks, evidence };
   const base = {
     label: decision.label,
     ruleId: decision.ruleId,
-    confidence: verdictConfidence(decision, args.checks),
+    confidence: verdictConfidence(decision, args.checks, signals),
     badge: decideBadge(decision.label, args.checks),
   };
 
   let text: GeneratedText | null = null;
   if (gemini) {
-    const prompt = `Verdict (fixed by rules): ${decision.label} (${LABEL_MEANING[decision.label]}), rule ${decision.ruleId}.\nChecks:\n${JSON.stringify(compactChecks(args.checks))}`;
+    const prompt = `Verdict (fixed by rules): ${decision.label} (${LABEL_MEANING[decision.label]}), rule ${decision.ruleId}.\nChecks:\n${JSON.stringify(compactChecks(args.checks))}\nWarning signals (describe fairly, do not add new facts):\n${JSON.stringify(signals)}`;
     let feedback = "";
     for (let attempt = 0; attempt < 2 && !text; attempt++) {
       try {
@@ -116,6 +121,6 @@ export async function decideAndWordVerdict(
     }
   }
   const usedTemplate = !text;
-  const final = text ?? templateVerdictText(decision.label, args.checks);
+  const final = text ?? templateVerdictText(decision.label, args.checks, signals);
   return { verdict: { ...base, ...final }, usedTemplate };
 }

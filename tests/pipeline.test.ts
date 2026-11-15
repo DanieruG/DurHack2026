@@ -42,7 +42,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checks.fit.details?.reviewSizingNote).toBe("Most reviewers say it fits true to size.");
 
     const verdict = events.find((e) => e.event === "verdict")!.data as Verdict;
-    expect(verdict).toMatchObject({ label: "hidden_gem", ruleId: "R6" });
+    expect(verdict).toMatchObject({ label: "hidden_gem", ruleId: "R7" });
     const done = events.at(-1)!.data as { geminiCalls: number; revision: number };
     expect(done.revision).toBe(1);
     expect(done.geminiCalls).toBe(deps.calls.length);
@@ -98,7 +98,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checks.price.status).toBe("unknown");
     expect(checks.comfort.status).toBe("unknown");
     expect(stageCalls(deps, "comfort") + stageCalls(deps, "price")).toBe(0);
-    expect((events.find((e) => e.event === "verdict")!.data as Verdict)).toMatchObject({ label: "proceed_with_caution", ruleId: "R5" });
+    expect((events.find((e) => e.event === "verdict")!.data as Verdict)).toMatchObject({ label: "proceed_with_caution", ruleId: "R6" });
     const moves = (await deps.store.getCase(caseId))!.nextMoves!;
     expect(moves.some((m) => m.relatesTo.includes("identify"))).toBe(true);
   });
@@ -219,7 +219,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checks.condition.status).toBe("unknown");
     expect(checks.condition.summary).not.toMatch(/boom|stack/);
     expect(events.some((e) => e.event === "error" && (e.data as { stage?: string }).stage === "condition")).toBe(true);
-    expect((events.find((e) => e.event === "verdict")!.data as Verdict).ruleId).toBe("R5");
+    expect((events.find((e) => e.event === "verdict")!.data as Verdict).ruleId).toBe("R6");
   });
 
   it("a stage timeout becomes unknown", async () => {

@@ -160,7 +160,7 @@ const PhrasingWireSchema = z.object({
 const PHRASING_SYSTEM = `You write short, copy-ready messages for a buyer on a second-hand marketplace.
 - Seller questions: polite, specific, friendly, never accusatory, one question each, ending with "?". Max 2 sentences.
 - Before-you-pay items: one short practical sentence each.
-Never use: scam, fake, fraud, liar, rip-off, guaranteed. Return one item for every id given.`;
+Never use: scam, fake, fraud, liar, rip-off, guaranteed, counterfeit, replica, rep or reps. Return one item for every id given.`;
 
 export async function generateNextMoves(
   gemini: GeminiClient | null,

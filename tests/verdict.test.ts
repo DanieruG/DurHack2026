@@ -3,7 +3,7 @@ import { decideBadge, decideVerdict } from "@/pipeline/verdict/rules";
 import { BANNED_WORDS, containsBanned, sentenceCount, validateNextMoveText, validateVerdictText } from "@/pipeline/verdict/validate";
 import { decideAndWordVerdict, templateVerdictText } from "@/pipeline/verdict/wording";
 import { indexEvidence } from "@/pipeline/util";
-import type { CheckResult, VerdictLabel } from "@/schemas/domain";
+import type { CheckResult, VerdictLabel, WarningSignal } from "@/schemas/domain";
 import { check } from "./helpers";
 
 const allPass = (over: Partial<Record<string, Partial<CheckResult>>> = {}): CheckResult[] => [
@@ -14,29 +14,45 @@ const allPass = (over: Partial<Record<string, Partial<CheckResult>>> = {}): Chec
   check({ check: "condition", status: "pass", details: { findings: [] }, ...over.condition }),
 ];
 
+const signal = (strength: WarningSignal["strength"], confidence = 0.8): WarningSignal => ({
+  id: "off_platform",
+  strength,
+  text: "The listing asks to move payment off-platform.",
+  evidence: [{ id: `ev_signal_${strength}`, kind: "quote", label: "Listing text", quote: "Pay outside the app" }],
+  confidence,
+  relatesTo: ["price"],
+});
+
 describe("verdict rules", () => {
   it("R1: identify not passed", () => expect(decideVerdict(allPass(), false)).toEqual({ label: "not_enough_evidence", ruleId: "R1" }));
   it("R2: fit fail", () => expect(decideVerdict(allPass({ fit: { status: "fail" } }), true).ruleId).toBe("R2"));
   it("R3: price fail", () => expect(decideVerdict(allPass({ price: { status: "fail" } }), true)).toEqual({ label: "overpriced", ruleId: "R3" }));
-  it("R4: condition fail", () => expect(decideVerdict(allPass({ condition: { status: "fail" } }), true)).toEqual({ label: "proceed_with_caution", ruleId: "R4" }));
-  it("R5: any warn or unknown", () => {
-    expect(decideVerdict(allPass({ comfort: { status: "warn" } }), true).ruleId).toBe("R5");
-    expect(decideVerdict(allPass({ comfort: { status: "unknown" } }), true).ruleId).toBe("R5");
-    expect(decideVerdict(allPass().filter((c) => c.check !== "comfort"), true).ruleId).toBe("R5"); // missing = unknown
+  it("R4: one strong or two medium signals", () => {
+    expect(decideVerdict(allPass(), true, [signal("strong")])).toEqual({ label: "proceed_with_caution", ruleId: "R4" });
+    expect(decideVerdict(allPass(), true, [signal("medium"), signal("medium")]).ruleId).toBe("R4");
+    expect(decideVerdict(allPass(), true, [signal("medium")]).ruleId).toBe("R8");
   });
-  it("R6: all pass, price below, no finding above minor", () => {
-    expect(decideVerdict(allPass({ condition: { status: "pass", details: { findings: [{ severity: "minor" }] } } }), true)).toEqual({ label: "hidden_gem", ruleId: "R6" });
+  it("R5: condition fail and R6: any warn or unknown", () => {
+    expect(decideVerdict(allPass({ condition: { status: "fail" } }), true).ruleId).toBe("R5");
+    expect(decideVerdict(allPass({ comfort: { status: "warn" } }), true).ruleId).toBe("R6");
+    expect(decideVerdict(allPass({ comfort: { status: "unknown" } }), true).ruleId).toBe("R6");
+    expect(decideVerdict(allPass().filter((c) => c.check !== "comfort"), true).ruleId).toBe("R6"); // missing = unknown
   });
-  it("R7: otherwise", () => {
-    expect(decideVerdict(allPass({ price: { status: "pass", details: { position: "typical" } } }), true)).toEqual({ label: "worth_a_look", ruleId: "R7" });
-    expect(decideVerdict(allPass({ condition: { status: "pass", details: { findings: [{ severity: "moderate" }] } } }), true).ruleId).toBe("R7");
+  it("R7: all pass, price below, no finding above minor and no signals", () => {
+    expect(decideVerdict(allPass({ condition: { status: "pass", details: { findings: [{ severity: "minor" }] } } }), true)).toEqual({ label: "hidden_gem", ruleId: "R7" });
+  });
+  it("R8: otherwise, including one medium signal", () => {
+    expect(decideVerdict(allPass({ price: { status: "pass", details: { position: "typical" } } }), true)).toEqual({ label: "worth_a_look", ruleId: "R8" });
+    expect(decideVerdict(allPass({ condition: { status: "pass", details: { findings: [{ severity: "moderate" }] } } }), true).ruleId).toBe("R8");
+    expect(decideVerdict(allPass(), true, [signal("medium")]).ruleId).toBe("R8");
   });
   it("ordering: first match wins", () => {
     const all = allPass({ fit: { status: "fail" }, price: { status: "fail" }, condition: { status: "fail" }, comfort: { status: "warn" } });
     expect(decideVerdict(all, false).ruleId).toBe("R1");
     expect(decideVerdict(all, true).ruleId).toBe("R2");
     expect(decideVerdict(allPass({ price: { status: "fail" }, condition: { status: "fail" } }), true).ruleId).toBe("R3");
-    expect(decideVerdict(allPass({ condition: { status: "fail" }, comfort: { status: "warn" } }), true).ruleId).toBe("R4");
+    expect(decideVerdict(allPass({ condition: { status: "fail" }, comfort: { status: "warn" } }), true).ruleId).toBe("R5");
+    expect(decideVerdict(allPass({ price: { status: "fail" } }), true, [signal("strong")]).ruleId).toBe("R3");
   });
 });
 
@@ -119,5 +135,14 @@ describe("wording", () => {
     expect(usedTemplate).toBe(true);
     expect(verdict.label).toBe("worth_a_look");
     expect(containsBanned(verdict.headline + verdict.explanation)).toBe(false);
+  });
+  it("uses signal evidence and wording in the deterministic caution template", async () => {
+    const checks = allPass({ price: { summary: "Compared with sampled listings on 10 Nov.", evidence: [{ id: "ev_price_signal", kind: "data_point", label: "Compared with sampled listings on 10 Nov" }] } });
+    const s = signal("strong");
+    const { verdict } = await decideAndWordVerdict(null, { checks, identifyPassed: true, signals: [s] });
+    expect(verdict).toMatchObject({ label: "proceed_with_caution", ruleId: "R4" });
+    expect(verdict.citedEvidenceIds).toContain("ev_signal_strong");
+    expect(verdict.explanation).toContain("move payment off-platform");
+    expect(validateVerdictText(verdict, { checks, evidence: indexEvidence(...checks.map((c) => c.evidence), s.evidence) })).toEqual([]);
   });
 });

@@ -1,8 +1,8 @@
 import type { CheckName, CheckResult, Evidence } from "@/schemas/domain";
 
 /** Banned in ALL generated text (spec 7.9 / 13). Stems catch "scammer", "faked", "ripoff", "guarantee". */
-export const BANNED_WORDS = ["scam", "fake", "fraud", "liar", "rip-off", "guaranteed"] as const;
-const BANNED_RE = /\b(scam\w*|fake\w*|fraud\w*|liars?|rip[\s-]?offs?|guarantee\w*)\b/i;
+export const BANNED_WORDS = ["scam", "fake", "fraud", "liar", "rip-off", "guaranteed", "counterfeit", "replica", "rep"] as const;
+const BANNED_RE = /\b(scam\w*|fake\w*|fraud\w*|liars?|rip[\s-]?offs?|guarantee\w*|counterfeit\w*|replicas?|reps?)\b/i;
 
 export function containsBanned(text: string): boolean {
   return BANNED_RE.test(text);
