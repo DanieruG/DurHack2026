@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conditionStatus, finaliseCondition, gradeFromClaims, wireToFindings } from "@/pipeline/checks/condition";
+import { ConditionWireSchema, conditionStatus, finaliseCondition, gradeFromClaims, wireToFindings } from "@/pipeline/checks/condition";
 import { checkComfort, comfortFromSnippets, comfortFromSummary, comfortResult, verifiedQuote, type ComfortDetails, type ComfortSummary } from "@/pipeline/checks/comfort";
 import { comfortQuery, resultDomain, topOrganic, type WebResult } from "@/lib/webSearch";
 import { MemoryStore } from "@/lib/store";
@@ -12,6 +12,16 @@ const f = (severity: ConditionFinding["severity"], confidence = 0.8): ConditionF
 const needs: UserNeeds = { sizes: [], priorities: ["all-day comfort", "wide fit"], wearTolerance: "light", extraPriorities: [], assumptions: [] };
 
 describe("condition status", () => {
+  it("parses per-photo stock and label visibility fields, defaulting photos for old responses", () => {
+    expect(ConditionWireSchema.parse({ findings: [], notVisible: [], contradictions: [], photos: [{ photoIndex: 0, stockPhotoLikely: true, confidence: 0.82, showsSizeLabel: false, showsInsole: true }] }).photos[0]).toEqual({
+      photoIndex: 0,
+      stockPhotoLikely: true,
+      confidence: 0.82,
+      showsSizeLabel: false,
+      showsInsole: true,
+    });
+    expect(ConditionWireSchema.parse({ findings: [], notVisible: [], contradictions: [] }).photos).toEqual([]);
+  });
   it("light tolerance (spec default)", () => {
     expect(conditionStatus([f("major")], [], "light")).toBe("fail");
     expect(conditionStatus([f("moderate")], [], "light")).toBe("warn");
@@ -37,7 +47,7 @@ describe("condition status", () => {
   });
   it("normalises boxes, drops bad photo indices, records a contradiction", () => {
     const findings = wireToFindings(
-      { findings: [
+      { photos: [], findings: [
         { label: "heel_wear", photoIndex: 0, box2d: [600, 900, 400, 1200], severity: "moderate", confidence: 0.9, note: "Worn heel" },
         { label: "tear_or_hole", photoIndex: 5, box2d: [1, 1, 2, 2], severity: "major", confidence: 0.9, note: "x" },
       ], notVisible: [], contradictions: [] },
@@ -53,7 +63,7 @@ describe("condition status", () => {
     expect(r.geminiFeatures).toEqual(["vision", "object_detection", "structured_output"]);
   });
   it("marks low-confidence findings as possible", () => {
-    const [x] = wireToFindings({ findings: [{ label: "discolouration", photoIndex: 0, box2d: [0, 0, 10, 10], severity: "minor", confidence: 0.4, note: "maybe a shadow" }], notVisible: [], contradictions: [] }, [0]);
+    const [x] = wireToFindings({ photos: [], findings: [{ label: "discolouration", photoIndex: 0, box2d: [0, 0, 10, 10], severity: "minor", confidence: 0.4, note: "maybe a shadow" }], notVisible: [], contradictions: [] }, [0]);
     const r = finaliseCondition({ findings: [x], notVisible: [], modelContradictions: [], facts: { platform: "other", photoCount: 1, conditionClaims: [], evidence: [] }, needs, photosChecked: 1 });
     expect(r.evidence[0].label).toMatch(/^Possible discolouration/);
   });

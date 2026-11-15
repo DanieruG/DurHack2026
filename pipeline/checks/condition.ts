@@ -22,6 +22,17 @@ import { clamp01, round2, unknownCheck } from "../util";
 export const POSSIBLE_BELOW = 0.6;
 
 export const ConditionWireSchema = z.object({
+  photos: z
+    .array(
+      z.object({
+        photoIndex: z.number().int().nonnegative(),
+        stockPhotoLikely: z.boolean(),
+        confidence: z.number().min(0).max(1),
+        showsSizeLabel: z.boolean(),
+        showsInsole: z.boolean(),
+      }),
+    )
+    .default([]),
   findings: z
     .array(
       z.object({
@@ -42,9 +53,12 @@ export type ConditionWire = z.infer<typeof ConditionWireSchema>;
 export const CONDITION_SYSTEM = `You inspect photos of second-hand trainers for DEFECTS (not objects).
 Use only these labels: ${DefectLabelSchema.options.join(", ")}.
 For each defect: photoIndex, box2d as [ymin, xmin, ymax, xmax] normalised to 0-1000 on that photo, severity (minor | moderate | major), confidence 0-1, and a short neutral note.
+For every photo, also report photos: photoIndex, stockPhotoLikely (whether it looks like catalogue or retailer imagery rather than the actual pair), confidence 0-1 for that judgement, showsSizeLabel, and showsInsole. Set stockPhotoLikely false when uncertain.
 Shadows, dirt, reflections, creases in packaging and lighting can resemble damage: lower your confidence when unsure, and do not report what you cannot see.
 notVisible: areas of the shoe that no photo shows clearly and that matter for condition (e.g. "inside lining", "heel close-up", "outsole", "insole", "size label").
 contradictions: where the seller's condition description disagrees with what the photos show, phrased neutrally (e.g. "described as like new; moderate outsole wear visible").`;
+
+export type ConditionPhoto = z.infer<typeof ConditionWireSchema>["photos"][number];
 
 const LABEL_WORDS: Record<DefectLabel, string> = {
   outsole_wear: "outsole wear",
@@ -128,6 +142,7 @@ export function finaliseCondition(args: {
   facts: ListingFacts;
   needs: UserNeeds;
   photosChecked: number;
+  photos?: ConditionPhoto[];
 }): CheckResult {
   const { findings, facts, needs } = args;
   const claimEv: Evidence[] = facts.evidence.filter((e) => e.label.startsWith("Seller's condition"));
@@ -170,7 +185,7 @@ export function finaliseCondition(args: {
     evidence,
     confidence: round2(clamp01(Math.min(avgConf, coverage, cap))),
     geminiFeatures: ["vision", "object_detection", "structured_output"],
-    details: { findings, notVisible: args.notVisible, soleNotVisible, contradictions, photosChecked: args.photosChecked },
+    details: { findings, notVisible: args.notVisible, soleNotVisible, contradictions, photosChecked: args.photosChecked, photos: args.photos ?? [] },
   };
 }
 
@@ -225,7 +240,7 @@ export async function checkCondition(args: {
 }): Promise<CheckResult> {
   if (args.images.length === 0) {
     return unknownCheck("condition", "There are no usable photos, so I can't check the condition.", {
-      details: { findings: [], notVisible: ["all areas"], soleNotVisible: ["outsole", "heel"], contradictions: [], photosChecked: 0 },
+      details: { findings: [], notVisible: ["all areas"], soleNotVisible: ["outsole", "heel"], contradictions: [], photosChecked: 0, photos: [] },
     });
   }
   const { data } = await generateStructured(args.gemini, ConditionWireSchema, {
@@ -244,6 +259,7 @@ export async function checkCondition(args: {
     facts: args.facts,
     needs: args.needs,
     photosChecked: args.images.length,
+    photos: data.photos,
   });
 }
 
@@ -256,7 +272,7 @@ export async function recheckConditionPhoto(args: {
   facts: ListingFacts;
   needs: UserNeeds;
 }): Promise<CheckResult> {
-  const prevDetails = (args.previous.details ?? {}) as { findings?: ConditionFinding[]; notVisible?: string[]; contradictions?: string[]; photosChecked?: number };
+  const prevDetails = (args.previous.details ?? {}) as { findings?: ConditionFinding[]; notVisible?: string[]; contradictions?: string[]; photosChecked?: number; photos?: ConditionPhoto[] };
   const prevFindings = prevDetails.findings ?? [];
   const { data } = await generateStructured(args.gemini, ConditionWireSchema, {
     stage: "condition",
@@ -274,5 +290,6 @@ export async function recheckConditionPhoto(args: {
     facts: args.facts,
     needs: args.needs,
     photosChecked: prevDetails.photosChecked ?? 1,
+    photos: [...(prevDetails.photos ?? []).filter((p) => p.photoIndex !== args.image.index), ...data.photos],
   });
 }

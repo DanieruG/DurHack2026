@@ -19,6 +19,7 @@ export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listi
   or text; if you can't, return null.
 - catalogueModelId: ONLY when the pair is exactly one of the candidate catalogue ids given; otherwise null. A wrong id is far worse than none.
 - confidence: your probability (0-1) that modelName (and catalogueModelId, if set) is exactly right; 0 when modelName is null.
+- photoModel: the model name the PHOTOS ALONE show, ignoring the title, description and candidate text; return null when the photos do not settle it, with confidence 0-1.
 - evidence: what you relied on: kind "quote" with exact text from this listing, or kind "photo_region" with photoIndex and box2d
   [ymin, xmin, ymax, xmax] normalised 0-1000 (e.g. tongue label, logo, sole pattern).`;
 
@@ -89,6 +90,7 @@ export function identifyWireSchema(ids: string[]) {
         }),
       )
       .default([]),
+    photoModel: z.object({ modelName: z.string().min(1), confidence: z.number().min(0).max(1) }).nullable().default(null),
   });
 }
 
@@ -192,6 +194,7 @@ export function toIdentifyResult(
   const picked = data.catalogueModelId ? (args.shortlist.find((m) => m.id === data.catalogueModelId) ?? null) : null;
   const model = picked ?? matchCatalogue(brand, modelName, args.catalogue);
   const confidence = model || modelName ? clamp01(data.confidence) : 0;
+  const photoModelName = data.photoModel?.modelName.replace(/\s+/g, " ").trim() || null;
   return {
     brand: model?.brand ?? brand,
     brandConfidence: model ? Math.max(clamp01(data.brandConfidence ?? 0), confidence) : brand ? clamp01(data.brandConfidence ?? 0) : 0,
@@ -201,6 +204,7 @@ export function toIdentifyResult(
     confidence,
     reasons: data.reasons,
     evidence,
+    photoModel: data.photoModel && photoModelName ? { modelName: photoModelName, confidence: clamp01(data.photoModel.confidence) } : null,
   };
 }
 

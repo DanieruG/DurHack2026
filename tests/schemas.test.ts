@@ -18,6 +18,7 @@ const fixtures: [string, z.ZodType, unknown][] = [
   ["Evidence(source)", S.EvidenceSchema, { id: "ev_comf_1", kind: "source", label: "Independent review: runrepeat.com", url: "https://x", title: "runrepeat.com", sourceType: "independent_review", observedOn: "2026-11-14" }],
   ["ListingFacts", S.ListingFactsSchema, facts],
   ["IdentifyResult", S.IdentifyResultSchema, { catalogueModelId: null, confidence: 0.3, reasons: "unsure", evidence: [] }],
+  ["WarningSignal", S.WarningSignalSchema, { id: "off_platform", strength: "strong", text: "Move payment off-platform.", evidence: [], confidence: 0.9, relatesTo: ["price"] }],
   ["CheckResult", S.CheckResultSchema, check],
   ["ConditionFinding", S.ConditionFindingSchema, { label: "heel_wear", photoIndex: 0, box2d: [1, 2, 3, 4], severity: "minor", confidence: 0.5, note: "n", evidenceId: "ev_cond_1" }],
   ["Verdict", S.VerdictSchema, verdict],
