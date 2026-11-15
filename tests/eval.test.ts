@@ -26,6 +26,7 @@ const run = (id: string, over: Partial<CaseRun> = {}): CaseRun => ({
   verdict: null,
   durationMs: 40_000,
   geminiCalls: 8,
+  structured: [],
   ...over,
 });
 const META = { runAt: "2026-11-15T10:00:00.000Z", pipelineVersion: "3", models: { fast: "flash-x", strong: "pro-x" }, cacheMode: "off" };

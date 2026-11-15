@@ -58,7 +58,12 @@ your defect when the two overlap by at least 0.3 (intersection over union), so i
     npx tsx scripts/export-eval-case.ts <caseId>    # one captured case (reads the main database, never writes)
     npx tsx scripts/export-eval-case.ts --all        # the newest case for every listing
 
-The export redacts the page text again, keeps only this listing's photos, never copies your profile or seller
+Cases captured from now on also store the extension's structured fields (item specifics, size options, Vinted
+attributes, pricing breakdown, each with its source); the export puts them in `capture.json` as `capture.listing`,
+`npm run eval` runs the case with them, and the report lists which cases had them. The current cases were captured
+before they were stored, so they run on page text and photos only.
+
+The export redacts the page text and structured fields again, keeps only this listing's photos, never copies your profile or seller
 replies, and leaves `label.json` empty. Look through the photos before committing a case: the export can't see what's
 in them.
 

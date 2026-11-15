@@ -261,6 +261,10 @@ export function summarise(
       section("Time and cost", ["timePerCase", "geminiCalls", "errors"]),
     ],
     headline,
+    structuredCapture: {
+      with: runs.filter((r) => r.structured.length).map((r) => ({ caseId: r.id, groups: r.structured })),
+      without: runs.filter((r) => !r.structured.length).map((r) => r.id),
+    },
     failures,
   };
 }

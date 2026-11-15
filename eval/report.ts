@@ -28,11 +28,26 @@ export function reportMarkdown(s: EvalSummary, labels: CaseLabels[]): string {
   for (const sec of s.sections) {
     out.push("", `## ${sec.title}`, "", "| Metric | Result |", "| --- | --- |", ...sec.figures.map(({ figure }) => `| ${figure.label} | ${figureText(figure)} |`));
   }
+  out.push("", ...structuredMarkdown(s));
   out.push("", "## Failure cases", "");
   if (!s.failures.length) out.push("None.");
   else out.push("| Case | Metric | What happened |", "| --- | --- | --- |", ...s.failures.map((f) => `| ${f.caseId} | ${f.metric} | ${f.detail.replace(/\|/g, "\\|")} |`));
   out.push("", "## Labels still missing", "", missingLabelsMarkdown(labels), "");
   return out.join("\n");
+}
+
+/** Which cases ran with the extension's structured fields: figures can differ between the two groups. */
+export function structuredMarkdown(s: Pick<EvalSummary, "structuredCapture" | "cases">): string[] {
+  const sc = s.structuredCapture;
+  if (!sc) return ["## Structured capture", "", "Not recorded for this run."];
+  const out = [
+    "## Structured capture",
+    "",
+    `${sc.with.length} of ${s.cases} case${s.cases === 1 ? "" : "s"} ran with the extension's structured fields (item specifics, size options, attributes, pricing, each with its source); the rest ran on page text and photos only.`,
+  ];
+  if (sc.with.length) out.push("", "| Case | Structured fields |", "| --- | --- |", ...sc.with.map((c) => `| ${c.caseId} | ${c.groups.join(", ")} |`));
+  if (sc.without.length) out.push("", `Page text only: ${sc.without.join(", ")}.`);
+  return out;
 }
 
 /** eval/slide.md: the headline figures as a compact table to paste into a slide. */

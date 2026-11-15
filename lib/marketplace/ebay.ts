@@ -120,7 +120,7 @@ export function extractEbay(page: MarketplacePage): ExtractedListing {
 
   // 2. Item specifics (visible page fields).
   const specifics = (fields?.specifics ?? []).filter((s) => s.label && s.value);
-  if (specifics.length) listing.itemSpecifics = specifics.slice(0, 40);
+  if (specifics.length) listing.itemSpecifics = specifics.slice(0, 40).map((s) => ({ label: s.label, value: s.value, source: "page_field" as const }));
   const spec = (re: RegExp) => specifics.find((s) => re.test(s.label))?.value;
   const pf = "page_field" as const;
   const colour = spec(/^colou?r$/i);

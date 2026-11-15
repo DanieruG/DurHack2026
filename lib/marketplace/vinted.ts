@@ -152,7 +152,7 @@ export function extractVinted(page: MarketplacePage): ExtractedListing {
     const seller = isRecord(pricing.sellerOriginalAskingAmount) ? pricing.sellerOriginalAskingAmount : undefined;
     const cur = str(seller?.currencyCode)?.toUpperCase();
     const sellerAmount = money(seller?.amount);
-    if (cur && cur !== "GBP" && /^[A-Z]{3}$/.test(cur) && sellerAmount !== undefined) listing.sellerPrice = { amount: sellerAmount, currency: cur };
+    if (cur && cur !== "GBP" && /^[A-Z]{3}$/.test(cur) && sellerAmount !== undefined) listing.sellerPrice = { amount: sellerAmount, currency: cur, source: sd };
   }
   if (plugins.some((p) => p.name === "offline_verification_availability")) listing.verificationAvailable = true;
 

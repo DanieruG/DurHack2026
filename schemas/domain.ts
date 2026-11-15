@@ -121,9 +121,9 @@ export const ListingDataSchema = z.object({
   /** Price plus buyer protection plus postage, when all parts are known. */
   totalGBP: sourcedGBP.optional(),
   /** The price in the seller's own currency, when it isn't GBP (evidence only: "Seller listed it at 40 AUD"). */
-  sellerPrice: z.object({ amount: z.number().nonnegative().max(1_000_000), currency: z.string().min(3).max(3) }).optional(),
-  /** Item specifics pairs (eBay "About this item"). */
-  itemSpecifics: z.array(z.object({ label: z.string().max(60), value: z.string().max(300) })).max(40).optional(),
+  sellerPrice: z.object({ amount: z.number().nonnegative().max(1_000_000), currency: z.string().min(3).max(3), source: FieldSourceSchema.optional() }).optional(),
+  /** Item specifics pairs (eBay "About this item"), with where they were read (optional for older captures). */
+  itemSpecifics: z.array(z.object({ label: z.string().max(60), value: z.string().max(300), source: FieldSourceSchema.optional() })).max(40).optional(),
   photos: z.object({ captured: z.number().int().nonnegative(), shown: z.number().int().nonnegative().nullable() }).optional(),
   /** The platform indicates its own item verification may apply (Vinted). */
   verificationAvailable: z.boolean().optional(),

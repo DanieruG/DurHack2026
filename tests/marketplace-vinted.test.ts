@@ -65,7 +65,7 @@ describe("Vinted item page fixture: structured extraction", () => {
     const ld = JSON.parse(raw.embedded!.jsonLd.find((t) => t.includes('"Product"'))!);
     expect(ld.offers).toMatchObject({ priceCurrency: "AUD", price: 40 });
     expect(listing.priceGBP).toEqual({ value: 20.75, source: "structured_data" });
-    expect(listing.sellerPrice).toEqual({ amount: 40, currency: "AUD" });
+    expect(listing.sellerPrice).toEqual({ amount: 40, currency: "AUD", source: "structured_data" });
     expect(prepareCapture(raw).preview.priceGBP).toBe(20.75);
     const facts = mergeListingFacts(geminiFacts({ priceGBP: 40 }), listing);
     expect(facts.priceGBP).toBe(20.75);

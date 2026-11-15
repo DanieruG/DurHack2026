@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { CaptureSchema, ProfileSchema, type CheckResult, type Profile } from "../schemas";
-import type { Box2d, IdentifyResult, ListingFacts, NewOffers } from "../schemas/domain";
+import type { Box2d, IdentifyResult, ListingData, ListingFacts, NewOffers } from "../schemas/domain";
 import type { Deps } from "../pipeline/deps";
 import { createCase } from "../pipeline";
 import { MemoryStore } from "../lib/store";
@@ -35,8 +35,23 @@ export type CaseRun = {
   verdict: string | null;
   durationMs: number;
   geminiCalls: number;
+  /** Which groups of the extension's structured fields the case was run with ([] when it has none: page text only). */
+  structured: StructuredGroup[];
   error?: string;
 };
+
+export type StructuredGroup = "item specifics" | "size options" | "attributes" | "pricing";
+
+/** The structured field groups present in a capture's `listing`. */
+export function structuredGroups(listing: ListingData | undefined): StructuredGroup[] {
+  if (!listing) return [];
+  const out: StructuredGroup[] = [];
+  if (listing.itemSpecifics?.length) out.push("item specifics");
+  if (listing.sizeOptions) out.push("size options");
+  if (listing.brand || listing.model || listing.size || listing.condition || listing.colour || listing.material || listing.styleCode || listing.category) out.push("attributes");
+  if (listing.priceGBP || listing.postageGBP || listing.buyerProtectionGBP || listing.totalGBP || listing.listPriceGBP) out.push("pricing");
+  return out;
+}
 
 export function readCase(dir: string) {
   const file = CaptureFileSchema.parse(JSON.parse(fs.readFileSync(path.join(dir, "capture.json"), "utf8")));
@@ -68,9 +83,12 @@ export async function runCase(base: Deps, dir: string, id: string, label: Label)
     verdict: null,
     durationMs: 0,
     geminiCalls: 0,
+    structured: [],
   };
   try {
     const file = readCase(dir);
+    // The structured fields go in with the capture when the case has them (createCase uses capture.listing).
+    run.structured = structuredGroups(file.capture.listing);
     const { caseId, done } = await createCase(deps, { capture: file.capture, profile: EVAL_PROFILE, caseNote: file.caseNote, screenshots: file.screenshots });
     await done;
     const doneEv = deps.hub.events(caseId).find((e) => e.event === "investigation_done")?.data as { durationMs: number; geminiCalls: number } | undefined;

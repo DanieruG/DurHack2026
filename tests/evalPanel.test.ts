@@ -45,6 +45,7 @@ const runs: CaseRun[] = Array.from({ length: 12 }, (_, i) => ({
   verdict: null,
   durationMs: 40_000 + i * 1000,
   geminiCalls: 8,
+  structured: [],
 }));
 const { failures: _f, ...SUMMARY } = summarise(runs, { runAt: "2026-11-15T10:00:00.000Z", pipelineVersion: "3", models: { fast: "f", strong: "s" }, cacheMode: "off" });
 const PUBLIC: PublicEvalSummary = SUMMARY;

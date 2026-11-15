@@ -48,6 +48,10 @@ export const EvalSummarySchema = z.object({
   overlapThreshold: z.number(),
   sections: z.array(z.object({ title: z.string(), figures: z.array(z.object({ id: z.string(), figure: FigureSchema })) })),
   headline: z.object(Object.fromEntries(HEADLINE_IDS.map((id) => [id, FigureSchema])) as Record<HeadlineId, typeof FigureSchema>),
+  /** Which cases ran with the extension's structured fields (and which groups), and which had page text only. */
+  structuredCapture: z
+    .object({ with: z.array(z.object({ caseId: z.string(), groups: z.array(z.string()) })), without: z.array(z.string()) })
+    .optional(),
   /** What went wrong where: case ids and short descriptions (model names, sizes, colours; no listing text). */
   failures: z.array(z.object({ caseId: z.string(), metric: z.string(), detail: z.string() })),
 });

@@ -88,7 +88,7 @@ export function scrubListingData(listing: ListingData, ids: string[]): ListingDa
     const f = out[k];
     if (f) out[k] = { ...f, value: scrubIdentifiers(f.value, ids) };
   }
-  if (out.itemSpecifics) out.itemSpecifics = out.itemSpecifics.map((s) => ({ label: s.label, value: scrubIdentifiers(s.value, ids) }));
+  if (out.itemSpecifics) out.itemSpecifics = out.itemSpecifics.map((s) => ({ ...s, value: scrubIdentifiers(s.value, ids) }));
   if (out.sizeSystem?.quote) out.sizeSystem = { ...out.sizeSystem, quote: scrubIdentifiers(out.sizeSystem.quote, ids) };
   return out;
 }

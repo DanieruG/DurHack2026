@@ -48,7 +48,7 @@ export function redactListingData(listing: ListingData | undefined): ListingData
     if (v) out.description = { ...out.description, value: v };
     else delete out.description;
   }
-  if (out.itemSpecifics) out.itemSpecifics = out.itemSpecifics.map((s) => ({ label: s.label, value: clean(s.value) ?? "" })).filter((s) => s.value);
+  if (out.itemSpecifics) out.itemSpecifics = out.itemSpecifics.map((s) => ({ ...s, value: clean(s.value) ?? "" })).filter((s) => s.value);
   if (out.sizeSystem?.quote) out.sizeSystem = { ...out.sizeSystem, quote: clean(out.sizeSystem.quote) };
   return out;
 }

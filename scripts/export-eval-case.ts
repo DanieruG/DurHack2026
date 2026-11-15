@@ -5,8 +5,10 @@
  *   npx tsx scripts/export-eval-case.ts --all      (the newest finished case for each listing)
  *
  * Writes, per listing:
- *   capture.json   the redacted page text, the page URL, and the user's search survey as card facts only
- *                  (never the user's own sizes or profile: the eval uses its own profile, see eval/LABELLING.md)
+ *   capture.json   the redacted page text, the page URL, the extension's structured fields (`listing`: item
+ *                  specifics, size options, Vinted attributes, pricing breakdown, each with its source) when the case
+ *                  stored them, and the user's search survey as card facts only (never the user's own sizes or
+ *                  profile: the eval uses its own profile, see eval/LABELLING.md)
  *   photo-NN.*     the listing's own photos as stored with the case, in photo-index order (sent as screenshots); other
  *                  listings' thumbnails that older captures picked up are left out, and repeats of one photo kept once
  *   label.json     every field left empty, for a person to fill in. Labels are never filled in from the pipeline.
@@ -18,7 +20,8 @@ import path from "node:path";
 import { redact } from "../lib/redact";
 import { listingItemId, scopeListingImages } from "../lib/listingScope";
 import type { StoredSurvey } from "../lib/observed";
-import type { ObservedListing, Platform } from "../schemas/domain";
+import { ListingDataSchema, type ListingData, type ObservedListing, type Platform } from "../schemas/domain";
+import { redactListingData } from "../pipeline/listingData";
 import { EMPTY_LABEL } from "../eval/labels";
 
 const { getDb } = await import("../lib/db");
@@ -48,6 +51,14 @@ if (args[0] === "--all") {
     if (!prev || (prev.status !== "closed" && c.status === "closed")) byListing.set(c.pageUrl, c);
   }
   cases = [...byListing.values()];
+}
+
+/** The stored structured fields (listing_data), redacted again; null for cases captured before they were stored. */
+function structuredFields(text: string | null | undefined): ListingData | null {
+  if (!text) return null;
+  const parsed = ListingDataSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) throw new Error(`stored listing_data doesn't match ListingDataSchema: ${parsed.error.issues[0]?.message}`);
+  return redactListingData(parsed.data) ?? null;
 }
 
 /** Stored survey cards back into the capture format: card facts only (title, price, link, thumbnail, size). */
@@ -82,6 +93,7 @@ for (const c of cases) {
   const first = c.inputs.filter((i) => i.revision === 1);
   const pageText = redact(first.find((i) => i.kind === "page_text")?.text).text;
   const survey = surveyCards(first.find((i) => i.kind === "observed_listings")?.text);
+  const listing = structuredFields(first.find((i) => i.kind === "listing_data")?.text);
   // Only this listing's own photos, once each: older captures also picked up other listings' thumbnails.
   const seen = new Set<string>();
   const photos = first.filter((i) => {
@@ -99,12 +111,12 @@ for (const c of cases) {
   photos.forEach((p, n) => fs.writeFileSync(path.join(dir, `photo-${String(n + 1).padStart(2, "0")}.${EXT[p.mimeType!]}`), p.data!));
 
   const capture = {
-    capture: { pageUrl: c.pageUrl ?? undefined, pageText, imageUrls: [], ...(survey ?? {}) },
+    capture: { pageUrl: c.pageUrl ?? undefined, pageText, ...(listing ? { listing } : {}), imageUrls: [], ...(survey ?? {}) },
     source: { exportedFrom: "live testing", capturedOn: c.createdAt.toISOString().slice(0, 10), status: c.status },
   };
   fs.writeFileSync(path.join(dir, "capture.json"), `${JSON.stringify(capture, null, 2)}\n`);
   const labelPath = path.join(dir, "label.json");
   if (!fs.existsSync(labelPath)) fs.writeFileSync(labelPath, `${JSON.stringify(EMPTY_LABEL, null, 2)}\n`);
-  console.log(`${name}: ${photos.length} photos, ${pageText.length} chars of page text${survey ? `, ${survey.observedListings.length} survey cards` : ""} (case ${c.id}, ${c.status})`);
+  console.log(`${name}: ${photos.length} photos, ${pageText.length} chars of page text${listing ? ", structured fields" : ", no structured fields"}${survey ? `, ${survey.observedListings.length} survey cards` : ""} (case ${c.id}, ${c.status})`);
 }
 process.exit(0);

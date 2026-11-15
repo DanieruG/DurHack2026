@@ -34,6 +34,8 @@ export function displayUrl(pageUrl: string | undefined): string | null {
 /** POST /api/cases: store the case and its inputs, then start the investigation in the background. */
 export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId: string; done: Promise<void> }> {
   const { platform, pageText } = prepareText(req.capture);
+  // The extension's structured fields, redacted once: stored with the case and used by the run.
+  const listing = redactListingData(req.capture.listing);
   const needs = await buildNeeds(req.profile, req.caseNote, null);
   const row = await deps.store.createCase({
     status: "investigating",
@@ -49,6 +51,7 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
   });
   await deps.store.addInputs(row.id, [
     ...(pageText ? [{ revision: 1, kind: "page_text" as const, text: pageText }] : []),
+    ...(listing ? [{ revision: 1, kind: "listing_data" as const, text: JSON.stringify(listing) }] : []),
     ...req.screenshots.map((s, i) => ({ revision: 1, kind: "screenshot" as const, mimeType: s.mimeType, data: s.bytes, position: i })),
   ]);
   deps.hub.startRevision(row.id, 1);
@@ -57,7 +60,7 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
   // Only this listing's own photos: drop other listings' thumbnails and size variants of the same photo.
   const done = runInvestigation(deps, row.id, {
     imageUrls: scopeListingImages(req.capture.imageUrls ?? [], platform),
-    listing: redactListingData(req.capture.listing),
+    listing,
     survey,
     searchQuery: sanitiseQuery(req.capture.searchQuery),
   });

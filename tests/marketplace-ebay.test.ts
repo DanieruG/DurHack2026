@@ -37,19 +37,19 @@ describe("eBay item page fixture: structured extraction", () => {
   it("pairs every item specifics label with its value", () => {
     const { listing } = structuredListing(raw)!;
     expect(listing.itemSpecifics).toEqual([
-      { label: "Condition", value: expect.stringMatching(/^New with box: This item is brand new/) },
-      { label: "Brand", value: "Nike" },
-      { label: "Colour", value: "Multicoloured" },
-      { label: "Department", value: "Men" },
-      { label: "Product Line", value: "Nike Revolution 6 Next Na" },
-      { label: "Model", value: "Nike Revolution 6 Next Na" },
-      { label: "Country of Origin", value: "China" },
-      { label: "Upper Material", value: "Mesh" },
-      { label: "Type", value: "Trainer" },
-      { label: "Insole Material", value: "Synthetic" },
-      { label: "Lining Material", value: "Synthetic" },
-      { label: "Outsole Material", value: "Rubber" },
-      { label: "Shoe Width", value: "Standard" },
+      { label: "Condition", value: expect.stringMatching(/^New with box: This item is brand new/), source: "page_field" },
+      { label: "Brand", value: "Nike", source: "page_field" },
+      { label: "Colour", value: "Multicoloured", source: "page_field" },
+      { label: "Department", value: "Men", source: "page_field" },
+      { label: "Product Line", value: "Nike Revolution 6 Next Na", source: "page_field" },
+      { label: "Model", value: "Nike Revolution 6 Next Na", source: "page_field" },
+      { label: "Country of Origin", value: "China", source: "page_field" },
+      { label: "Upper Material", value: "Mesh", source: "page_field" },
+      { label: "Type", value: "Trainer", source: "page_field" },
+      { label: "Insole Material", value: "Synthetic", source: "page_field" },
+      { label: "Lining Material", value: "Synthetic", source: "page_field" },
+      { label: "Outsole Material", value: "Rubber", source: "page_field" },
+      { label: "Shoe Width", value: "Standard", source: "page_field" },
     ]);
     expect(listing.colour).toEqual({ value: "Multicoloured", source: "page_field" });
     expect(listing.material).toEqual({ value: "Mesh", source: "page_field" });

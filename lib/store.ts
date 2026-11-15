@@ -42,8 +42,12 @@ export type CaseRow = {
 export type NewCase = Pick<CaseRow, "status" | "platform" | "pageUrl" | "inputHash" | "needs">;
 export type CasePatch = Partial<Omit<CaseRow, "id" | "createdAt" | "updatedAt">>;
 
-/** observed_listings: the matched subset of the user's search survey (JSON in `text`; see lib/observed.ts StoredSurvey). */
-export type InputKind = "image" | "screenshot" | "page_text" | "seller_reply" | "observed_listings";
+/**
+ * observed_listings: the matched subset of the user's search survey (JSON in `text`; see lib/observed.ts StoredSurvey).
+ * listing_data: the extension's structured fields for this listing, redacted (ListingData JSON in `text`, each field
+ * with its source).
+ */
+export type InputKind = "image" | "screenshot" | "page_text" | "seller_reply" | "observed_listings" | "listing_data";
 
 export type CaseInputRow = {
   id: string;
