@@ -315,6 +315,12 @@ a.ref-link:hover { box-shadow: inset 0 0 0 1px var(--light); }
 
 /* ---------- leads followed ---------- */
 .leads { margin-top: 34px; }
+.warning-signals { margin-top: 34px; }
+.warning-signal { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.warning-signal-text { font-size: 15px; line-height: 1.4; }
+.warning-evidence { list-style: none; margin-top: 9px; color: var(--muted); font-size: 13px; }
+.warning-evidence li + li { margin-top: 5px; }
+.warning-evidence .quote { display: block; color: var(--text); margin-top: 2px; }
 .lead-list { list-style: none; margin-top: 14px; }
 .lead { padding: 10px 0 10px 14px; border-left: 2px solid var(--light); margin-top: 10px; }
 .lead.problem { border-left-color: var(--red); }

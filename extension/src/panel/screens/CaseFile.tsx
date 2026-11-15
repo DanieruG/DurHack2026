@@ -86,6 +86,27 @@ export function CaseFile(props: {
         )}
       </section>
 
+      {detail.warningSignals.length > 0 && (
+        <section className="block warning-signals" aria-label="Worth checking">
+          <h2 className="h2">Worth checking</h2>
+          {detail.warningSignals.map((signal) => (
+            <article className="warning-signal" key={signal.id}>
+              <p className="warning-signal-text">{signal.text}</p>
+              {signal.evidence.length > 0 && (
+                <ul className="warning-evidence">
+                  {signal.evidence.map((e) => (
+                    <li key={e.id}>
+                      <span>{e.label}</span>
+                      {e.quote && <span className="quote">“{e.quote}”</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          ))}
+        </section>
+      )}
+
       {leads && (
         <section className="block leads" aria-label="Leads followed">
           <h2 className="h2">Leads followed</h2>

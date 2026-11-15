@@ -104,6 +104,11 @@ describe("investigation reducer", () => {
     expect(revisionOf("3:17")).toBe(3);
     expect(revisionOf(undefined)).toBeNull();
   });
+  it("keeps warning signals from the SSE stream for the case file", () => {
+    let s = newInvestigation(1, 0);
+    s = applyEvent(s, ev("warning_signals", CASE_FILE.warningSignals, 1));
+    expect(s.warningSignals).toEqual(CASE_FILE.warningSignals);
+  });
 });
 
 describe("case file evidence", () => {
