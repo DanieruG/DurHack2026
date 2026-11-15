@@ -15,8 +15,8 @@ const DROP_LINE = [
   /\bfeedback left by (buyer|seller)\b/i,
   /^\s*see all feedback\s*$/i,
   /^\s*\w\*{2,}\w\s*\(\d[\d,]*\)\s*$/, // masked feedback handles: "t***n (1058)"
-  /^\s*(hi|hello|welcome( back)?),?\s+[^\s!]{1,30}!?\s*$/i, // the viewer's own name in the site header: "Hi Daniel!"
-  /^\s*hi\s+[^\s!]{1,30}!/i, // ...also when the header runs on: "Hi Daniel!Hello. Sign in"
+  /^\s*(hi|hello|welcome( back)?),?\s+[^\s!]{1,30}!?\s*$/i, // the viewer's own name in the site header: "Hi Alex!"
+  /^\s*hi\s+[^\s!]{1,30}!/i, // ...also when the header runs on: "Hi Alex!Hello. Sign in"
   /^\s*(frequent uploads|speedy shipping|active lister|regularly lists \d+ or more items\.?|ships (quickly|fast))\s*$/i, // seller badges (Vinted)
   /^\s*sends items promptly\b/i, // Vinted seller badge
   /\bfeedback (left by buyer|replied to by seller)\b/i,
@@ -51,7 +51,7 @@ const FEEDBACK_START = /^\s*(about this seller|seller feedback|all ratings)\s*$/
 const FEEDBACK_WHEN = /^\s*(past (month|\d+ months|year)|more than a year ago)\s*$/i;
 const FEEDBACK_ENTRY = /^\s*(verified purchase|ebay automated feedback)\s*$/i;
 const FEEDBACK_END = /^\s*(back to search results|return to top|more to explore:?)\s*$/i;
-// A business seller's card has a shop name with spaces ("sample_identity_02"), its feedback count, then "Message".
+// A business seller's card has a shop name with spaces ("Sampleshop Shoes"), its feedback count, then "Message".
 const CARD_NAME = /^\s*(?!£)[A-Za-z0-9][^\n]{1,58}\s*$/;
 const CARD_AFTER = /^\s*(message|private|business)\s*$/i;
 // "Seller: jane_doe" / "Sold by janedoe" on a single line.
@@ -61,7 +61,7 @@ const INLINE_SELLER = /^\s*(seller|sold by|listed by|posted by)\s*[:\-]?\s+\S+/i
 const INLINE_LABEL = /\b(seller|sold by|listed by|posted by|username|user)\s*[:\-]\s*[^\s,.;!?]+/gi;
 const HANDLE = /(^|[\s(])@[A-Za-z0-9_.-]{2,}/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-// UK postcodes ("sample_identity_15", "SW1A 1AA"): the buyer's delivery postcode appears in eBay's postage line.
+// UK postcodes ("AB1 2BD", "SW1A 1AA"): the buyer's delivery postcode appears in eBay's postage line.
 const POSTCODE = /\b(GIR 0AA|[A-PR-UWYZ][A-HK-Y]?\d[A-Z\d]? ?\d[ABD-HJLNP-UW-Z]{2})\b/g;
 const PHONE = /(?:\+\d{1,3}[\s.-]?(?:\(0\)[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b|\b0\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b)/g;
 
@@ -74,7 +74,7 @@ const BARE_COUNT = /^\s*\d{1,6}\s*$/;
 const SELLER_TYPE = /^\s*(private|business)\s*$/i;
 const COUNT_WORDS = /^(reviews?|ratings?|feedback|sold|items?|photos?|watchers?|bids?|offers?|questions?|answers?|likes?|views?|sizes?)$/i;
 
-/** Usernames shown in seller cards ("pako8242" above "(75)"), so they can be removed wherever else they appear. */
+/** Usernames shown in seller cards ("sample_seller_02" above "(75)"), so they can be removed wherever else they appear. */
 export function sellerUsernames(lines: string[]): string[] {
   const names = new Set<string>();
   const next = (i: number) => {
@@ -83,7 +83,7 @@ export function sellerUsernames(lines: string[]): string[] {
   };
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
-    // Handles look like "pako8242", "jane_doe", "sneakerqueen"; not "Reviews" / "Watchers" above a count.
+    // Handles look like "sample_seller_02", "jane_doe", "sneakerqueen"; not "Reviews" / "Watchers" above a count.
     if (!USERNAME.test(t) || COUNT_WORDS.test(t) || !(/[\d_.\-]/.test(t) || t === t.toLowerCase())) continue;
     const j = next(i);
     if (j !== -1 && (FEEDBACK_COUNT.test(lines[j]) || BARE_COUNT.test(lines[j]))) names.add(lines[i].trim());
@@ -155,13 +155,13 @@ export function redact(input: string | undefined | null): RedactResult {
   let joined = out.join("\n");
   // Anywhere else the username appears (descriptions, replies, feedback), mask it.
   for (const name of usernames) joined = joined.replace(new RegExp(`(^|[^\\w])${escapeRe(name)}(?![\\w])`, "gi"), "$1[redacted]");
-  const text = joined
-    .replace(EMAIL, "[email removed]")
-    .replace(INLINE_LABEL, (_, label) => `${label}: [redacted]`)
-    .replace(HANDLE, (_, pre) => `${pre}[redacted]`)
-    .replace(PHONE, "[phone number removed]")
-    .replace(POSTCODE, "[postcode removed]")
+  const text = maskContacts(joined.replace(EMAIL, "[email removed]").replace(INLINE_LABEL, (_, label) => `${label}: [redacted]`).replace(HANDLE, (_, pre) => `${pre}[redacted]`))
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { text, removedLines: removed };
+}
+
+/** Emails, phone numbers and UK postcodes masked in place; nothing else changes (safe on short strings). */
+export function maskContacts(text: string): string {
+  return text.replace(EMAIL, "[email removed]").replace(PHONE, "[phone number removed]").replace(POSTCODE, "[postcode removed]");
 }

@@ -100,7 +100,7 @@ describe("redaction helpers", () => {
   });
 
   it("masks UK postcodes and run-on greetings", () => {
-    expect(redact("Estimated by Tue, 17 Nov to sample_identity_15. See details").text).toBe("Estimated by Tue, 17 Nov to [postcode removed]. See details");
-    expect(redact("Hi Daniel!Hello. Sign in\nNike Revolution 6").text).toBe("Nike Revolution 6");
+    expect(redact("Estimated by Tue, 17 Nov to AB1 2BD. See details").text).toBe("Estimated by Tue, 17 Nov to [postcode removed]. See details");
+    expect(redact("Hi Alex!Hello. Sign in\nNike Revolution 6").text).toBe("Nike Revolution 6");
   });
 });

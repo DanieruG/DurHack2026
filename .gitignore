@@ -9,3 +9,4 @@ generated/
 coverage/
 .neon
 extension/dist/
+data/private/

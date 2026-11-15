@@ -231,21 +231,21 @@ describe("exported eval cases carry no personal details", () => {
 
 describe("seller redaction (gaps found while exporting the eval cases)", () => {
   it("drops a business seller's shop name and feedback count, and masks the name elsewhere", () => {
-    const t = redact("Nike Revolution 6\nsample_identity_03\n(228410)\nMessage\nPrice\n£54.00\nThanks from sample_identity_03").text;
-    expect(t).not.toContain("Wynsors");
+    const t = redact("Nike Revolution 6\nSampleshop Shoes\n(228410)\nMessage\nPrice\n£54.00\nThanks from Sampleshop Shoes").text;
+    expect(t).not.toContain("Sampleshop");
     expect(t).not.toContain("228410");
     expect(t).toContain("£54.00");
   });
   it("drops the store after 'Find similar items from', and eBay's feedback block up to the footer", () => {
     const t = redact(
-      ["Find similar items from", "sample_identity_07", "Nike P-6000", "About this seller", "All ratings", "Past year", "Verified purchase", "Great seller", "Watch (#206500725165)", "Back to search results", "More to explore"].join("\n"),
+      ["Find similar items from", "Samplejo's style closet", "Nike P-6000", "About this seller", "All ratings", "Past year", "Verified purchase", "Great seller", "Watch (#206500725165)", "Back to search results", "More to explore"].join("\n"),
     ).text;
-    expect(t).not.toMatch(/Trendyjulie|Verified purchase|Great seller|206500725165/);
+    expect(t).not.toMatch(/Samplejo|Verified purchase|Great seller|206500725165/);
     expect(t).toContain("Nike P-6000");
     expect(t).toContain("More to explore");
   });
   it("drops a Vinted seller's username, review count and badge", () => {
-    const t = redact("Make an offer\nHow you’re covered\nsample_identity_00\n4\nSends items promptly — usually within the next 24 hours.").text;
+    const t = redact("Make an offer\nHow you’re covered\nsample_seller_03\n4\nSends items promptly — usually within the next 24 hours.").text;
     expect(t).toBe("Make an offer\nHow you’re covered");
   });
   it("keeps ordinary lines followed by a number", () => {

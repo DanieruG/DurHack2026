@@ -116,6 +116,7 @@ the shipping components. It opens straight from disk.
 | `npm run eval` | Run `eval/listings/*` through the pipeline and write `eval/report.md` |
 | `npm run db:deploy` / `db:migrate` / `db:migrate:https` | Prisma migrations |
 | `npx tsx scripts/placeholder-samples.ts` | Regenerate the placeholder price samples |
+| `npx tsx scripts/redact-stored.ts [--apply\|--verify]` | Re-run today's redaction over every stored case in both databases; `--verify` searches for the known identities in `data/private/known-identities.txt` (gitignored) |
 
 ## Demo mode (record / replay)
 
