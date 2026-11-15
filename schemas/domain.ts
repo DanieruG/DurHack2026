@@ -61,8 +61,81 @@ export const ObservedListingSchema = z.object({
 });
 export type ObservedListing = z.infer<typeof ObservedListingSchema>;
 
+// ---------- structured listing data (read from the page by the extension) ----------
+
+/** Where a listing field came from: the page's own JSON-LD or state, a visible page field (DOM), or Gemini. */
+export const FieldSourceSchema = z.enum(["structured_data", "page_field", "gemini"]);
+export type FieldSource = z.infer<typeof FieldSourceSchema>;
+
+const sourcedText = (max: number) => z.object({ value: z.string().trim().min(1).max(max), source: FieldSourceSchema });
+const sourcedGBP = z.object({ value: z.number().nonnegative().max(100_000), source: FieldSourceSchema });
+
+export const SizeSystemOrUnknownSchema = z.enum(["UK", "US", "EU", "unknown"]);
+
+/** One size a multi-size listing offers (eBay variations): a choice, not a fact about the pair. */
+export const SizeOptionSchema = z.object({ value: z.string().trim().min(1).max(20), outOfStock: z.boolean() });
+export const SizeOptionsSchema = z.object({
+  /** The menu's own label, e.g. "UK Shoe Size". */
+  label: z.string().max(60),
+  system: SizeSystemOrUnknownSchema,
+  options: z.array(SizeOptionSchema).min(1).max(60),
+  source: FieldSourceSchema,
+});
+export type SizeOptions = z.infer<typeof SizeOptionsSchema>;
+
+/** Where the size system was found ("Mens US 14" in the description); never assumed. */
+export const SizeSystemFoundSchema = z.object({
+  value: SizeSystemSchema,
+  source: FieldSourceSchema,
+  foundIn: z.enum(["size_field", "size_menu", "title", "description", "photo"]),
+  quote: z.string().max(120).optional(),
+});
+export type SizeSystemFound = z.infer<typeof SizeSystemFoundSchema>;
+
+/**
+ * This listing's own fields, read by the extension from the page's structured data (JSON-LD, page state) and visible
+ * page fields before anything is sent to Gemini. Listing facts only: there is deliberately no field for the seller.
+ */
+export const ListingDataSchema = z.object({
+  title: sourcedText(300).optional(),
+  brand: sourcedText(80).optional(),
+  model: sourcedText(120).optional(),
+  condition: sourcedText(300).optional(),
+  colour: sourcedText(80).optional(),
+  material: sourcedText(120).optional(),
+  category: sourcedText(120).optional(),
+  description: sourcedText(5000).optional(),
+  uploadDate: sourcedText(60).optional(),
+  styleCode: sourcedText(40).optional(),
+  /** A single listed size (Vinted). */
+  size: sourcedText(20).optional(),
+  sizeSystem: SizeSystemFoundSchema.optional(),
+  /** Size choices on a multi-size listing (eBay variations). */
+  sizeOptions: SizeOptionsSchema.optional(),
+  /** The listing price in GBP (Vinted: the GBP asking amount, never the seller's own currency). */
+  priceGBP: sourcedGBP.optional(),
+  /** eBay "List price"/RRP. */
+  listPriceGBP: sourcedGBP.optional(),
+  postageGBP: sourcedGBP.optional(),
+  buyerProtectionGBP: sourcedGBP.optional(),
+  /** Price plus buyer protection plus postage, when all parts are known. */
+  totalGBP: sourcedGBP.optional(),
+  /** The price in the seller's own currency, when it isn't GBP (evidence only: "Seller listed it at 40 AUD"). */
+  sellerPrice: z.object({ amount: z.number().nonnegative().max(1_000_000), currency: z.string().min(3).max(3) }).optional(),
+  /** Item specifics pairs (eBay "About this item"). */
+  itemSpecifics: z.array(z.object({ label: z.string().max(60), value: z.string().max(300) })).max(40).optional(),
+  photos: z.object({ captured: z.number().int().nonnegative(), shown: z.number().int().nonnegative().nullable() }).optional(),
+  /** The platform indicates its own item verification may apply (Vinted). */
+  verificationAvailable: z.boolean().optional(),
+  /** Plain notes about what couldn't be read, e.g. "Seller description not captured". */
+  notes: z.array(z.string().max(200)).max(10).optional(),
+});
+export type ListingData = z.infer<typeof ListingDataSchema>;
+
 /** What the extension (or upload page) sends. Screenshots arrive as multipart files. */
 export const CaptureSchema = z.object({
+  /** This listing's fields from the page's own data (see ListingDataSchema). */
+  listing: ListingDataSchema.optional(),
   pageUrl: z.string().url().max(2048).optional(),
   pageText: z.string().max(MAX_PAGE_TEXT).optional(),
   imageUrls: z.array(z.string().url().max(2048)).max(32).optional(),
@@ -162,6 +235,25 @@ export const ListingFactsSchema = z.object({
   conditionClaims: z.array(z.string()),
   photoCount: z.number().int().nonnegative(),
   evidence: z.array(EvidenceSchema),
+  /** Where each filled field came from (title, brand, model, size, sizeSystem, price, condition, colour, ...). */
+  fieldSources: z.record(z.string(), FieldSourceSchema).optional(),
+  /** Where the size system was found, when it was found (never assumed). */
+  sizeSystemFound: SizeSystemFoundSchema.optional(),
+  /** Size choices on a multi-size listing: there is no single listed size then. */
+  sizeOptions: SizeOptionsSchema.optional(),
+  /** The listing's own colour field (Vinted colour, eBay item specifics), as written. */
+  colourText: z.string().optional(),
+  styleCode: z.string().optional(),
+  listPriceGBP: z.number().nonnegative().optional(),
+  postageGBP: z.number().nonnegative().optional(),
+  buyerProtectionGBP: z.number().nonnegative().optional(),
+  /** What the buyer pays: price plus whatever of buyer protection and postage is known (see totalIncludes). */
+  totalGBP: z.number().nonnegative().optional(),
+  totalIncludes: z.array(z.enum(["buyer_protection", "postage"])).optional(),
+  sellerPrice: z.object({ amount: z.number(), currency: z.string() }).optional(),
+  verificationAvailable: z.boolean().optional(),
+  photosShown: z.number().int().nonnegative().nullable().optional(),
+  notes: z.array(z.string()).optional(),
 });
 export type ListingFacts = z.infer<typeof ListingFactsSchema>;
 

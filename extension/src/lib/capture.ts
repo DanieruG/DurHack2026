@@ -3,6 +3,9 @@ import { redact } from "@/lib/redact";
 import { scopeListingImages } from "@/lib/listingScope";
 import { MAX_PAGE_TEXT, type Capture, type Platform } from "@/schemas/domain";
 import { photosFromEmbedded, photosFromState, type EmbeddedData, type GalleryState } from "./gallery";
+import type { PageFields } from "@/lib/marketplace/common";
+import { extractListing, type ExtractedListing } from "@/lib/marketplace";
+import { ListingDataSchema, type ListingData } from "@/schemas/domain";
 
 /** What the in-page collector returns. Plain data only (it crosses the scripting boundary). */
 export type RawCapture = {
@@ -20,8 +23,12 @@ export type RawCapture = {
   embedded?: EmbeddedData;
   /** The page's JavaScript state (MAIN world), read only when the embedded JSON had no photos for this item. */
   state?: GalleryState;
+  /** Visible listing fields read from the DOM (see PageFields). */
+  fields?: PageFields;
   pageText: string;
 };
+
+export type { PageFields };
 
 export type ListingPreview = {
   title: string;
@@ -109,7 +116,7 @@ export function collectListing(): RawCapture {
     budget -= t.length;
     list.push(t);
   };
-  const MAY_HOLD_PHOTOS = /"(photos|images|mediaList|imageList|pictures)"|__next_f|ebayimg\.com|vinted\.net/;
+  const MAY_HOLD_PHOTOS = /"(photos|images|mediaList|imageList|pictures|MSKU)"|__next_f|ebayimg\.com|vinted\.net/;
   document.querySelectorAll<HTMLScriptElement>("script:not([src])").forEach((sc) => {
     const t = sc.textContent ?? "";
     const type = (sc.type || "").toLowerCase();
@@ -127,6 +134,81 @@ export function collectListing(): RawCapture {
   const currency = meta('meta[property="product:price:currency"]') ?? meta('meta[property="og:price:currency"]') ??
     (document.querySelector('[itemprop="priceCurrency"]')?.getAttribute("content") || null);
 
+  // Visible listing fields (plain text only).
+  const clean = (t: string | null | undefined) => (t ?? "").replace(/\s+/g, " ").trim();
+  const specifics: { label: string; value: string }[] = [];
+  const about = document.querySelector('[data-testid="x-about-this-item"], #viTabs_0_is, [class*="ux-layout-section-evo"]');
+  (about ?? document).querySelectorAll(".ux-labels-values__labels").forEach((labelEl) => {
+    if (!about && !labelEl.closest('[class*="ux-layout-section-evo"]')) return;
+    const valueEl = labelEl.nextElementSibling;
+    if (!valueEl || !valueEl.classList.contains("ux-labels-values__values")) return;
+    const label = clean(labelEl.textContent).replace(/:$/, "");
+    // The condition value repeats itself behind "Read more"; keep the first sentence block.
+    const value = clean(valueEl.querySelector("span")?.textContent ?? valueEl.textContent);
+    if (label && value && label.length <= 60 && specifics.length < 40) specifics.push({ label, value: value.slice(0, 300) });
+  });
+  const grid = Array.from(document.querySelectorAll<HTMLImageElement>("button.ux-image-grid-item img, .ux-image-grid-item img"))
+    .slice(0, 60)
+    .map((img) => ({ src: img.getAttribute("src"), dataSrc: img.getAttribute("data-src") }));
+  let pictureTotal: number | null = null;
+  document.querySelectorAll("[aria-label]").forEach((el) => {
+    const m = /^Picture \d+ of (\d+)$/i.exec(el.getAttribute("aria-label") ?? "");
+    if (m) pictureTotal = Math.max(pictureTotal ?? 0, Number(m[1]));
+  });
+  const testIds: Record<string, string> = {};
+  const leafTexts = (root: Element) => {
+    const out: string[] = [];
+    root.querySelectorAll("*").forEach((el) => {
+      if (el.children.length || el.closest("button")) return;
+      const t = clean(el.textContent);
+      if (t) out.push(t);
+    });
+    return out;
+  };
+  for (const id of ["item-attributes-size", "item-attributes-status", "item-attributes-color", "item-attributes-material", "item-attributes-brand"]) {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) continue;
+    const leaves = leafTexts(el);
+    const value = leaves.slice(1).join(" ") || leaves[0];
+    if (value) testIds[id] = value.slice(0, 200);
+  }
+  for (const id of ["item-price", "item-shipping-banner-price"]) {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    const t = clean(el?.firstElementChild?.textContent ?? el?.textContent);
+    if (t) testIds[id] = t.slice(0, 100);
+  }
+  let photoTiles = 0;
+  document.querySelectorAll('[data-testid^="item-photo-"]').forEach((el) => {
+    const m = /^item-photo-(\d+)$/.exec(el.getAttribute("data-testid") ?? "");
+    if (m) photoTiles = Math.max(photoTiles, Number(m[1]));
+  });
+  const descriptionFrame = !!document.querySelector('iframe[src*="ebaydesc.com"], iframe#desc_ifr');
+  // The signed-in user's name/id in the header (eBay renders it from GHIdentConfig): collected only so it can be removed.
+  const account: string[] = [];
+  const pushAccount = (v: string | null | undefined) => {
+    const t = clean(v);
+    if (t && t.length >= 2 && t.length <= 64 && !account.includes(t)) account.push(t);
+  };
+  pushAccount(document.querySelector("#gh-ident-srvr-name, .gh-identity__greeting span span")?.textContent);
+  document.querySelectorAll<HTMLScriptElement>("script:not([src])").forEach((sc) => {
+    const t = sc.textContent ?? "";
+    const cfg = /GHIdentConfig\s*=\s*(\{[^{}]{0,500}\})/.exec(t);
+    if (cfg) {
+      try {
+        const o = JSON.parse(cfg[1]) as Record<string, unknown>;
+        for (const k of ["fn", "id"]) if (typeof o[k] === "string") pushAccount(o[k] as string);
+      } catch {
+        /* not plain JSON */
+      }
+    }
+    const auth = /"userAuth"\s*:\s*true\s*,\s*"userId"\s*:\s*"([^"]{2,64})"(?:\s*,\s*"fn"\s*:\s*"([^"]{2,64})")?/.exec(t);
+    if (auth) {
+      pushAccount(auth[1]);
+      pushAccount(auth[2]);
+    }
+  });
+  const fields = { specifics, grid, pictureTotal, testIds, photoTiles, descriptionFrame, account };
+
   const text = (document.body?.innerText ?? "").replace(/\n{3,}/g, "\n\n");
   const priceMatch = text.match(/£\s?\d{1,5}(?:[.,]\d{2})?/);
 
@@ -140,6 +222,7 @@ export function collectListing(): RawCapture {
     images: images.slice(0, 120),
     pageImages: pageImages.slice(0, 60),
     embedded,
+    fields,
     pageText: text.slice(0, 40_000),
   };
 }
@@ -269,9 +352,28 @@ export function listingPhotos(raw: RawCapture): string[] {
 }
 
 /** Turn a raw page capture into the API `Capture` plus what the panel shows before investigating. */
+/** This listing's fields from the page's own data (eBay, Vinted), or null on other sites. */
+export function structuredListing(raw: RawCapture): ExtractedListing | null {
+  return extractListing({ pageUrl: raw.pageUrl, embedded: raw.embedded, fields: raw.fields });
+}
+
+/** The listing data as sent: validated field by field, so one odd value never drops the rest. */
+function validListing(listing: ListingData, captured: number): ListingData | undefined {
+  const withPhotos: ListingData = { ...listing, photos: { captured, shown: listing.photos?.shown ?? null } };
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(withPhotos)) {
+    const one = ListingDataSchema.safeParse({ [k]: v });
+    if (one.success && (one.data as Record<string, unknown>)[k] !== undefined) out[k] = (one.data as Record<string, unknown>)[k];
+  }
+  return Object.keys(out).length ? (out as ListingData) : undefined;
+}
+
 export function prepareCapture(raw: RawCapture): { capture: Capture; preview: ListingPreview } {
   const platform = detectPlatform(raw.pageUrl);
-  const imageUrls = listingPhotos(raw).slice(0, MAX_CAPTURED_IMAGES);
+  const extracted = structuredListing(raw);
+  // eBay: the gallery grid has every photo (JSON-LD lists only some). Elsewhere: page data, then the gallery DOM.
+  const imageUrls = (extracted?.photos.length ? extracted.photos : listingPhotos(raw)).slice(0, MAX_CAPTURED_IMAGES);
+  const listing = extracted ? validListing(extracted.listing, imageUrls.length) : undefined;
   const pageText = redactPageText(raw.pageText);
   const pageUrl = /^https?:\/\//.test(raw.pageUrl) && raw.pageUrl.length <= 2048 ? raw.pageUrl : undefined;
   return {
@@ -279,10 +381,11 @@ export function prepareCapture(raw: RawCapture): { capture: Capture; preview: Li
       ...(pageUrl ? { pageUrl } : {}),
       ...(pageText ? { pageText } : {}),
       ...(imageUrls.length ? { imageUrls } : {}),
+      ...(listing ? { listing } : {}),
     },
     preview: {
-      title: cleanTitle(raw),
-      priceGBP: parsePriceGBP(raw),
+      title: listing?.title?.value.slice(0, 120) ?? cleanTitle(raw),
+      priceGBP: listing?.priceGBP?.value ?? parsePriceGBP(raw),
       platform,
       photoCount: imageUrls.length,
       thumbnail: imageUrls[0] ?? null,

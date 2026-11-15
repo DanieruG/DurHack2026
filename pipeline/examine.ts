@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { IdentifyResult, ListingFacts, Platform } from "@/schemas/domain";
+import type { IdentifyResult, ListingData, ListingFacts, Platform } from "@/schemas/domain";
+import { listingDataPart } from "./listingData";
 import type { CatalogueModel } from "@/schemas/seed";
 import type { StoredImage } from "@/lib/images";
 import { generateStructured } from "@/gemini/structured";
@@ -31,11 +32,15 @@ export async function examineListing(
     readReferenceImage: (p: string) => Promise<StoredImage | null>;
     /** The user's marketplace search (a hint, never a fact about this listing). */
     searchQuery?: string | null;
+    /** This listing's fields from the page's own data: facts, sent so Gemini only fills the gaps. */
+    listing?: ListingData;
   },
 ): Promise<{ facts: ListingFacts; identify: IdentifyResult }> {
   // Nothing is extracted yet, so shortlist the catalogue from the top of the (already scoped) page text.
-  const shortlist = identifyShortlist({ title: args.pageText.slice(0, 2000) }, args.catalogue);
+  const own = [args.listing?.title?.value, args.listing?.model?.value].filter(Boolean).join("\n");
+  const shortlist = identifyShortlist({ title: `${own}\n${args.pageText.slice(0, 2000)}` }, args.catalogue);
   const parts = extractParts(args.pageText, args.images, args.platform);
+  parts.splice(1, 0, ...listingDataPart(args.listing));
   parts.push({ text: candidateList(shortlist) }, ...(await referenceParts(shortlist, args.readReferenceImage)), ...searchHintPart(args.searchQuery));
   const { data } = await generateStructured(gemini, examineWireSchema(shortlist.map((m) => m.id)), {
     stage: "extract",

@@ -13,6 +13,8 @@ import { finalise, instrumented, loadImages, loadPageText, saveSurvey } from "./
 import { guardSearchHint } from "./identify";
 import { prepareSurvey, sanitiseQuery, type Survey } from "@/lib/observed";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
+import { factsFromPageOnly, mergeListingFacts, redactListingData } from "./listingData";
+import type { ListingData } from "@/schemas/domain";
 
 export { reopenCase, startReopen, ReopenConflictError } from "./reopen";
 export { finalise, instrumented, loadImages } from "./core";
@@ -54,6 +56,7 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
   // Only this listing's own photos: drop other listings' thumbnails and size variants of the same photo.
   const done = runInvestigation(deps, row.id, {
     imageUrls: scopeListingImages(req.capture.imageUrls ?? [], platform),
+    listing: redactListingData(req.capture.listing),
     survey,
     searchQuery: sanitiseQuery(req.capture.searchQuery),
   });
@@ -68,7 +71,7 @@ function profileFromNeeds(needs: UserNeeds) {
 export async function runInvestigation(
   deps: Deps,
   caseId: string,
-  opts: { imageUrls: string[]; survey?: Survey | null; searchQuery?: string | null },
+  opts: { imageUrls: string[]; survey?: Survey | null; searchQuery?: string | null; listing?: ListingData },
 ): Promise<void> {
   const c = await deps.store.getCase(caseId);
   if (!c) throw new Error(`Case ${caseId} not found`);
@@ -89,14 +92,15 @@ export async function runInvestigation(
     const examineStats: StageStats = { geminiCalls: 0, cachedCalls: 0, functionCalls: 0 };
     const [examined, needs] = await Promise.all([
       runStage("extract", { emit, timeoutMs: config.stageTimeoutMs, geminiFeatures: ["vision", "structured_output"], stats: examineStats }, () =>
-        examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage, searchQuery: opts.searchQuery }),
+        examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage, searchQuery: opts.searchQuery, listing: opts.listing }),
       ).catch(() => null),
       c.needs.caseNote
         ? runStage("needs", { emit, timeoutMs: config.stageTimeoutMs }, () => buildNeeds(profileFromNeeds(c.needs), c.needs.caseNote, deps.gemini)).catch(() => c.needs)
         : Promise.resolve(c.needs),
     ]);
     if (!examined) emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
-    const facts: ListingFacts = examined?.facts ?? emptyFacts(c.platform, images.length);
+    // The page's own data first; Gemini fills only what it doesn't give.
+    const facts: ListingFacts = examined ? mergeListingFacts(examined.facts, opts.listing) : opts.listing ? factsFromPageOnly(c.platform, images.length, opts.listing) : emptyFacts(c.platform, images.length);
 
     const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null, survey: opts.survey ?? null, searchQuery: opts.searchQuery ?? null });
     // The search hint never decides on its own: a model only the search names (no text, no photo) stays below the gate.
