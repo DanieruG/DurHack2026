@@ -16,7 +16,7 @@ if (!sourceId) throw new Error("usage: npx tsx scripts/rerun-case.ts <caseId>");
 const db = getDb();
 const src = await db.case.findUnique({ where: { id: sourceId }, include: { inputs: { orderBy: { position: "asc" }, select: { kind: true, text: true, sourceUrl: true } } } });
 if (!src) throw new Error(`case ${sourceId} not found on the test branch`);
-const needs = src.needs as { sizes: never[]; priorities: string[]; budgetGBP?: number; wearTolerance: "none" | "light" | "moderate" | "any" };
+const needs = src.needs as { sizes: never[]; defaultSize?: never; priorities: string[]; budgetGBP?: number; wearTolerance: "none" | "light" | "moderate" | "any" };
 const pageText = src.inputs.find((i) => i.kind === "page_text")?.text ?? "";
 const imageUrls = src.inputs.filter((i) => i.kind === "image" && i.sourceUrl).map((i) => i.sourceUrl!);
 
@@ -24,7 +24,7 @@ const deps = await getDeps();
 const started = Date.now();
 const { caseId, done } = await createCase(deps, {
   capture: { pageUrl: src.pageUrl ?? undefined, pageText, imageUrls },
-  profile: { sizes: needs.sizes, priorities: needs.priorities, budgetGBP: needs.budgetGBP, wearTolerance: needs.wearTolerance },
+  profile: { sizes: needs.sizes, ...(needs.defaultSize ? { defaultSize: needs.defaultSize } : {}), priorities: needs.priorities, budgetGBP: needs.budgetGBP, wearTolerance: needs.wearTolerance },
   screenshots: [],
 });
 await done;

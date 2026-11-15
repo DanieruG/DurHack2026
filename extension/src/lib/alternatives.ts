@@ -26,10 +26,8 @@ export function alternativeTags(a: ObservedAlternative): { text: string; flag: b
   ];
 }
 
-/** Under the price: which price was compared ("Postage not included", or the total). */
-export function basisLabel(a: Pick<ObservedAlternative, "priceBasis">): string {
-  return a.priceBasis === "total" ? "Incl. protection and postage" : "Postage not included";
-}
+/** Under the price: prices are compared without postage. */
+export const POSTAGE_LABEL = "Postage not included";
 
 /** The card's accessible name: "Nike Pegasus 40 on Vinted, £28, £14 cheaper than this listing, UK 9, same colour, not investigated yet, opens in a new tab". */
 export function alternativeLabel(a: ObservedAlternative): string {
@@ -37,7 +35,7 @@ export function alternativeLabel(a: ObservedAlternative): string {
     `${a.title} on ${PLATFORM_NAMES[a.platform]}`,
     gbp(a.priceGBP),
     differenceText(a.differenceGBP),
-    basisLabel(a).toLowerCase(),
+    POSTAGE_LABEL.toLowerCase(),
     sizeLabel(a).text,
     ...alternativeTags(a).map((t) => t.text.toLowerCase()),
     "opens in a new tab",

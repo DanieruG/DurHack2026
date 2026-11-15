@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { alternativeCandidates, matchSurvey, MAX_ALTERNATIVES, noAlternatives, prepareSurvey, toAlternatives, type MatchedListing } from "@/lib/observed";
+import { alternativeCandidates, matchSurvey, MAX_ALTERNATIVES, noAlternatives, prepareSurvey, toAlternatives } from "@/lib/observed";
 import { deriveTokens } from "@/lib/titleMatch";
 import { findAlternatives } from "@/pipeline/checks/price";
 import { matchOfferColours } from "@/pipeline/offerColour";
@@ -137,7 +137,7 @@ describe("which surveyed listings qualify", () => {
     expect(candidates([card({ price: 40 }), card({ price: 60 })], 40)).toEqual([]);
   });
 
-  it("price basis: listed prices against the listing's listed price, never against its total", () => {
+  it("price basis: listed prices only, never a total with postage", () => {
     // £40 listing, £46.20 with protection and postage. A £35 card is £5 cheaper on the listed price: it qualifies,
     // and the difference is against £40, not £46.20.
     const c = card({ price: 35 });
@@ -147,15 +147,6 @@ describe("which surveyed listings qualify", () => {
     expect(a).toMatchObject({ priceGBP: 35, priceBasis: "listed", differenceGBP: -5 });
     // £36 is only £4 cheaper on the listed price, though £10.20 under the total: not an alternative.
     expect(alternativeCandidates(matched([card({ price: 36 })]).matched, { listing: facts, userSizeUK: 9, platform: "vinted" })).toEqual([]);
-  });
-
-  it("price basis: totals are compared when both the card and the listing include protection and postage", () => {
-    const facts = { priceGBP: 40, totalGBP: 46, totalIncludes: ["buyer_protection", "postage"] } as ListingFacts;
-    const m = matched([card({ price: 38 })]).matched.map((x): MatchedListing => ({ ...x, totalGBP: 40 }));
-    const got = alternativeCandidates(m, { listing: facts, userSizeUK: 9, platform: "vinted" });
-    expect(got[0].compared).toEqual({ basis: "total", card: 40, listing: 46 });
-    // A listing total without postage isn't the same basis: listed prices instead (£38 vs £40: not enough).
-    expect(alternativeCandidates(m, { listing: { ...facts, totalIncludes: ["buyer_protection"] }, userSizeUK: 9, platform: "vinted" })).toEqual([]);
   });
 
   it("sorts exact before version-not-stated, then cheapest first", () => {

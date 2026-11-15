@@ -15,6 +15,7 @@ import { detectPlatform } from "./platform";
 import { listingItemId } from "./listingScope";
 import { excludeOutliers, percentile } from "./priceSample";
 import { convertSize, rowForCm } from "./sizes";
+import { savedSizeFor } from "./userSize";
 import { chartForBrand, extractSize, matchTitle, toUK, type MatchLevel, type ModelTokens } from "./titleMatch";
 
 /**
@@ -47,8 +48,6 @@ export type SurveyListing = {
   sponsored: boolean;
   /** When the card was surveyed (YYYY-MM-DD). */
   seenOn?: string;
-  /** What the buyer pays (item, buyer protection and postage), when the card gives it. Surveyed cards don't yet. */
-  totalGBP?: number;
 };
 
 export type Survey = {
@@ -72,7 +71,7 @@ export type MatchedListing = SurveyListing & { level: MatchLevel; sizeUK: number
 /** What is stored with the case: the matched subset only (no unmatched cards), with each card's match level. */
 export type StoredSurvey = Omit<Survey, "listings"> & {
   counts: MatchCounts;
-  listings: (Pick<SurveyListing, "id" | "title" | "priceGBP" | "url" | "thumbnailUrl" | "sizeText" | "sponsored" | "seenOn" | "totalGBP"> & { matchLevel: MatchLevel })[];
+  listings: (Pick<SurveyListing, "id" | "title" | "priceGBP" | "url" | "thumbnailUrl" | "sizeText" | "sponsored" | "seenOn"> & { matchLevel: MatchLevel })[];
 };
 
 export const sanitiseQuery = (q: string | undefined | null) => {
@@ -177,7 +176,6 @@ export function toStoredSurvey(survey: Survey, matched: MatchedListing[]): Store
         ...(m.sizeText ? { sizeText: m.sizeText } : {}),
         sponsored: m.sponsored,
         ...(m.seenOn ? { seenOn: m.seenOn } : {}),
-        ...(m.totalGBP !== undefined ? { totalGBP: m.totalGBP } : {}),
         matchLevel: m.level,
       })),
   };
@@ -191,11 +189,12 @@ export function fromStoredSurvey(s: StoredSurvey): Survey {
 
 // ---------- the user's size ----------
 
-const sameBrand = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-
-/** The user's size in UK on the model's chart: their saved size for this brand, else another brand's size by foot length. */
-export function userSizeUK(needs: UserNeeds, brand: string, chart: SizeChart | undefined, charts: SizeChart[]): number | null {
-  const own = needs.sizes.find((s) => sameBrand(s.brand, brand));
+/**
+ * The user's size in UK on the model's chart: their saved size for this brand, else their usual size, else another
+ * brand's size by foot length.
+ */
+export function userSizeUK(needs: Pick<UserNeeds, "sizes" | "defaultSize">, brand: string | null, chart: SizeChart | undefined, charts: SizeChart[]): number | null {
+  const own = savedSizeFor(needs, brand);
   if (own) return own.system === "UK" ? own.size : chart ? (convertSize(own.size, own.system, chart)?.uk ?? null) : null;
   for (const s of needs.sizes) {
     const theirs = chartForBrand(s.brand, charts);
@@ -329,17 +328,14 @@ export const noAlternatives = (survey: Pick<Survey, "platform" | "surveyedOn"> |
   survey ? { surveyUsed: true, platform: survey.platform, surveyedOn: survey.surveyedOn, alternatives: [] } : { surveyUsed: false, platform: null, surveyedOn: null, alternatives: [] };
 
 /**
- * The two prices to compare, on the same basis: what the buyer pays (buyer protection and postage included) when both
- * the card and the listing give it, otherwise the listed prices (postage not included). Surveyed cards only carry the
- * item price today, so in practice that is listed price against listed price.
+ * The two prices to compare: always the listed prices (Vinted's without the buyer protection fee), never a total with
+ * postage, which depends on where the buyer lives and how it's sent.
  */
 export function comparedPrices(
-  card: Pick<SurveyListing, "priceGBP" | "totalGBP">,
-  listing: Pick<ListingFacts, "priceGBP" | "totalGBP" | "totalIncludes">,
+  card: Pick<SurveyListing, "priceGBP">,
+  listing: Pick<ListingFacts, "priceGBP">,
 ): { basis: ObservedAlternative["priceBasis"]; card: number; listing: number } | null {
   if (listing.priceGBP === undefined) return null;
-  const listingTotal = listing.totalGBP !== undefined && listing.totalIncludes?.includes("buyer_protection") && listing.totalIncludes.includes("postage");
-  if (card.totalGBP !== undefined && listingTotal) return { basis: "total", card: card.totalGBP, listing: listing.totalGBP! };
   return { basis: "listed", card: card.priceGBP, listing: listing.priceGBP };
 }
 
@@ -350,12 +346,12 @@ const LEVEL_ORDER = { exact: 0, version_unknown: 1 } as const;
 /**
  * Surveyed listings that could be alternatives, before the colour check: exact or version-not-stated matches, in the
  * user's size or stating no size (any adult size when the user's size isn't known), same platform with an https link,
- * and cheaper by at least 10% or £5 (whichever is larger) on the same price basis. Auctions and the listing being
+ * and cheaper by at least 10% or £5 (whichever is larger) on the listed price. Auctions and the listing being
  * investigated never reach here (prepareSurvey). Exact before version-not-stated, then cheapest first.
  */
 export function alternativeCandidates(
   matched: MatchedListing[],
-  args: { listing: Pick<ListingFacts, "priceGBP" | "totalGBP" | "totalIncludes">; userSizeUK: number | null; platform: Platform },
+  args: { listing: Pick<ListingFacts, "priceGBP">; userSizeUK: number | null; platform: Platform },
 ): AlternativeCandidate[] {
   const inSize = (m: MatchedListing) => {
     if (m.sizeLabel === null) return true; // "Size not stated"

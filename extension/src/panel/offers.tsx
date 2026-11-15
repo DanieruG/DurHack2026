@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { NewOffer, NewOffers, ObservedAlternative, ObservedAlternatives } from "@/schemas/domain";
 import { gbp, PLATFORM_NAMES } from "../lib/format";
 import { colourLabel, differenceText, notEnoughLine, offerLabel, offersFootnote, OFFERS_SHOWN, openableOffers, safeHref, safeThumbnail } from "../lib/offers";
-import { alternativeLabel, alternativesView, ALTERNATIVES_TITLE, alternativeTags, basisLabel, sizeLabel } from "../lib/alternatives";
+import { alternativeLabel, alternativesView, ALTERNATIVES_TITLE, alternativeTags, POSTAGE_LABEL, sizeLabel } from "../lib/alternatives";
 import { Button, Label } from "./ui";
 
 /** Product thumbnail, or a plain block when there is none or it fails to load. */
@@ -119,7 +119,7 @@ function AlternativeCard({ alt: a, onInvestigate }: { alt: ObservedAlternative; 
       side={
         <>
           <span className="offer-price">{gbp(a.priceGBP)}</span>
-          <span className="offer-colour">{basisLabel(a)}</span>
+          <span className="offer-colour">{POSTAGE_LABEL}</span>
         </>
       }
       action={

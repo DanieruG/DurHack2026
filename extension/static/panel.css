@@ -105,6 +105,7 @@ p, h1, h2, ol, ul, dl, dd, figure { margin: 0; padding: 0; }
 
 .sizes { display: grid; gap: 4px; margin-bottom: 8px; }
 .size-row { display: grid; grid-template-columns: 1fr 52px 56px 20px; gap: 14px; align-items: center; }
+.size-row-usual { grid-template-columns: 52px 56px; justify-content: start; }
 .remove { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 0; }
 .remove:hover { color: var(--text); }
 .prefix { display: flex; align-items: center; gap: 8px; max-width: 140px; }

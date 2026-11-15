@@ -448,19 +448,23 @@ export type SurveySummary = { total: number; inYourSize: number | null; unmatche
 export function summariseSurvey(survey: Pick<SurveyRecord, "cards" | "query">, profile: Profile | null): SurveySummary {
   const models = [...CATALOGUE_TOKENS, ...(queryModel(survey.query) ? [queryModel(survey.query)!] : [])];
   const sizes = profile?.sizes ?? [];
-  const needs = { sizes: sizes.map((s) => ({ brand: s.brand, size: s.size, system: s.system ?? ("UK" as const) })), priorities: [], wearTolerance: "light" as const, extraPriorities: [], assumptions: [] };
+  const d = profile?.defaultSize;
+  const needs = {
+    sizes: sizes.map((s) => ({ brand: s.brand, size: s.size, system: s.system ?? ("UK" as const) })),
+    ...(d ? { defaultSize: { size: d.size, system: d.system ?? ("UK" as const) } } : {}),
+  };
   let inSize = 0;
   for (const c of survey.cards) {
-    const brand = brandOf(c.title) ?? sizes[0]?.brand ?? null;
+    const brand = brandOf(c.title) ?? (d ? null : (sizes[0]?.brand ?? null));
     const chart = chartForBrand(brand, sizeCharts);
     const s = extractSize(c.sizeText, { bareOk: true }) ?? extractSize(c.title);
     const uk = s ? toUK(s, chart) : null;
-    const mine = brand ? userSizeUK(needs, brand, chart, sizeCharts) : null;
+    const mine = brand || d ? userSizeUK(needs, brand, chart, sizeCharts) : null;
     if (uk !== null && mine !== null && Math.abs(uk - mine) < 0.01) inSize++;
   }
   return {
     total: survey.cards.length,
-    inYourSize: sizes.length ? inSize : null,
+    inYourSize: sizes.length || d ? inSize : null,
     unmatched: survey.cards.filter((c) => !namesAnyModel(c.title, models)).length,
   };
 }

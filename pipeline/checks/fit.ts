@@ -1,6 +1,7 @@
 import type { CheckResult, Evidence, FitMatch, ListingFacts, SizeSystem, UserNeeds } from "@/schemas/domain";
 import type { SizeChart } from "@/schemas/seed";
 import { convertSize, formatSize, parseSizeText, sizeIn, type ConvertedSize } from "@/lib/sizes";
+import { hasAnySize, sameBrand, savedSizeFor, savedSizeName } from "@/lib/userSize";
 import { evidenceIds, unknownCheck } from "../util";
 
 export type FitInput = {
@@ -13,8 +14,6 @@ export type FitInput = {
   /** All charts, for cross-brand estimates from the user's other saved sizes. */
   charts: SizeChart[];
 };
-
-const sameBrand = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** Fit check: pure code, exact size-chart lookups only (spec 7.6). */
 export function checkFit({ facts, needs, brand, chart, charts }: FitInput): CheckResult {
@@ -51,7 +50,8 @@ export function checkFit({ facts, needs, brand, chart, charts }: FitInput): Chec
     value: listedRow.cm,
   };
 
-  const own = needs.sizes.find((s) => sameBrand(s.brand, brand));
+  // Their size for this brand, else their usual size (any brand), else an estimate from another brand's size.
+  const own = savedSizeFor(needs, brand);
   let status: CheckResult["status"];
   let match: FitMatch;
   let summary: string;
@@ -60,8 +60,8 @@ export function checkFit({ facts, needs, brand, chart, charts }: FitInput): Chec
 
   if (own) {
     const userRow = convertSize(own.size, own.system, chart);
-    userSizeLabel = `${formatSize(own.size, own.system)} (${own.brand})`;
-    evidence.push({ id: nextId(), kind: "data_point", label: `Your saved ${own.brand} size: ${formatSize(own.size, own.system)}`, value: own.size });
+    userSizeLabel = `${formatSize(own.size, own.system)} (${own.brand ?? "usual size"})`;
+    evidence.push({ id: nextId(), kind: "data_point", label: `${savedSizeName(own)}: ${formatSize(own.size, own.system)}`, value: own.size });
     if (!userRow) {
       return unknownCheck("fit", `Your saved ${userSizeLabel} isn't on the ${brand} chart, so I can't compare.`, { evidence });
     }
@@ -69,21 +69,24 @@ export function checkFit({ facts, needs, brand, chart, charts }: FitInput): Chec
     // Count sizes by UK size, not chart rows: charts skip half sizes at the top (Nike UK 12 -> 13).
     const steps = Math.round(Math.abs(listedRow.uk - userRow.uk) * 2);
     const listedInYours = formatSize(sizeIn(listedRow, own.system), own.system);
+    // A usual size may not carry across brands exactly, so it counts for a little less than a size saved for this brand.
+    const yours = own.brand ? `your ${brand} size` : "your usual size";
+    const cut = own.brand ? 0 : 0.1;
     if (steps === 0) {
       status = "pass";
       match = "exact";
-      summary = `Listed ${listedLabel} matches your ${brand} size.`;
-      confidence = 0.95;
+      summary = `Listed ${listedLabel} matches ${yours}.`;
+      confidence = 0.95 - cut;
     } else if (steps === 1) {
       status = "warn";
       match = "close";
-      summary = `Listed ${listedLabel} (${listedInYours}) is half a size ${listedRow.uk > userRow.uk ? "bigger" : "smaller"} than your ${brand} size.`;
-      confidence = 0.9;
+      summary = `Listed ${listedLabel} (${listedInYours}) is half a size ${listedRow.uk > userRow.uk ? "bigger" : "smaller"} than ${yours}.`;
+      confidence = 0.9 - cut;
     } else {
       status = "fail";
       match = "mismatch";
-      summary = `Listed ${listedLabel} (${listedInYours}) is ${steps / 2} sizes ${listedRow.uk > userRow.uk ? "bigger" : "smaller"} than your ${brand} size.`;
-      confidence = 0.9;
+      summary = `Listed ${listedLabel} (${listedInYours}) is ${steps / 2} sizes ${listedRow.uk > userRow.uk ? "bigger" : "smaller"} than ${yours}.`;
+      confidence = 0.9 - cut;
     }
   } else {
     const other = crossBrand(needs, charts);
@@ -129,6 +132,7 @@ export function checkFit({ facts, needs, brand, chart, charts }: FitInput): Chec
       listed: facts.sizeText,
       listedSystem,
       userSize: userSizeLabel,
+      userSizeSource: own ? (own.brand ? "brand" : "usual") : "other_brand",
       match,
       listedUK: listedRow.uk,
     },
@@ -140,9 +144,9 @@ export const SIZE_SYSTEM_QUESTION = "Is that a UK or US size?";
 /** The user's size for this brand in `system`: their saved size for the brand, else a cross-brand estimate by length. */
 function userSizeIn(input: FitInput, system: SizeSystem): { value: number; label: string; estimated: boolean; ev: Evidence[] } | null {
   const { needs, brand, chart, charts } = input;
-  const own = needs.sizes.find((s) => sameBrand(s.brand, brand));
+  const own = savedSizeFor(needs, brand);
   if (own) {
-    const ev: Evidence[] = [{ id: "fit_user", kind: "data_point", label: `Your saved ${own.brand} size: ${formatSize(own.size, own.system)}`, value: own.size }];
+    const ev: Evidence[] = [{ id: "fit_user", kind: "data_point", label: `${savedSizeName(own)}: ${formatSize(own.size, own.system)}`, value: own.size }];
     if (own.system === system) return { value: own.size, label: formatSize(own.size, system), estimated: false, ev };
     const row = chart ? convertSize(own.size, own.system, chart) : null;
     return row ? { value: sizeIn(row, system), label: formatSize(sizeIn(row, system), system), estimated: false, ev } : null;
@@ -185,7 +189,7 @@ function checkSizeOptions(input: FitInput, listedEv: Evidence[]): CheckResult {
   if (!user) {
     return unknownCheck(
       "fit",
-      input.needs.sizes.length ? `You haven't saved a ${input.brand} size I can compare with the ${opts.label.toLowerCase()} options.` : "You haven't saved any sizes, so I can't check the fit.",
+      hasAnySize(input.needs) ? `You haven't saved a ${input.brand} size I can compare with the ${opts.label.toLowerCase()} options.` : "You haven't saved any sizes, so I can't check the fit.",
       { evidence: listedEv, details: { ...base, match: null, userSize: null } },
     );
   }
@@ -216,7 +220,7 @@ function checkSizeOptions(input: FitInput, listedEv: Evidence[]): CheckResult {
 function unknownSystemFit(size: number, input: FitInput, listedEv: Evidence[]): CheckResult {
   const { chart, brand } = input;
   const readings: string[] = [];
-  const own = input.needs.sizes.find((s) => sameBrand(s.brand, brand));
+  const own = savedSizeFor(input.needs, brand);
   if (chart && own) {
     const userRow = convertSize(own.size, own.system, chart);
     for (const sys of ["UK", "US"] as const) {

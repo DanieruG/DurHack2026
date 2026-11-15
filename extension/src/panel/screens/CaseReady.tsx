@@ -31,10 +31,12 @@ export function ListingHead(props: { preview: Pick<ListingPreview, "title" | "pr
   );
 }
 
-/** Which saved sizes matter for this listing: the brand named in the title, else all of them. */
+/** Which saved sizes matter for this listing: the brand named in the title, else the usual size, else all of them. */
 export function relevantSizes(profile: Profile, title: string): string {
   const t = title.toLowerCase();
   const own = profile.sizes.filter((s) => t.includes(s.brand.toLowerCase()));
+  const usual = profile.defaultSize ? `Usual ${profile.defaultSize.system ?? "UK"} ${profile.defaultSize.size}` : null;
+  if (!own.length && usual) return usual;
   return (own.length ? own : profile.sizes).map((s) => `${s.brand} ${s.system ?? "UK"} ${s.size}`).join(" · ");
 }
 

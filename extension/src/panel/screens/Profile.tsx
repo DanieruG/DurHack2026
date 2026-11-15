@@ -14,11 +14,8 @@ export function ProfileScreen(props: {
   onSave: (p: Profile, apiBase: string) => Promise<void> | void;
 }) {
   const p = props.profile;
-  const [sizes, setSizes] = useState<SizeRow[]>(
-    p?.sizes.length
-      ? p.sizes.map((s) => ({ brand: s.brand, system: s.system ?? "UK", size: String(s.size) }))
-      : [{ brand: "", system: "UK", size: "" }],
-  );
+  const [usual, setUsual] = useState<Omit<SizeRow, "brand">>({ system: p?.defaultSize?.system ?? "UK", size: p?.defaultSize ? String(p.defaultSize.size) : "" });
+  const [sizes, setSizes] = useState<SizeRow[]>(p?.sizes.map((s) => ({ brand: s.brand, system: s.system ?? "UK", size: String(s.size) })) ?? []);
   const [priorities, setPriorities] = useState((p?.priorities ?? []).join(", "));
   const [budget, setBudget] = useState(p?.budgetGBP ? String(p.budgetGBP) : "");
   const [wear, setWear] = useState<WearTolerance>(p?.wearTolerance ?? "light");
@@ -33,14 +30,16 @@ export function ProfileScreen(props: {
       .map((r) => ({ brand: r.brand.trim(), system: r.system, size: Number(r.size) }))
       .filter((r) => r.brand && Number.isFinite(r.size) && r.size > 0);
     const budgetGBP = Number(budget);
+    const usualSize = Number(usual.size);
     const profile: Profile = {
+      ...(usual.size && Number.isFinite(usualSize) && usualSize > 0 ? { defaultSize: { size: usualSize, system: usual.system } } : {}),
       sizes: cleanSizes,
       priorities: priorities.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 12),
       ...(budget && Number.isFinite(budgetGBP) && budgetGBP > 0 ? { budgetGBP } : {}),
       wearTolerance: wear,
     };
-    if (!profile.sizes.length) {
-      setError("Add at least one size.");
+    if (!profile.sizes.length && !profile.defaultSize) {
+      setError("Add your usual size, or a size for a brand.");
       return;
     }
     setError(null);
@@ -57,7 +56,27 @@ export function ProfileScreen(props: {
       <h1 className="h1">Your profile</h1>
 
       <section className="block">
-        <Label>Sizes</Label>
+        <Label>Your usual size</Label>
+        <div className="size-row size-row-usual">
+          <select className="input select" aria-label="Usual size system" value={usual.system} onChange={(e) => setUsual((u) => ({ ...u, system: e.target.value as SizeSystem }))}>
+            <option>UK</option>
+            <option>US</option>
+            <option>EU</option>
+          </select>
+          <input
+            className="input num"
+            aria-label="Usual size"
+            inputMode="decimal"
+            placeholder="9"
+            value={usual.size}
+            onChange={(e) => setUsual((u) => ({ ...u, size: e.target.value.replace(/[^\d.]/g, "") }))}
+          />
+        </div>
+        <p className="hint">Used for any brand you haven't added below.</p>
+      </section>
+
+      <section className="block">
+        <Label>Sizes by brand</Label>
         <div className="sizes">
           {sizes.map((r, i) => (
             <div className="size-row" key={i}>
@@ -85,7 +104,7 @@ export function ProfileScreen(props: {
                 type="button"
                 className="remove"
                 aria-label={`Remove ${r.brand || "size"}`}
-                onClick={() => setSizes((rows) => (rows.length > 1 ? rows.filter((_, j) => j !== i) : [{ brand: "", system: "UK", size: "" }]))}
+                onClick={() => setSizes((rows) => rows.filter((_, j) => j !== i))}
               >
                 ×
               </button>
@@ -93,7 +112,7 @@ export function ProfileScreen(props: {
           ))}
         </div>
         <Button kind="text" onClick={() => setSizes((rows) => [...rows, { brand: "", system: "UK", size: "" }])}>
-          Add a brand
+          Add a brand size
         </Button>
       </section>
 

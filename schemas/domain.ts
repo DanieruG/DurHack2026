@@ -155,11 +155,20 @@ export const ProfileSizeSchema = z.object({
   system: SizeSystemSchema.optional(),
 });
 
+/** The user's usual size, not tied to any brand: used for a brand they haven't saved a size for. */
+export const DefaultSizeSchema = z.object({
+  size: z.number().positive().max(60),
+  system: SizeSystemSchema.optional(),
+});
+
 export const WearToleranceSchema = z.enum(["none", "light", "moderate", "any"]);
 export type WearTolerance = z.infer<typeof WearToleranceSchema>;
 
 /** Saved in the extension, sent with every case. */
 export const ProfileSchema = z.object({
+  /** Usual size for any brand without its own entry in `sizes`. */
+  defaultSize: DefaultSizeSchema.optional(),
+  /** Brand-specific sizes; these win over defaultSize for that brand. */
   sizes: z.array(ProfileSizeSchema).max(20).default([]),
   priorities: z.array(z.string().min(1).max(80)).max(12).default([]),
   budgetGBP: z.number().positive().max(100_000).optional(),
@@ -169,6 +178,7 @@ export type Profile = z.infer<typeof ProfileSchema>;
 
 export const UserNeedsSchema = z.object({
   sizes: z.array(z.object({ brand: z.string(), size: z.number(), system: SizeSystemSchema })),
+  defaultSize: z.object({ size: z.number(), system: SizeSystemSchema }).optional(),
   priorities: z.array(z.string()),
   budgetGBP: z.number().optional(),
   wearTolerance: WearToleranceSchema,
@@ -572,8 +582,8 @@ export const ObservedAlternativeSchema = z.object({
   listingId: z.string(),
   title: z.string(),
   priceGBP: z.number(),
-  /** total: both prices include buyer protection and postage. listed: listed prices, postage not included. */
-  priceBasis: z.enum(["total", "listed"]),
+  /** Always the listed prices (Vinted's without buyer protection); postage is never included. */
+  priceBasis: z.enum(["listed"]),
   platform: PlatformSchema,
   url: z.string(),
   thumbnailUrl: z.string().optional(),

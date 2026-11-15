@@ -8,7 +8,7 @@ export const NoteWireSchema = z.object({
   budgetGBP: z.number().positive().nullish(),
   wearTolerance: WearToleranceSchema.nullish(),
   sizes: z
-    .array(z.object({ brand: z.string(), size: z.number().positive(), system: SizeSystemSchema.nullish() }))
+    .array(z.object({ brand: z.string().nullish(), size: z.number().positive(), system: SizeSystemSchema.nullish() }))
     .default([]),
 });
 
@@ -16,7 +16,7 @@ const NOTE_SYSTEM = `You turn a shopper's short note about one purchase into str
 - extraPriorities: short phrases for anything they care about (e.g. "wide fit", "for running a marathon").
 - budgetGBP: only if the note states a budget for this purchase.
 - wearTolerance: only if they say how much wear they accept (none, light, moderate, any).
-- sizes: only sizes stated in the note. Leave anything not stated empty or null.`;
+- sizes: only sizes stated in the note; brand null when the note gives a size without a brand. Leave anything not stated empty or null.`;
 
 /** Profile -> UserNeeds. Missing size system -> assume UK (recorded in assumptions). Optional note parsed by Gemini. */
 export async function buildNeeds(
@@ -29,8 +29,11 @@ export async function buildNeeds(
     if (!s.system) assumptions.push(`Size system not stated for your ${s.brand} size ${s.size}; assumed UK`);
     return { brand: s.brand, size: s.size, system: s.system ?? ("UK" as const) };
   });
+  const d = profile.defaultSize;
+  if (d && !d.system) assumptions.push(`Size system not stated for your usual size ${d.size}; assumed UK`);
   const needs: UserNeeds = {
     sizes,
+    ...(d ? { defaultSize: { size: d.size, system: d.system ?? ("UK" as const) } } : {}),
     priorities: profile.priorities,
     budgetGBP: profile.budgetGBP,
     wearTolerance: profile.wearTolerance,
@@ -55,8 +58,10 @@ export async function buildNeeds(
     if (data.wearTolerance) needs.wearTolerance = data.wearTolerance;
     for (const s of data.sizes) {
       const system = s.system ?? "UK";
-      if (!s.system) assumptions.push(`Size system not stated in your note for ${s.brand} ${s.size}; assumed UK`);
-      needs.sizes = [{ brand: s.brand, size: s.size, system }, ...needs.sizes.filter((x) => x.brand.toLowerCase() !== s.brand.toLowerCase())];
+      const brand = s.brand?.trim();
+      if (!s.system) assumptions.push(`Size system not stated in your note for ${brand ? `${brand} ` : ""}${s.size}; assumed UK`);
+      if (brand) needs.sizes = [{ brand, size: s.size, system }, ...needs.sizes.filter((x) => x.brand.toLowerCase() !== brand.toLowerCase())];
+      else needs.defaultSize = { size: s.size, system };
     }
   } catch {
     // The note is optional context; keep it verbatim as a priority rather than fail.

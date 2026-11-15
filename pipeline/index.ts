@@ -65,7 +65,7 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
 }
 
 function profileFromNeeds(needs: UserNeeds) {
-  return { sizes: needs.sizes, priorities: needs.priorities, budgetGBP: needs.budgetGBP, wearTolerance: needs.wearTolerance };
+  return { sizes: needs.sizes, ...(needs.defaultSize ? { defaultSize: needs.defaultSize } : {}), priorities: needs.priorities, budgetGBP: needs.budgetGBP, wearTolerance: needs.wearTolerance };
 }
 
 /** The investigation pipeline (spec 7.2). Always reaches a verdict unless something unexpected throws. */
