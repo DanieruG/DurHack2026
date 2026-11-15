@@ -7,12 +7,14 @@ import { brandToken, catalogueTokens, chartForBrand, deriveTokens, extractSize, 
 import { CatalogueModelSchema, SizeChartSchema } from "@/schemas/seed";
 import { MAX_OBSERVED_LISTINGS, ObservedListingSchema, type ObservedListing, type Profile } from "@/schemas/domain";
 import { nextFlightChunk, rscRows } from "./gallery";
+import { topResults, type TopResult } from "./topResults";
 
 /**
  * "Survey this search" (Feature A1/A2). On an eBay or Vinted search results page, one click reads the listing cards shown
- * (embedded page data first, else the card elements) and keeps them on this device for 24 hours. When the user later
- * investigates a listing on the same platform, the most recent survey goes with the case. Nothing runs in the
- * background, and no seller names, usernames, ratings or locations are ever kept.
+ * (embedded page data first, else the card elements) and keeps them on this device for 24 hours. The background worker
+ * does this automatically when a search is submitted (see autoSurvey.ts); the panel can also do it on demand. When the
+ * user later investigates a listing on the same platform, the most recent survey goes with the case. Nothing is sent to
+ * the server until then, and no seller names, usernames, ratings or locations are ever kept.
  */
 
 export type SurveyPlatform = "ebay" | "vinted";
@@ -421,6 +423,34 @@ export function surveyForCase(
   return { observedListings, ...(survey.query ? { searchQuery: survey.query } : {}), survey };
 }
 
+// ---------- top results for a case ----------
+
+/** What the case file and the investigation view show under "Other high-potential results". */
+export type TopResultsBlock = { results: TopResult[]; platformName: string; footnote: string | null };
+
+/**
+ * The best-value listings from the buyer's most recent search on the case's platform, never including the listing itself.
+ * Null when there is no survey for that platform. Entirely local: it uses the survey kept on this device.
+ */
+export function topResultsForCase(
+  surveys: SurveyRecord[],
+  args: { platform: string; pageUrl: string | null; profile: Profile | null; colourWish?: string; now: number },
+): TopResultsBlock | null {
+  if (args.platform !== "ebay" && args.platform !== "vinted") return null;
+  const survey = pruneSurveys(surveys.map((s) => ({ ...s, cards: [...s.cards] })), args.now)
+    .filter((s) => s.platform === args.platform)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  if (!survey) return null;
+  const results = topResults(survey.cards, { profile: args.profile, query: survey.query, excludeId: args.pageUrl ? listingItemId(args.pageUrl, args.platform) : null, colourWish: args.colourWish });
+  if (!results.length) return null;
+  const date = new Date(survey.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return {
+    results,
+    platformName: args.platform === "ebay" ? "eBay" : "Vinted",
+    footnote: `From your ${args.platform === "ebay" ? "eBay" : "Vinted"} search${survey.query ? ` for “${survey.query}”` : ""} on ${date}. Best value first; none has been investigated.`,
+  };
+}
+
 // ---------- the summary ----------
 
 const catalogue = z.array(CatalogueModelSchema).parse(catalogueJson);
@@ -444,27 +474,39 @@ const brandOf = (title: string) => {
 
 export type SurveySummary = { total: number; inYourSize: number | null; unmatched: number };
 
-/** Counts for "Surveyed 38 listings · 21 in your size · 6 couldn't be matched to a model yet". */
-export function summariseSurvey(survey: Pick<SurveyRecord, "cards" | "query">, profile: Profile | null): SurveySummary {
-  const models = [...CATALOGUE_TOKENS, ...(queryModel(survey.query) ? [queryModel(survey.query)!] : [])];
+/** What the profile says about the buyer's sizes, in the shape `userSizeUK` reads. */
+function sizeNeeds(profile: Profile | null) {
   const sizes = profile?.sizes ?? [];
   const d = profile?.defaultSize;
-  const needs = {
+  return {
     sizes: sizes.map((s) => ({ brand: s.brand, size: s.size, system: s.system ?? ("UK" as const) })),
     ...(d ? { defaultSize: { size: d.size, system: d.system ?? ("UK" as const) } } : {}),
   };
-  let inSize = 0;
-  for (const c of survey.cards) {
-    const brand = brandOf(c.title) ?? (d ? null : (sizes[0]?.brand ?? null));
-    const chart = chartForBrand(brand, sizeCharts);
-    const s = extractSize(c.sizeText, { bareOk: true }) ?? extractSize(c.title);
-    const uk = s ? toUK(s, chart) : null;
-    const mine = brand || d ? userSizeUK(needs, brand, chart, sizeCharts) : null;
-    if (uk !== null && mine !== null && Math.abs(uk - mine) < 0.01) inSize++;
-  }
+}
+
+/**
+ * A card's size in UK, and the buyer's UK size for that card's brand (null when the buyer has no sizes, or the brand or
+ * size can't be read). `fits` is true only when both are known and equal.
+ */
+export function cardSizeFit(card: Pick<SurveyCard, "title" | "sizeText">, profile: Profile | null): { cardUK: number | null; mineUK: number | null; fits: boolean } {
+  const sizes = profile?.sizes ?? [];
+  const d = profile?.defaultSize;
+  const brand = brandOf(card.title) ?? (d ? null : (sizes[0]?.brand ?? null));
+  const chart = chartForBrand(brand, sizeCharts);
+  const s = extractSize(card.sizeText, { bareOk: true }) ?? extractSize(card.title);
+  const cardUK = s ? toUK(s, chart) : null;
+  const mineUK = brand || d ? userSizeUK(sizeNeeds(profile), brand, chart, sizeCharts) : null;
+  return { cardUK, mineUK, fits: cardUK !== null && mineUK !== null && Math.abs(cardUK - mineUK) < 0.01 };
+}
+
+/** Counts for "Surveyed 38 listings · 21 in your size · 6 couldn't be matched to a model yet". */
+export function summariseSurvey(survey: Pick<SurveyRecord, "cards" | "query">, profile: Profile | null): SurveySummary {
+  const models = [...CATALOGUE_TOKENS, ...(queryModel(survey.query) ? [queryModel(survey.query)!] : [])];
+  const hasSizes = !!(profile?.sizes.length || profile?.defaultSize);
+  const inSize = survey.cards.filter((c) => cardSizeFit(c, profile).fits).length;
   return {
     total: survey.cards.length,
-    inYourSize: sizes.length || d ? inSize : null,
+    inYourSize: hasSizes ? inSize : null,
     unmatched: survey.cards.filter((c) => !namesAnyModel(c.title, models)).length,
   };
 }

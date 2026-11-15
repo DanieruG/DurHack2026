@@ -648,6 +648,8 @@ export const ObservedAlternativesSchema = z.object({
   surveyedOn: z.string().nullable(),
   /** Exact matches before version-not-stated ones, then cheapest first. */
   alternatives: z.array(ObservedAlternativeSchema),
+  /** A survey was taken, but the model isn't confirmed (or was skipped), so nothing was compared with it. */
+  deferred: z.boolean().optional(),
 });
 export type ObservedAlternatives = z.infer<typeof ObservedAlternativesSchema>;
 

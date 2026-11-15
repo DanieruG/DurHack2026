@@ -3,6 +3,7 @@ import type { NewOffer, NewOffers, ObservedAlternative, ObservedAlternatives } f
 import { gbp, PLATFORM_NAMES } from "../lib/format";
 import { colourLabel, differenceText, notEnoughLine, offerLabel, offersFootnote, OFFERS_SHOWN, openableOffers, safeHref, safeThumbnail } from "../lib/offers";
 import { alternativeLabel, alternativesView, ALTERNATIVES_TITLE, alternativeTags, POSTAGE_LABEL, sizeLabel } from "../lib/alternatives";
+import type { TopResult } from "../lib/topResults";
 import { Button, Label } from "./ui";
 
 /** Product thumbnail, or a plain block when there is none or it fails to load. */
@@ -163,6 +164,68 @@ export function AlternativeCards({ data, onInvestigate }: { data: ObservedAltern
     </section>
   );
 }
+
+/**
+ * The best-value listings from the buyer's own search (see lib/topResults.ts): thumbnail, title, price, size and why it was
+ * picked, each opening the listing in a new tab, with an Investigate button. Not investigated, not compared with this pair.
+ */
+export function TopResultsList({
+  results,
+  platformName,
+  heading,
+  onInvestigate,
+  footnote,
+}: {
+  results: TopResult[];
+  platformName: string;
+  heading: string;
+  onInvestigate?: (url: string) => void;
+  footnote?: string | null;
+}) {
+  const [all, setAll] = useState(false);
+  const usable = results.filter((r) => safeHref(r.card.url));
+  if (!usable.length) return null;
+  const shown = all ? usable : usable.slice(0, TOP_SHOWN);
+  return (
+    <section className="alts top-results" aria-label={heading}>
+      <Label>{heading}</Label>
+      <div className="offers">
+        <ul className="offer-list" aria-label={`${heading}, best value first`}>
+          {shown.map((r) => {
+            const href = safeHref(r.card.url)!;
+            return (
+              <li key={r.card.id}>
+                <ListingCard
+                  href={href}
+                  label={`${r.card.title}, ${gbp(r.card.price ?? 0)}, ${r.reason}, opens in a new tab`}
+                  thumbnailUrl={r.card.thumbnailUrl}
+                  title={r.card.title}
+                  source={`${platformName} · ${r.sizeLabel}`}
+                  difference={r.reason}
+                  side={<span className="offer-price">{gbp(r.card.price ?? 0)}</span>}
+                  action={
+                    <Button kind="secondary" small label={`Investigate ${r.card.title}`} onClick={() => (onInvestigate ? onInvestigate(href) : window.open(href, "_blank", "noopener"))}>
+                      Investigate
+                    </Button>
+                  }
+                />
+              </li>
+            );
+          })}
+        </ul>
+        {usable.length > TOP_SHOWN && (
+          <button type="button" className="btn btn-text offers-more" aria-expanded={all} onClick={() => setAll((x) => !x)}>
+            {all ? "Show fewer" : `Show all ${usable.length}`}
+          </button>
+        )}
+        {footnote && <p className="offers-note dim">{footnote}</p>}
+      </div>
+    </section>
+  );
+}
+
+/** Cards shown before "Show all". */
+export const TOP_SHOWN = 5;
 
 /** Up to three offer cards, "Show all" for the rest, and the date and caveats line. */
 export function OfferCards({ data }: { data: NewOffers }) {

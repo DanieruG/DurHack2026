@@ -9,7 +9,8 @@ import { differenceText, safeHref } from "./offers";
 
 export const ALTERNATIVES_TITLE = "Worth looking at";
 export const NOT_INVESTIGATED = "Not investigated yet";
-export const NO_SURVEY_LINE = "Survey a search results page to compare with other listings.";
+export const NO_SURVEY_LINE = "Open an eBay or Vinted search first and Sleuth will compare with the other listings it sees.";
+export const DEFERRED_LINE = "Listings from your search are compared once the model is confirmed.";
 export const NOTHING_CHEAPER_LINE = "Nothing cheaper in your size from your search.";
 
 /** "UK 9", or "Size not stated" (flagged). */
@@ -53,6 +54,7 @@ export function alternativesView(
   data: ObservedAlternatives | null | undefined,
 ): { kind: "cards"; alternatives: ObservedAlternative[]; footnote: string | null } | { kind: "empty"; line: string } {
   if (!data?.surveyUsed) return { kind: "empty", line: NO_SURVEY_LINE };
+  if (data.deferred) return { kind: "empty", line: DEFERRED_LINE };
   const alternatives = data.alternatives.filter((a) => safeHref(a.url));
   if (!alternatives.length) return { kind: "empty", line: NOTHING_CHEAPER_LINE };
   return { kind: "cards", alternatives, footnote: alternativesFootnote(data) };

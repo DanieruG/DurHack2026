@@ -5,7 +5,8 @@ import { ApiError, createApi } from "../chrome/api";
 import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, loadSurveys, rememberCase, saveHistory, saveProfile, saveSettings, saveSurveyCards } from "../chrome/storage";
 import { caseForUrl, historyRows, keepFound, type HistoryEntry } from "../lib/history";
 import { activeTabUrl, captureActiveTab, onActiveListingChange, openListingTab, requestSiteAccess, surveyActiveTab } from "../chrome/tab";
-import { cardsFromCapture, searchPageOf, summariseSurvey, summaryLine, surveyForCase, type SearchPage } from "../lib/survey";
+import { cardsFromCapture, searchPageOf, summariseSurvey, summaryLine, surveyForCase, topResultsForCase, type SearchPage, type SurveyRecord } from "../lib/survey";
+import { topResults } from "../lib/topResults";
 import { listingItemId } from "@/lib/listingScope";
 import { detectPlatform } from "@/lib/platform";
 import { SearchSurvey } from "./screens/SearchSurvey";
@@ -32,7 +33,8 @@ type View =
 
 type Captured = { capture: Capture; preview: ListingPreview; screenshot: Blob | null };
 /** The case on screen. Title and price come from the capture (new case) or the server, never from local storage. */
-type Active = { caseId: string; title: string; priceGBP: number | null; detail: CaseDetail | null };
+/** The case being shown. `platform`, `pageUrl` and `colourWish` are known before the detail loads (for "Other high-potential results"). */
+type Active = { caseId: string; title: string; priceGBP: number | null; detail: CaseDetail | null; platform?: string; pageUrl?: string | null; colourWish?: string };
 
 type InvAction = { type: "reset"; revision: number; at: number } | { type: "event"; e: IncomingEvent };
 const invReducer = (s: Investigation, a: InvAction) => (a.type === "reset" ? newInvestigation(a.revision, a.at) : applyEvent(s, a.e));
@@ -46,6 +48,8 @@ export function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [summaries, setSummaries] = useState<Record<string, CaseSummary>>({});
+  /** Search surveys kept on this device (written by the background worker as well as here): the top results come from them. */
+  const [surveys, setSurveys] = useState<SurveyRecord[]>([]);
   const [historyState, setHistoryState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [ready, setReady] = useState<ReadyState>({ kind: "loading" });
   const [captured, setCaptured] = useState<Captured | null>(null);
@@ -67,6 +71,21 @@ export function App() {
   /** "Compared with your survey of “nike pegasus 40” (38 listings)" on the Investigate screen. */
   const [surveyNote, setSurveyNote] = useState<string | null>(null);
 
+  /** "Other high-potential results" for the case on screen: the best-value listings from the buyer's own search, from this device. */
+  const topBlock = useMemo(
+    () =>
+      active
+        ? topResultsForCase(surveys, {
+            platform: active.detail?.platform ?? active.platform ?? "other",
+            pageUrl: active.detail?.pageUrl ?? active.pageUrl ?? null,
+            profile,
+            colourWish: active.detail?.needs.colourWish ?? active.colourWish,
+            now: Date.now(),
+          })
+        : null,
+    [surveys, active, profile],
+  );
+
   const api = useMemo(() => createApi(apiBase), [apiBase]);
   const loadEvalSummary = useCallback(() => api.getEvalSummary(), [api]);
 
@@ -80,6 +99,21 @@ export function App() {
       setView(p ? { name: "ready" } : { name: "profile", firstRun: true });
     })();
     return () => unsub.current?.();
+  }, []);
+
+  // ---------- surveys: kept current as the background worker reads search pages ----------
+  useEffect(() => {
+    let live = true;
+    const reload = () => void loadSurveys().then((s) => live && setSurveys(s)).catch(() => undefined);
+    reload();
+    const onChanged = (changes: Record<string, unknown>, area: string) => {
+      if (area === "local" && "surveys" in changes) reload();
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => {
+      live = false;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
   }, []);
 
   // ---------- history: summaries come from the server; cases it can't find are dropped silently ----------
@@ -125,6 +159,7 @@ export function App() {
       const existing = (await loadSurveys()).find((x) => x.key === page.key);
       setSurvey({ summary: existing ? summaryLine(summariseSurvey(existing, profileRef.current)) : null, added: null, busy: false, error: null });
       setReady({ kind: "search", page });
+      void surveyNow(page, true); // the background worker usually has it already; this makes sure the open page is read
       return;
     }
     const r = await captureActiveTab();
@@ -217,7 +252,7 @@ export function App() {
       });
       const p = now.preview;
       setHistory(await rememberCase({ caseId, createdAt: new Date().toISOString() }));
-      setActive({ caseId, title: p.title, priceGBP: p.priceGBP, detail: null });
+      setActive({ caseId, title: p.title, priceGBP: p.priceGBP, detail: null, platform: p.platform, pageUrl: p.pageUrl, colourWish: colour?.trim() || undefined });
       follow(caseId, 1);
       setView({ name: "investigating" });
     } catch (err) {
@@ -227,9 +262,11 @@ export function App() {
     }
   };
 
-  const surveyNow = async (page: SearchPage) => {
-    setSurvey((x) => ({ ...x, busy: true, error: null }));
+  /** Read the search page in the active tab. `quiet`: no spinner, and a page that isn't ready or readable stays silent. */
+  const surveyNow = async (page: SearchPage, quiet = false) => {
+    if (!quiet) setSurvey((x) => ({ ...x, busy: true, error: null }));
     const r = await surveyActiveTab();
+    if (quiet && (!r.ok || !cardsFromCapture(r.raw, searchPageOf(r.raw.pageUrl)?.platform ?? page.platform, new Date().toISOString()).length)) return;
     if (!r.ok) {
       if (r.reason === "no_access") {
         setReady({ kind: "no_access", host: r.host, origin: r.origin });
@@ -245,7 +282,7 @@ export function App() {
       return;
     }
     const { survey: saved, added } = await saveSurveyCards(now, cards);
-    setSurvey({ summary: saved ? summaryLine(summariseSurvey(saved, profile)) : null, added: saved && saved.cards.length > added ? added : null, busy: false, error: null });
+    setSurvey({ summary: saved ? summaryLine(summariseSurvey(saved, profileRef.current)) : null, added: saved && saved.cards.length > added ? added : null, busy: false, error: null });
   };
 
   /** Investigate a suggested listing: open it, and investigate as soon as it's read (else the normal Investigate button). */
@@ -398,7 +435,16 @@ export function App() {
       const onFile = ready.kind === "listing" ? caseForUrl(history, summaries, ready.preview.pageUrl) : null;
       nav = mainNav;
       body = ready.kind === "search" ? (
-        <SearchSurvey page={ready.page} summary={survey.summary} added={survey.added} busy={survey.busy} error={survey.error} onSurvey={() => void surveyNow(ready.page)} />
+        <SearchSurvey
+          page={ready.page}
+          summary={survey.summary}
+          added={survey.added}
+          busy={survey.busy}
+          error={survey.error}
+          onSurvey={() => void surveyNow(ready.page)}
+          top={topResults(surveys.find((x) => x.key === ready.page.key)?.cards ?? [], { profile, query: ready.page.query })}
+          onInvestigate={(url) => void investigateListing(url)}
+        />
       ) : profile && (
         <CaseReady
           surveyNote={surveyNote}
@@ -447,6 +493,8 @@ export function App() {
           onConfirm={(c) => void confirmIdentity(c, "card")}
           answered={answered}
           confirmError={confirmError}
+          topResults={topBlock}
+          onInvestigateListing={(url) => void investigateListing(url)}
         />
       );
       break;
@@ -466,6 +514,7 @@ export function App() {
           addEvidence={{ busy, error, onCaptureTab: captureForEvidence, onSubmit: submitEvidence }}
           onInvestigateListing={(url) => void investigateListing(url)}
           onAccuracy={() => toAccuracy("file")}
+          topResults={topBlock}
           onCorrect={(c) => void confirmIdentity(c, "file")}
           correctError={confirmError}
         />

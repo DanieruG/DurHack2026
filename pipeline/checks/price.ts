@@ -156,7 +156,7 @@ export type PriceCheckArgs = {
    * The identification is only a "possible" or "best_guess": price is reported as conditional on the best guess
    * (candidates[0], whose lookup is `lookupNewPrices`), and is known only if every candidate's new price agrees within 15%.
    */
-  conditional?: { candidates: { name: string; lookup: () => Promise<NewPrices> }[] };
+  conditional?: { candidates: { name: string; lookup: () => Promise<NewPrices> }[]; /** The buyer's survey, so the empty alternatives can say it was taken but not compared yet. */ survey?: Survey | null };
 };
 
 /** Candidates' new prices count as agreeing when the dearest is within 15% of the cheapest. */
@@ -352,7 +352,8 @@ const median = (xs: number[]) => {
 async function conditionalPrice(args: PriceCheckArgs, price: number, priceEv: Evidence[]): Promise<CheckResult> {
   const candidates = args.conditional!.candidates;
   const paid = listingTotal(args.facts)!;
-  const none = noAlternatives(args.observed?.survey);
+  const survey = args.conditional!.survey ?? args.observed?.survey;
+  const none = { ...noAlternatives(survey), ...(survey ? { deferred: true } : {}) };
   args.onAlternatives?.(none); // an uncertain model can't call any listing "the same pair"
   const looked = await Promise.all(candidates.map((c, i) => candidateNewPrice(args, c.lookup, paid.total, i === 0)));
   const prices = looked.map((l) => l.newPrice);

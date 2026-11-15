@@ -268,7 +268,7 @@ describe("Worth looking at (panel)", () => {
     expect(alternativesView(none)).toEqual({ kind: "empty", line: NO_SURVEY_LINE });
     expect(alternativesView(null)).toEqual({ kind: "empty", line: NO_SURVEY_LINE });
     let el = render(h(AlternativeCards, { data: none }));
-    expect(el.textContent).toBe("Worth looking atSurvey a search results page to compare with other listings.");
+    expect(el.textContent).toBe(`Worth looking at${NO_SURVEY_LINE}`);
     act(() => root?.unmount());
     host?.remove();
     el = render(h(AlternativeCards, { data: { ...ALTERNATIVES, alternatives: [] } }));

@@ -192,7 +192,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             onNewOffers: (offers) => ctx.emit("new_offers", offers),
             assessOfferColours: (offers) => matchOfferColours(offers, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
             observed: uncertain ? undefined : observedFor(ctx, subject),
-            conditional: uncertain ? { candidates: priceCandidates(ctx, subject) } : undefined,
+            conditional: uncertain ? { candidates: priceCandidates(ctx, subject), survey: ctx.survey } : undefined,
             assessListingColours: (candidates) => matchOfferColours(candidates, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
             onAlternatives: (alternatives) => ctx.emit("observed_alternatives", alternatives),
           });
@@ -235,7 +235,7 @@ function labelAsGuess(ctx: RunCtx, name: DownstreamCheck, result: CheckResult, s
 
 /** No alternatives (no survey, or nothing to compare against), sent as the observed_alternatives event too. */
 function emitNoAlternatives(ctx: RunCtx) {
-  const none = noAlternatives(ctx.survey);
+  const none = { ...noAlternatives(ctx.survey), ...(ctx.survey ? { deferred: true } : {}) };
   ctx.emit("observed_alternatives", none);
   return none;
 }

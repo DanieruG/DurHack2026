@@ -2,7 +2,8 @@ import { useRef } from "react";
 import { CHECK_NAMES, elapsed } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { offersSlot, segments, type Investigation } from "../../lib/progress";
-import { OffersSlot } from "../offers";
+import { OffersSlot, TopResultsList } from "../offers";
+import type { TopResultsBlock } from "../../lib/survey";
 import { Button, Notice, Tags } from "../ui";
 import type { IdentityChoice } from "@/schemas/api";
 import { IdentityCard } from "./IdentityCard";
@@ -18,6 +19,9 @@ export function Investigating(props: {
   /** The answer already sent: the card locks and the investigation continues below it. */
   answered?: IdentityChoice | null;
   confirmError?: string | null;
+  /** Other good listings from the buyer's search, shown while the case runs or waits. */
+  topResults?: TopResultsBlock | null;
+  onInvestigateListing?: (url: string) => void;
 }) {
   const { inv } = props;
   const segs = segments(inv);
@@ -63,6 +67,10 @@ export function Investigating(props: {
       </ol>
 
       {offers.show && <OffersSlot data={offers.data} />}
+
+      {props.topResults && props.topResults.results.length > 0 && (
+        <TopResultsList results={props.topResults.results} platformName={props.topResults.platformName} heading="Other high-potential results" footnote={props.topResults.footnote} onInvestigate={props.onInvestigateListing} />
+      )}
 
       {(inv.fatal || props.lost) && (
         <div className="foot">

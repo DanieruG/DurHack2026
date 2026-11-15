@@ -11,7 +11,8 @@ import { conditionView, evidenceLines, leadsView, observedView, priceView, sourc
 import { Button, CopyButton, Label, Notice, StatusMark, Tags, Verdict } from "../ui";
 import { checkTags, runTotals } from "../../lib/tags";
 import { BUY_NEW_MOVE_ID } from "../../lib/offers";
-import { AlternativeCards, OfferCards } from "../offers";
+import { AlternativeCards, OfferCards, TopResultsList } from "../offers";
+import type { TopResultsBlock } from "../../lib/survey";
 
 const ORDER: CheckName[] = ["condition", "fit", "colour", "comfort", "price"];
 
@@ -36,6 +37,8 @@ export function CaseFile(props: {
   onInvestigateListing?: (url: string) => void;
   /** Open "How accurate is Sleuth?". */
   onAccuracy?: () => void;
+  /** "Other high-potential results": the best-value listings from the buyer's own search on this platform, from this device. */
+  topResults?: TopResultsBlock | null;
   /** "Not right?": the buyer corrected the model; reruns the case as a new revision. */
   onCorrect?: (choice: IdentityChoice) => void;
   correctError?: string | null;
@@ -90,6 +93,16 @@ export function CaseFile(props: {
         <Verdict label={detail.verdict.label} headline={detail.verdict.headline} badge={detail.verdict.badge} />
       ) : (
         <Verdict label="not_enough_evidence" headline="The investigation didn't reach a verdict." />
+      )}
+
+      {props.topResults && props.topResults.results.length > 0 && (
+        <TopResultsList
+          results={props.topResults.results}
+          platformName={props.topResults.platformName}
+          heading="Other high-potential results"
+          footnote={props.topResults.footnote}
+          onInvestigate={props.onInvestigateListing}
+        />
       )}
 
       <section className="evidence" aria-label="Evidence">
