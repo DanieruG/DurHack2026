@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { testConfig, type Config } from "@/lib/config";
-import type { CacheMode } from "@/lib/cache";
+import { ResponseCache, type CacheMode } from "@/lib/cache";
 import { createNewPriceClient, type RawShoppingResult } from "@/lib/newPrices";
 import { createWebSearchClient, type WebSearchFetch } from "@/lib/webSearch";
 import { createLensClient } from "@/lib/lens";
@@ -236,12 +236,14 @@ export function makeDeps(
     shopping?: Record<string, RawShoppingResult[]>;
     webSearch?: Parameters<typeof fakeWebSearch>[0];
     lens?: Parameters<typeof fakeLens>[0];
+    cache?: ResponseCache;
   } = {},
 ): Deps & Recorded {
   const shopping = fakeNewPrices(opts.shopping);
   const web = fakeWebSearch(opts.webSearch);
   const lens = fakeLens(opts.lens);
   const handlers = { ...happyHandlers(), ...(opts.handlers ?? {}) };
+  const cache = opts.cache ?? new ResponseCache("off", null, null);
   const calls: GenRequest[] = [];
   const config = testConfig(opts.config);
   const gemini = createGeminiClient({
@@ -278,6 +280,7 @@ export function makeDeps(
   return {
     config,
     store: new MemoryStore(opts.reference ?? fixtureReference()),
+    cache,
     gemini,
     newPrices: shopping.client,
     shoppingRequests: shopping.requests,

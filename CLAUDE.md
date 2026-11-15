@@ -70,9 +70,20 @@ mark every other check `unknown`, verdict `not_enough_evidence`) is a misconcept
   what the pair really is, researched beyond the listing if need be; `"unknown"` (`UNKNOWN`) only when even that fails,
   which leaves the case out of model accuracy.
 
-Status (2026-11-15): the labels, labelling tool and eval metrics follow these rules, but the pipeline doesn't yet. It
-still gates (`subjectOf` tiers and `passesGate` in `pipeline/identify.ts`, `IDENTIFY_CONFIDENCE_MIN`): below the
-threshold it drops to the `brand` tier and withholds its guess. Levels, alternatives, Lens and the pause are not built.
+Status (2026-11-15): built as above. Where to look: `pipeline/identifyLevel.ts` (levels, `normaliseIdentify` for old stored
+cases), `pipeline/lens.ts` + `lib/lens.ts` (Lens, cached per image URL, counted in `lib/serpQuota.ts`),
+`pipeline/identityCheck.ts` (question payload, the buyer's answer, contradiction warning), `pipeline/confirm.ts`
+(`startConfirm`: resumes a paused case, or corrects a closed one as a new revision), `pipeline/identityReplay.ts` (record/replay
+of the buyer's answer), `extension/src/panel/screens/IdentityCard.tsx`. Notes:
+
+- The pause is persisted (status `awaiting_confirmation`, checks, identify with alternatives, a union survey, `pause_state`
+  input with run totals), so it survives a restart; `synthesizeEvents` re-asks it. `ctx.paused` makes any search throw.
+- Lens runs before the pause, so it can spend quota on a case that then waits. Model-dependent checks wait for the Gemini Pro
+  recheck (fit and condition run alongside it).
+- `createCase(deps, req, { pause: false })` is how the eval carries on with the best guess; the eval records `wouldHavePaused`.
+- Replay: `CACHE_MODE=record` saves the buyer's answer per listing; `CACHE_MODE=replay` shows the card, waits
+  `REPLAY_CHOICE_DELAY_MS`, then applies it. With no recorded answer a replayed case waits for the buyer.
+- The prompt and schema changed and `PIPELINE_VERSION` is 3: existing `data/cache` recordings won't match, so re-record demos.
 
 ## Databases
 

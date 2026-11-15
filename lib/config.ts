@@ -17,6 +17,8 @@ const EnvSchema = z.object({
   GEMINI_MODEL_FAST: z.string().optional(),
   GEMINI_MODEL_STRONG: z.string().optional(),
   GEMINI_COMBINED_TOOLS: bool,
+  /** Demo replay: how long the "Is this the right item?" card stays up before the recorded answer is applied. */
+  REPLAY_CHOICE_DELAY_MS: z.coerce.number().int().min(0).default(4000),
   MAX_LEADS: z.coerce.number().int().min(0).max(5).default(2),
   STAGE_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
   SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
@@ -37,6 +39,7 @@ export type Config = {
   /** Model names come from env only; never hard-coded. */
   models: { fast?: string; strong?: string };
   combinedTools: boolean;
+  replayChoiceDelayMs: number;
   maxLeads: number;
   stageTimeoutMs: number;
   /** Cap on the comfort check's SerpApi web search; past it, saved review snippets are used. */
@@ -61,6 +64,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     shoppingApiKey: blank(e.SHOPPING_API_KEY),
     models: { fast: blank(e.GEMINI_MODEL_FAST), strong: blank(e.GEMINI_MODEL_STRONG) },
     combinedTools: e.GEMINI_COMBINED_TOOLS,
+    replayChoiceDelayMs: e.REPLAY_CHOICE_DELAY_MS,
     maxLeads: e.MAX_LEADS,
     stageTimeoutMs: e.STAGE_TIMEOUT_MS,
     searchTimeoutMs: e.SEARCH_TIMEOUT_MS,
@@ -77,6 +81,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     models: { fast: "test-fast", strong: "test-strong" },
     combinedTools: false,
+    replayChoiceDelayMs: 0,
     maxLeads: 2,
     stageTimeoutMs: 2000,
     searchTimeoutMs: 1000,

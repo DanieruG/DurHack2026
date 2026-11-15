@@ -143,6 +143,28 @@ export function summarise(
   modelCases
     .filter((r) => !modelOk.includes(r))
     .forEach((r) => fail(r.id, "Model", `labelled ${r.label.model}, Sleuth ${EXACT_TIERS.has(r.tier) ? `said ${say(r.modelName)}` : `named no exact model (${r.tier})`}`));
+  // Top 3: the best guess or one of its alternatives. Naming only the brand (or nothing) is wrong, as for top 1.
+  const top3Ok = modelCases.filter((r) => EXACT_TIERS.has(r.tier) && [r.modelName, ...(r.alternatives ?? [])].some((n) => nameMatch(n, r.label).model));
+  // Accuracy by the level Sleuth gave: a lower level that is right more often than a higher one means the levels mislead.
+  const LEVELS = ["confirmed", "likely", "possible", "best_guess"] as const;
+  const byLevel = LEVELS.map((level) => {
+    const cases = modelCases.filter((r) => r.level === level);
+    return { level, d: cases.length, n: cases.filter((r) => modelOk.includes(r)).length };
+  });
+  let inversions = 0;
+  let comparablePairs = 0;
+  for (let i = 0; i < byLevel.length; i++) {
+    for (let j = i + 1; j < byLevel.length; j++) {
+      const hi = byLevel[i];
+      const lo = byLevel[j];
+      if (!hi.d || !lo.d) continue;
+      comparablePairs++;
+      if (lo.n * hi.d > hi.n * lo.d) inversions++; // cross-multiplied: no rounding
+    }
+  }
+  const levelled = runs.filter((r) => r.level);
+  const confidentWrong = modelCases.filter((r) => (r.level === "confirmed" || r.level === "likely") && !modelOk.includes(r));
+  const lensRuns = runs.filter((r) => r.lens?.ran);
   const versionCases = modelCases.filter((r) => isKnown(r.label.version));
   const versionOk = versionCases.filter((r) => named(r).version);
   versionCases
@@ -225,6 +247,17 @@ export function summarise(
     modelIdentification: fraction("Model identified correctly", modelOk.length, modelCases.length),
     versionAccuracy: fraction("Version identified correctly", versionOk.length, versionCases.length),
     wrongModel: fraction("Wrong model named", wrongPassed.length, modelCases.length, false),
+    top3Identification: fraction("Model among Sleuth's best guess and alternatives (top 3)", top3Ok.length, modelCases.length),
+    levelConfirmed: fraction('Model correct when Sleuth said "confirmed"', byLevel[0].n, byLevel[0].d),
+    levelLikely: fraction('Model correct when Sleuth said "likely"', byLevel[1].n, byLevel[1].d),
+    levelPossible: fraction('Model correct when Sleuth said "possible"', byLevel[2].n, byLevel[2].d),
+    levelBestGuess: fraction('Model correct when Sleuth said "best guess"', byLevel[3].n, byLevel[3].d),
+    levelInversions: fraction("Pairs of levels where the lower level was right more often", inversions, comparablePairs, false),
+    confidentWrong: fraction('Wrong model said "confirmed" or "likely"', confidentWrong.length, modelCases.filter((r) => r.level === "confirmed" || r.level === "likely").length, false),
+    wouldHavePaused: fraction("Cases where the app would have paused to ask the buyer", levelled.filter((r) => r.wouldHavePaused).length, levelled.length, false),
+    lensRan: fraction("Cases where Google Lens ran", lensRuns.length, runs.filter((r) => r.lens).length, false),
+    lensChanged: fraction("Lens changed the best guess (of the cases where it ran)", lensRuns.filter((r) => r.lens!.changedAnswer).length, lensRuns.length),
+    lensCorrect: fraction("Model correct in the cases where Lens ran", lensRuns.filter((r) => modelOk.includes(r)).length, lensRuns.filter((r) => isKnown(r.label.model)).length),
     styleCodeRead: fraction("Style code read (when visible)", styleOk.length, styleCases.length),
     vagueModel: fraction("Model identified correctly when the listing doesn't show it", vagueOk.length, vagueCases.length),
     proDisagreement: fraction("Flash and Pro disagreed", disagreed.length, answered.length, false),
@@ -260,7 +293,9 @@ export function summarise(
     labelsHash: labelsHash(runs),
     overlapThreshold: OVERLAP_THRESHOLD,
     sections: [
-      section("Identification", ["brandAccuracy", "modelIdentification", "versionAccuracy", "wrongModel", "styleCodeRead", "vagueModel"]),
+      section("Identification", ["brandAccuracy", "modelIdentification", "top3Identification", "versionAccuracy", "wrongModel", "styleCodeRead", "vagueModel"]),
+      section("Confidence levels and the pause", ["levelConfirmed", "levelLikely", "levelPossible", "levelBestGuess", "levelInversions", "confidentWrong", "wouldHavePaused"]),
+      section("Google Lens", ["lensRan", "lensChanged", "lensCorrect"]),
       section("Gemini Flash vs Pro (model read only from photos)", ["proDisagreement", "flashRight", "proRight", "neitherRight", "proNoAnswer"]),
       section("Condition", ["defectDetection", "falseAlarms", "defectPhotos"]),
       section("Fit", ["fitAccuracy"]),

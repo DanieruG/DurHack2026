@@ -14,6 +14,7 @@ import { finalise, instrumented, loadImages, loadPageText, savePausedSurvey, sav
 import { guardSearchHint } from "./identify";
 import { withLevel } from "./identifyLevel";
 import { runLens, shouldRunLens } from "./lens";
+import { replayRecordedChoice } from "./identityReplay";
 import { prepareSurvey, sanitiseQuery, type Survey } from "@/lib/observed";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
 import { factsFromPageOnly, mergeListingFacts, redactListingData } from "./listingData";
@@ -67,7 +68,7 @@ export async function createCase(deps: Deps, req: CaseRequest, opts: { pause?: b
     survey,
     searchQuery: sanitiseQuery(req.capture.searchQuery),
     pause: opts.pause,
-  });
+  }).then(() => replayRecordedChoice(deps, row.id)); // a replayed demo shows the pause, then applies the recorded answer
   return { caseId: row.id, done };
 }
 

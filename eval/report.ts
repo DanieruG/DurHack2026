@@ -15,6 +15,7 @@ const day = (iso: string) => iso.slice(0, 10);
 export const COMPARED: [id: string, name: string][] = [
   ["brandAccuracy", "Brand"],
   ["modelIdentification", "Model"],
+  ["top3Identification", "Model in the top 3 (the baseline gives one answer)"],
   ["versionAccuracy", "Version"],
   ["styleCodeRead", "Style code read (when visible)"],
   ["fitAccuracy", "Size and size system"],

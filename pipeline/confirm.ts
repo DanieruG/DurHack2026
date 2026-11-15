@@ -12,6 +12,7 @@ import { followLeads, skipLeads } from "./leads";
 import { diffCases } from "./reopen";
 import { buildCtx, DOWNSTREAM, runDownstream, toIdentifyCheck } from "./runChecks";
 import { synthesizeEvents } from "./views";
+import { recordChoice } from "./identityReplay";
 
 /** The case isn't waiting for an answer and can't be corrected right now (still running, or errored). */
 export class ConfirmConflictError extends Error {
@@ -62,6 +63,7 @@ export async function startConfirm(deps: Deps, caseId: string, choice: IdentityC
     if (err instanceof InvalidChoiceError) throw new RequestError(err.message, 400);
     throw err;
   }
+  if (waiting) await recordChoice(deps, c, choice);
   return waiting ? resume(deps, c, next, choice, facts) : correct(deps, c, next, facts);
 }
 

@@ -9,6 +9,10 @@ import { MemoryStore } from "../lib/store";
 import { EventHub } from "../pipeline/events";
 import { sniffImageMime } from "../lib/images";
 import { subjectOf } from "../pipeline/identify";
+import { normaliseIdentify } from "../pipeline/identifyLevel";
+import { shouldPause } from "../pipeline/identityCheck";
+import { fullModelName } from "../lib/identifyLabel";
+import type { ConfidenceLevel } from "../schemas/domain";
 import type { Label } from "./labels";
 
 /** Every eval case runs with this profile, so fit results don't depend on whoever captured the listing. */
@@ -20,8 +24,16 @@ const CaptureFileSchema = z.object({ capture: CaptureSchema, profile: ProfileSch
 export type CaseRun = {
   id: string;
   label: Label;
-  /** What identify established after the gate: none, brand, family (version unclear), model, catalogue. */
+  /** What identify established: none (no brand), brand (no model suggested), model, catalogue. */
   tier: "none" | "brand" | "model" | "catalogue";
+  /** How sure Sleuth said it was. Absent for the plain-Gemini baseline, which has no levels. */
+  level?: Exclude<ConfidenceLevel, "user_confirmed">;
+  /** The best guess's alternatives (model names without the brand), most likely first: top-3 is the best guess plus these. */
+  alternatives?: string[];
+  /** The eval never pauses and carries on with the best guess; this records whether the app would have asked the buyer. */
+  wouldHavePaused?: boolean;
+  /** Google Lens: whether it ran for this case, and whether it changed the best guess. */
+  lens?: { ran: boolean; changedAnswer: boolean };
   brand: string | null;
   modelName: string | null;
   /** Gemini Pro version check (model read only from photos), when it ran. */
@@ -89,18 +101,23 @@ export async function runCase(base: Deps, dir: string, id: string, label: Label)
     const file = readCase(dir);
     // The structured fields go in with the capture when the case has them (createCase uses capture.listing).
     run.structured = structuredGroups(file.capture.listing);
-    const { caseId, done } = await createCase(deps, { capture: file.capture, profile: EVAL_PROFILE, caseNote: file.caseNote, screenshots: file.screenshots });
+    const { caseId, done } = await createCase(deps, { capture: file.capture, profile: EVAL_PROFILE, caseNote: file.caseNote, screenshots: file.screenshots }, { pause: false }); // never pauses: figures measure Sleuth alone
     await done;
     const doneEv = deps.hub.events(caseId).find((e) => e.event === "investigation_done")?.data as { durationMs: number; geminiCalls: number } | undefined;
     const c = (await deps.store.getCase(caseId))!;
     const checks = (await deps.store.getChecks(caseId, c.revision)) as CheckResult[];
     const get = (n: string) => checks.find((x) => x.check === n);
-    const subject = subjectOf(c.identify as IdentifyResult | null, ref.catalogue);
+    const identify = normaliseIdentify(c.identify as IdentifyResult | null);
+    const subject = subjectOf(identify, ref.catalogue);
     const facts = c.listingFacts as ListingFacts | null;
     Object.assign(run, {
       tier: subject.tier,
       brand: subject.brand,
       modelName: subject.modelName,
+      ...(identify?.confidenceLevel && identify.confidenceLevel !== "user_confirmed" ? { level: identify.confidenceLevel } : {}),
+      alternatives: (identify?.alternatives ?? []).map((a) => fullModelName(a.model, a.version)).filter((n): n is string => !!n),
+      wouldHavePaused: shouldPause(identify, ref.catalogue),
+      lens: { ran: !!identify?.lens, changedAnswer: identify?.lens?.changedAnswer ?? false },
       proRecheck: (get("identify")?.details as { proRecheck?: CaseRun["proRecheck"] } | undefined)?.proRecheck,
       styleCode: facts?.styleCode ?? null,
       colours: facts?.listingColour?.names ?? null,

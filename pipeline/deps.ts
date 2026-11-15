@@ -22,6 +22,8 @@ export type Deps = {
   newPrices: NewPriceClient;
   /** SerpApi web search for comfort reviews, cached in CacheEntry for 7 days. */
   webSearch: WebSearchClient;
+  /** Record/replay cache (Gemini calls, images, and the buyer's recorded answers for the offline demo). */
+  cache: ResponseCache;
   /** Google Lens visual matches (SerpApi), for listings whose model isn't clear. */
   lens: LensClient;
   hub: EventHub;
@@ -75,6 +77,7 @@ async function buildDefaultDeps(): Promise<Deps> {
   return {
     config,
     store,
+    cache,
     gemini: createGeminiClient({ config, transport: createLiveTransport(config.geminiApiKey), cache }),
     newPrices: createNewPriceClient({ apiKey: config.shoppingApiKey, mode: config.cacheMode, store }),
     webSearch: createWebSearchClient({ apiKey: config.shoppingApiKey, mode: config.cacheMode, store }),
