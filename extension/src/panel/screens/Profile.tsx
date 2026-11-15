@@ -119,8 +119,11 @@ export function ProfileScreen(props: {
       </section>
 
       <section className="block">
-        <Label>Priorities</Label>
-        <input className="input" placeholder="All-day comfort, wide fit" value={priorities} onChange={(e) => setPriorities(e.target.value)} />
+        <Label>Comfort and fit priorities</Label>
+        <input className="input" placeholder="All-day comfort, wide fit" value={priorities} onChange={(e) => setPriorities(e.target.value)} aria-describedby="priorities-hint" />
+        <p className="note dim field-hint" id="priorities-hint">
+          What matters for how they feel and wear. Colour goes on each case instead.
+        </p>
       </section>
 
       <section className="block">

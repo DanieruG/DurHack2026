@@ -13,7 +13,7 @@ import { checkTags, runTotals } from "../../lib/tags";
 import { BUY_NEW_MOVE_ID } from "../../lib/offers";
 import { AlternativeCards, OfferCards } from "../offers";
 
-const ORDER: CheckName[] = ["condition", "fit", "comfort", "price"];
+const ORDER: CheckName[] = ["condition", "fit", "colour", "comfort", "price"];
 
 type RowKey = CheckName | "reasoning";
 
@@ -233,6 +233,25 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
   switch (check.check) {
     case "condition":
       return <ConditionExhibit view={conditionView(check, detail.imageUrls)} />;
+    case "colour": {
+      const d = (check.details ?? {}) as { wish?: string; requirements?: { text: string; verdict: string; note: string }[] };
+      const WORD: Record<string, string> = { meets: "Meets", partly: "Partly", doesnt: "Doesn't meet", cant_tell: "Can't tell" };
+      return (
+        <>
+          {d.wish && <p className="note">You asked for: {d.wish}</p>}
+          {(d.requirements ?? []).map((r) => (
+            <p className={`note${r.verdict === "doesnt" || r.verdict === "partly" ? " problem" : ""}`} key={r.text}>
+              <strong>{WORD[r.verdict] ?? r.verdict}:</strong> {r.text}. {r.note}
+            </p>
+          ))}
+          {evidenceLines(check).map((l) => (
+            <p className="note dim" key={l}>
+              {l}
+            </p>
+          ))}
+        </>
+      );
+    }
     case "comfort": {
       const refs = sourceRefs(check);
       return refs.length ? <SourceList refs={refs} /> : <p className="note">No sources.</p>;

@@ -11,7 +11,7 @@ export const MAX_QUESTIONS = 3;
 /** `exact`: the fallback is the question, word for word (not rephrased by Gemini). */
 export type Gap = { id: string; check: CheckName; priority: number; ask: string; fallback: string; exact?: boolean };
 
-const PRIORITY: Record<CheckName, number> = { identify: 0, fit: 1, condition: 2, price: 3, comfort: 5 };
+const PRIORITY: Record<CheckName, number> = { identify: 0, fit: 1, condition: 2, price: 3, colour: 4, comfort: 5 };
 
 type Details = Record<string, unknown> | undefined;
 
@@ -61,6 +61,8 @@ function gapFor(c: CheckResult): Gap | null {
       if (d?.overBudget) return null; // nothing the seller can answer
       return { id: "gap_price", check: "price", priority: PRIORITY.price + 1, ask: "Ask where and when they were bought originally.", fallback: "Do you know roughly when and where these were bought originally?" };
     }
+    case "colour":
+      return { id: "gap_colour", check: "colour", priority: PRIORITY.colour, ask: "Ask for a photo in daylight to confirm the colour.", fallback: "Could you share a photo in daylight? I want to be sure of the colour." };
     case "comfort":
       return { id: "gap_comfort", check: "comfort", priority: PRIORITY.comfort, ask: "Ask how they found the fit and comfort, and how often they were worn.", fallback: "How did you find the fit and comfort, and roughly how often were they worn?" };
   }

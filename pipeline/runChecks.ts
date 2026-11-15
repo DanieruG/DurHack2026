@@ -14,6 +14,7 @@ import { checkPrice } from "./checks/price";
 import type { NewPrices } from "@/lib/newPrices";
 import { checkComfort } from "./checks/comfort";
 import { checkCondition } from "./checks/condition";
+import { checkColour } from "./checks/colour";
 import { plainError, runStage, today, unknownCheck, type StageStats } from "./util";
 import { matchSurvey, modelUnknownComparison, noAlternatives, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
 import { catalogueTokens, deriveTokens, type ModelTokens } from "@/lib/titleMatch";
@@ -32,7 +33,8 @@ async function fetchThumbnail(ctx: RunCtx, url: string): Promise<Uint8Array | nu
 }
 
 export type DownstreamCheck = Exclude<CheckName, "identify">;
-export const DOWNSTREAM: DownstreamCheck[] = ["fit", "price", "comfort", "condition"];
+/** "colour" only runs when the buyer asked for a colour or look (runDownstream drops it otherwise). */
+export const DOWNSTREAM: DownstreamCheck[] = ["fit", "price", "comfort", "condition", "colour"];
 
 /** Everything a check needs; built once per investigation (and per reopen). */
 export type RunCtx = {
@@ -169,6 +171,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     price: [],
     comfort: ["structured_output"],
     condition: ["vision", "object_detection", "structured_output"],
+    colour: ["vision", "structured_output"],
   } as const;
   const stats: StageStats = { geminiCalls: 0, cachedCalls: 0, functionCalls: 0 };
   try {
@@ -207,6 +210,8 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
           });
         case "condition":
           return checkCondition({ gemini: deps.gemini, images: ctx.images, facts: ctx.facts, needs: ctx.needs });
+        case "colour":
+          return checkColour({ gemini: deps.gemini, images: ctx.images, facts: ctx.facts, needs: ctx.needs });
       }
     });
     return withUsage(uncertain ? labelAsGuess(ctx, name, result, subject) : result, stats);
@@ -276,7 +281,9 @@ export async function settleAndEmit(
 }
 
 /** Run the downstream checks and apply the comfort -> fit link (re-emitting fit if it changed). */
-export async function runDownstream(ctx: RunCtx, names: DownstreamCheck[] = DOWNSTREAM, previous: CheckResult[] = []): Promise<CheckResult[]> {
+export async function runDownstream(ctx: RunCtx, wanted: DownstreamCheck[] = DOWNSTREAM, previous: CheckResult[] = []): Promise<CheckResult[]> {
+  // The colour check exists only for a buyer who asked for a colour or look.
+  const names = wanted.filter((n) => n !== "colour" || !!ctx.needs.colourWish?.trim());
   // If comfort isn't being rerun, its sizing advice is already known: apply it to fit before emitting.
   const knownComfort = names.includes("comfort") ? undefined : previous.find((c) => c.check === "comfort");
   const adjust = (r: CheckResult) => {

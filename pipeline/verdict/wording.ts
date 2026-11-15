@@ -30,7 +30,7 @@ Rules: use only facts in the evidence and check summaries; never invent numbers.
 Any price claim must say its source ("compared with N listings sampled on <date>" or "the current new price from retailers").
 Never accuse the seller. Never use these words: scam, fake, fraud, liar, rip-off, guaranteed, counterfeit, replica, rep or reps.`;
 
-const ORDER: CheckName[] = ["identify", "fit", "price", "condition", "comfort"];
+const ORDER: CheckName[] = ["identify", "fit", "price", "condition", "colour", "comfort"];
 
 function compactChecks(checks: CheckResult[]) {
   return checks.map((c) => ({

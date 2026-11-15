@@ -40,7 +40,7 @@ export async function createCase(deps: Deps, req: CaseRequest, opts: { pause?: b
   const { platform, pageText } = prepareText(req.capture);
   // The extension's structured fields, redacted once: stored with the case and used by the run.
   const listing = redactListingData(req.capture.listing);
-  const needs = await buildNeeds(req.profile, req.caseNote, null);
+  const needs = await buildNeeds(req.profile, req.caseNote, null, req.colourWish);
   const row = await deps.store.createCase({
     status: "investigating",
     platform,
@@ -111,7 +111,7 @@ export async function runInvestigation(
         examineListing(deps.gemini, { pageText, images, platform: c.platform, catalogue: ref.catalogue, readReferenceImage: deps.readReferenceImage, searchQuery: opts.searchQuery, listing: opts.listing }),
       ).catch(() => null),
       c.needs.caseNote
-        ? runStage("needs", { emit, timeoutMs: config.stageTimeoutMs }, () => buildNeeds(profileFromNeeds(c.needs), c.needs.caseNote, deps.gemini)).catch(() => c.needs)
+        ? runStage("needs", { emit, timeoutMs: config.stageTimeoutMs }, () => buildNeeds(profileFromNeeds(c.needs), c.needs.caseNote, deps.gemini, c.needs.colourWish)).catch(() => c.needs)
         : Promise.resolve(c.needs),
     ]);
     if (!examined) emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
@@ -159,14 +159,14 @@ export async function runInvestigation(
     let early: CheckResult[] | null = null;
     if (modelFromPhotosOnly(ctx.identify, ctx.facts, ctx.pageText, ref.catalogue) && ctx.images.length) {
       const versionCheck = runVersionCheck(ctx);
-      early = await runDownstream(ctx, ["fit", "condition"]);
+      early = await runDownstream(ctx, ["fit", "condition", "colour"]);
       identifyCheck = applyVersionCheck(ctx, await versionCheck);
     }
 
     // Only a possible or best guess pauses: ask the buyer before any model-dependent search.
     if (opts.pause !== false && shouldPause(ctx.identify, ref.catalogue)) {
       ctx.paused = true;
-      early ??= await runDownstream(ctx, ["fit", "condition"]);
+      early ??= await runDownstream(ctx, ["fit", "condition", "colour"]);
       await pauseForIdentity(ctx, [identifyCheck, ...early]);
       return { paused: true as const };
     }

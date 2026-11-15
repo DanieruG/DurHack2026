@@ -196,7 +196,7 @@ export function App() {
   }, [view.name, inv.done, inv.revision, inv.diff, active, api]);
 
   // ---------- actions ----------
-  const investigate = async (note: string) => {
+  const investigate = async (note: string, colour?: string) => {
     if (!profile || !captured) return;
     setBusy(true);
     setError(null);
@@ -212,6 +212,7 @@ export function App() {
         capture: s ? { ...now.capture, observedListings: s.observedListings, ...(s.searchQuery ? { searchQuery: s.searchQuery } : {}) } : now.capture,
         profile,
         caseNote: note,
+        colourWish: colour,
         screenshots: now.screenshot ? [now.screenshot] : [],
       });
       const p = now.preview;

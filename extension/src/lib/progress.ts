@@ -99,6 +99,7 @@ const STAGE_TEXT: Partial<Record<string, string>> = {
   price: "Comparing prices",
   comfort: "Reading reviews",
   condition: "Inspecting photos",
+  colour: "Checking the colour",
   version_check: "Checking the exact version",
   lens: "Checking visual matches",
   leads: "Deciding what to follow up",
@@ -144,6 +145,9 @@ function checkLine(c: CheckResult): Pick<LogLine, "text" | "state"> {
       if (!findings) return { text: "Photos inspected, no defects", state: ok ? "done" : "problem" };
       return { text: `Photos inspected, ${findings} finding${findings === 1 ? "" : "s"}`, state: ok ? "done" : "problem" };
     }
+    case "colour":
+      if (c.status === "unknown") return { text: "Colour unclear", state: "problem" };
+      return ok ? { text: "Colour matches what you asked for", state: "done" } : { text: "Colour may not match", state: "problem" };
   }
 }
 

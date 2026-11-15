@@ -19,6 +19,7 @@ const CHECK_KEYWORDS: Record<CheckName, RegExp> = {
   price: /(£|\bprice\w*|\bcost\w*|\bnew\b|\bsampled\b|\blistings\b|\bvalue\b)/i,
   comfort: /\b(comfort\w*|reviews?|reviewers|cushion\w*|width|wide|narrow)\b/i,
   condition: /\b(condition|wear|worn|photos?|defects?|crease\w*|sole|scuff\w*|stain\w*|damage\w*)\b/i,
+  colour: /\b(colou?rs?|colourway|shade|looks?)\b/i,
 };
 
 const PRICE_MENTION = /(£\s?\d|\bprice\w*\b|\bcosts?\b|\bcheap\w*\b|\bexpensive\b|\bbargain\b|\boverpriced\b)/i;

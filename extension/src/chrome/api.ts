@@ -47,11 +47,12 @@ export function createApi(base: string) {
   return {
     base,
 
-    async createCase(args: { capture: Capture; profile: Profile; caseNote?: string; screenshots?: Blob[] }) {
+    async createCase(args: { capture: Capture; profile: Profile; caseNote?: string; colourWish?: string; screenshots?: Blob[] }) {
       const form = new FormData();
       form.set("capture", JSON.stringify(args.capture));
       form.set("profile", JSON.stringify(args.profile));
       if (args.caseNote?.trim()) form.set("caseNote", args.caseNote.trim());
+      if (args.colourWish?.trim()) form.set("colourWish", args.colourWish.trim());
       for (const [i, s] of (args.screenshots ?? []).slice(0, MAX_SCREENSHOTS).entries()) form.append("screenshots", s, `screenshot-${i + 1}.${s.type.split("/")[1] ?? "png"}`);
       const res = await send(u("/api/cases"), { method: "POST", body: form });
       return read(res, CaseCreatedSchema);

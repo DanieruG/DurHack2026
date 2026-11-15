@@ -150,6 +150,7 @@ export function happyHandlers(): Record<string, Handler> {
         citedEvidenceIds: ["ev_price_1", "ev_fit_1"],
       }),
     next_moves: () => json({ questions: [], beforeYouPay: [{ id: "byp_protection", text: "Pay through the platform checkout so buyer protection applies." }] }),
+    colour: () => json({ requirements: [{ index: 0, verdict: "meets", note: "The upper is white.", photoIndex: 0, confidence: 0.8 }] }),
     reopen: () => json({ conditionStatements: [], answers: [], images: [] }),
   };
 }

@@ -87,6 +87,7 @@ export function plainError(check: CheckName, err: unknown): string {
     price: "check the price",
     comfort: "check reviews for comfort",
     condition: "check the photos for condition",
+    colour: "check the colour",
   };
   if (err instanceof StageTimeoutError) return `I ran out of time trying to ${what[check]}, so this is unknown.`;
   return `Something went wrong while trying to ${what[check]}, so this is unknown.`;

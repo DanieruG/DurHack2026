@@ -63,7 +63,9 @@ async function readScreenshots(form: FormData, maxBytes: number): Promise<Stored
   return out;
 }
 
-export type CaseRequest = { capture: Capture; profile: Profile; caseNote?: string; screenshots: StoredImage[] };
+export const MAX_COLOUR_WISH = 100;
+
+export type CaseRequest = { capture: Capture; profile: Profile; caseNote?: string; /** "all white, nothing neon" */ colourWish?: string; screenshots: StoredImage[] };
 
 /** Validate POST /api/cases multipart input. At least one of screenshots, imageUrls or pageText. */
 export async function parseCaseRequest(form: FormData, maxImageBytes: number): Promise<CaseRequest> {
@@ -71,13 +73,15 @@ export async function parseCaseRequest(form: FormData, maxImageBytes: number): P
   const profile = parseJsonField(form, "profile", ProfileSchema, true)!;
   const noteRaw = form.get("caseNote");
   const caseNote = typeof noteRaw === "string" && noteRaw.trim() ? noteRaw.trim().slice(0, MAX_CASE_NOTE) : undefined;
+  const colourRaw = form.get("colourWish");
+  const colourWish = typeof colourRaw === "string" && colourRaw.trim() ? colourRaw.replace(/\s+/g, " ").trim().slice(0, MAX_COLOUR_WISH) : undefined;
   const screenshots = await readScreenshots(form, maxImageBytes);
   const hasText = !!capture.pageText?.trim();
   const hasUrls = (capture.imageUrls?.length ?? 0) > 0;
   if (!hasText && !hasUrls && screenshots.length === 0) {
     throw new RequestError("Capture is empty: send at least one screenshot, image URL or page text");
   }
-  return { capture, profile, caseNote, screenshots };
+  return { capture, profile, caseNote, ...(colourWish ? { colourWish } : {}), screenshots };
 }
 
 export type ReopenRequest = { capture?: Capture; sellerReply?: string; screenshots: StoredImage[] };

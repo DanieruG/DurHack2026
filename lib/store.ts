@@ -95,7 +95,7 @@ export function newId(): string {
   return "c" + randomBytes(16).toString("base64url").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().slice(0, 24).padEnd(24, "0");
 }
 
-export const CHECK_ORDER: CheckName[] = ["identify", "fit", "price", "comfort", "condition"];
+export const CHECK_ORDER: CheckName[] = ["identify", "fit", "price", "comfort", "condition", "colour"];
 
 export function latestPerCheck(records: { check: string; result: CheckResult }[]): CheckResult[] {
   const map = new Map<string, CheckResult>();

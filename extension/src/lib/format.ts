@@ -14,6 +14,7 @@ export const CHECK_NAMES: Record<CheckName, string> = {
   price: "Price",
   comfort: "Comfort",
   condition: "Condition",
+  colour: "Colour",
 };
 
 export const WEAR_NAMES: Record<WearTolerance, { label: string; hint: string }> = {

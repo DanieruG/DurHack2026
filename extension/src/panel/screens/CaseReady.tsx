@@ -47,7 +47,7 @@ export function CaseReady(props: {
   busy: boolean;
   error: string | null;
   defaultNote?: string;
-  onInvestigate: (note: string) => void;
+  onInvestigate: (note: string, colour?: string) => void;
   onOpenCase: (c: CaseSummary) => void;
   onEditProfile: () => void;
   onAllow: (origin: string) => void;
@@ -55,6 +55,7 @@ export function CaseReady(props: {
   surveyNote?: string | null;
 }) {
   const [note, setNote] = useState(props.defaultNote ?? "");
+  const [colour, setColour] = useState("");
   const s = props.state;
 
   if (s.kind === "loading" || s.kind === "search") return <div className="screen" />;
@@ -84,7 +85,7 @@ export function CaseReady(props: {
   const preview = s.preview;
   const rows: [string, string][] = [
     ["Size", relevantSizes(profile, preview.title) || "None saved"],
-    ...(profile.priorities.length ? ([["Priority", profile.priorities.map((p, i) => (i ? p : p[0].toUpperCase() + p.slice(1))).join(", ")]] as [string, string][]) : []),
+    ...(profile.priorities.length ? ([["Comfort priorities", profile.priorities.map((p, i) => (i ? p : p[0].toUpperCase() + p.slice(1))).join(", ")]] as [string, string][]) : []),
     ...(profile.budgetGBP ? ([["Budget", gbp(profile.budgetGBP)]] as [string, string][]) : []),
     ["Wear", WEAR_NAMES[profile.wearTolerance].label],
   ];
@@ -122,16 +123,29 @@ export function CaseReady(props: {
       </section>
 
       <section className="block">
-        <label className="field-label" htmlFor="case-note">
-          Anything else for this one?
+        <label className="field-label" htmlFor="case-colour">
+          Colour or look
         </label>
-        <textarea id="case-note" className="input area" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+        <input id="case-colour" className="input" maxLength={100} placeholder="e.g. all white, retro, nothing neon" value={colour} onChange={(e) => setColour(e.target.value)} aria-describedby="case-colour-hint" />
+        <p className="note dim field-hint" id="case-colour-hint">
+          Sleuth checks the listing against this. It isn&rsquo;t a comfort question.
+        </p>
+      </section>
+
+      <section className="block">
+        <label className="field-label" htmlFor="case-note">
+          Anything else about this pair?
+        </label>
+        <textarea id="case-note" className="input area" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} aria-describedby="case-note-hint" />
+        <p className="note dim field-hint" id="case-note-hint">
+          Budget, size or how you&rsquo;ll use them. Put colour in the box above.
+        </p>
       </section>
 
       <div className="foot">
         {props.surveyNote && <p className="note dim">{props.surveyNote}</p>}
         {props.error && <Notice tone="problem">{props.error}</Notice>}
-        <Button wide onClick={() => props.onInvestigate(note)} disabled={props.busy}>
+        <Button wide onClick={() => props.onInvestigate(note, colour)} disabled={props.busy}>
           {props.busy ? "Opening case" : "Investigate"}
         </Button>
       </div>

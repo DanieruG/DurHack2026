@@ -31,7 +31,8 @@ export function decideVerdict(checks: CheckResult[], brandKnown: boolean, signal
 /** Badge: out_sleuthed when hidden_gem and every check's confidence >= 0.7, except price which may be >= 0.6. */
 export function decideBadge(label: VerdictLabel, checks: CheckResult[]): "out_sleuthed" | null {
   if (label !== "hidden_gem") return null;
-  const ok = checks.every((c) => c.confidence >= (c.check === "price" ? 0.6 : 0.7));
+  // Colour is advisory: a low-confidence colour reading never stops the badge.
+  const ok = checks.filter((c) => c.check !== "colour").every((c) => c.confidence >= (c.check === "price" ? 0.6 : 0.7));
   return ok ? "out_sleuthed" : null;
 }
 

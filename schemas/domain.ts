@@ -8,7 +8,7 @@ export type Platform = z.infer<typeof PlatformSchema>;
 export const SizeSystemSchema = z.enum(["UK", "US", "EU"]);
 export type SizeSystem = z.infer<typeof SizeSystemSchema>;
 
-export const CheckNameSchema = z.enum(["identify", "fit", "price", "comfort", "condition"]);
+export const CheckNameSchema = z.enum(["identify", "fit", "price", "comfort", "condition", "colour"]);
 export type CheckName = z.infer<typeof CheckNameSchema>;
 
 export const GeminiFeatureSchema = z.enum([
@@ -183,6 +183,8 @@ export const UserNeedsSchema = z.object({
   budgetGBP: z.number().optional(),
   wearTolerance: WearToleranceSchema,
   caseNote: z.string().optional(),
+  /** The buyer's colour or look requirement for this pair ("all white, nothing neon"). Checked by the colour check, never judged as a comfort priority. */
+  colourWish: z.string().optional(),
   extraPriorities: z.array(z.string()),
   assumptions: z.array(z.string()),
 });
