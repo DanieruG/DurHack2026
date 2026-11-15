@@ -44,6 +44,11 @@ export const EvalSummarySchema = z.object({
   cacheMode: z.string(),
   /** Listings run (each one labelled by hand, some labels possibly still missing). */
   cases: z.number().int().nonnegative(),
+  /** Which cases, and a hash of their labels: two runs are comparable only when both match. */
+  caseIds: z.array(z.string()).optional(),
+  labelsHash: z.string().optional(),
+  /** "sleuth" (npm run eval) or "baseline" (npm run eval:baseline: one plain Gemini call per case). */
+  system: z.enum(["sleuth", "baseline"]).optional(),
   /** Two boxes match when their intersection over union is at least this. */
   overlapThreshold: z.number(),
   sections: z.array(z.object({ title: z.string(), figures: z.array(z.object({ id: z.string(), figure: FigureSchema })) })),

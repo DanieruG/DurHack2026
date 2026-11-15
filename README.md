@@ -114,6 +114,8 @@ the shipping components. It opens straight from disk.
 | `npm test` | Vitest. `RUN_DB_TESTS=1 npx vitest run tests/db.integration.test.ts` runs one end-to-end case against Neon and cleans up after itself |
 | `npm run seed` | Validate every `/data` file with Zod, then upsert. Prints a warning while placeholder price samples are present |
 | `npm run eval` | Run `eval/listings/*` through the pipeline and write `eval/report.md` |
+| `npm run eval:baseline` | The same cases through one plain Gemini call each (no tools, search, catalogue or rules), scored the same way; adds the side-by-side table to `eval/report.md` and `eval/slide.md` |
+| `npm run label` / `eval:photos` | Local labelling page for the eval cases / restore the (gitignored) eval photos from the main database |
 | `npm run db:deploy` / `db:migrate` / `db:migrate:https` | Prisma migrations |
 | `npx tsx scripts/placeholder-samples.ts` | Regenerate the placeholder price samples |
 | `npx tsx scripts/redact-stored.ts [--apply\|--verify]` | Re-run today's redaction over every stored case in both databases; `--verify` searches for the known identities in `data/private/known-identities.txt` (gitignored) |

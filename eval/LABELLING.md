@@ -69,8 +69,14 @@ your defect when the two overlap by at least 0.3 (intersection over union), so i
 ## Checking your work
 
     npm run eval:labels     # updates the list below
-    npm run eval            # runs every case: eval/report.md and eval/summary.json
-    npm run eval:slide      # eval/slide.md, the headline figures for a slide
+    npm run eval            # runs every case: eval/summary.json, eval/report.md, eval/slide.md
+    npm run eval:baseline   # the same cases through one plain Gemini call each: eval/baseline-summary.json,
+                            # and the side-by-side table in eval/report.md and eval/slide.md
+    npm run eval:slide      # rewrite eval/slide.md and eval/report.md from the latest summaries
+
+Run `npm run eval` and `npm run eval:baseline` one after the other on the same labels: the comparison says "not
+comparable" if the cases or labels changed between them. The labels, `report.md`, `summary.json`,
+`baseline-summary.json` and `slide.md` are committed; the photos aren't.
 
 ## Adding a case
 

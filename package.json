@@ -17,6 +17,7 @@
     "seed:reviews": "tsx scripts/seed-reviews.ts",
     "eval": "tsx eval/run.ts",
     "eval:slide": "tsx eval/slide.ts",
+    "eval:baseline": "tsx eval/run-baseline.ts",
     "eval:labels": "tsx eval/check-labels.ts",
     "label": "tsx eval/label/server.ts",
     "eval:photos": "tsx scripts/eval-photos.ts",

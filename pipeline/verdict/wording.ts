@@ -12,7 +12,7 @@ const WordingWireSchema = z.object({
   citedEvidenceIds: z.array(z.string()),
 });
 
-const LABEL_MEANING: Record<VerdictLabel, string> = {
+export const LABEL_MEANING: Record<VerdictLabel, string> = {
   hidden_gem: "a genuinely good find: fits, fairly or under-priced, condition as described",
   worth_a_look: "nothing wrong found; worth a closer look",
   proceed_with_caution: "loose ends or concerns to resolve before buying",

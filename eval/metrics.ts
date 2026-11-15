@@ -3,6 +3,10 @@ import type { EvalSummary, Figure, Fraction, HeadlineId, Spread } from "../schem
 import { brandToken, tokenise } from "../lib/titleMatch";
 import { parseSizeText } from "../lib/sizes";
 import type { CaseRun } from "./collect";
+import { createHash } from "node:crypto";
+
+/** A hash of the labels a run was scored against (case ids and labels, in order). */
+export const labelsHash = (runs: Pick<CaseRun, "id" | "label">[]) => createHash("sha256").update(JSON.stringify(runs.map((r) => [r.id, r.label]))).digest("hex").slice(0, 16);
 
 /**
  * Eval metrics: pure functions from labelled runs to figures. Every figure carries its sample size. Percentages are
@@ -250,6 +254,8 @@ export function summarise(
   return {
     ...meta,
     cases: runs.length,
+    caseIds: runs.map((r) => r.id),
+    labelsHash: labelsHash(runs),
     overlapThreshold: OVERLAP_THRESHOLD,
     sections: [
       section("Identification", ["brandAccuracy", "modelIdentification", "versionAccuracy", "wrongModel", "styleCodeRead", "gateRefusal"]),

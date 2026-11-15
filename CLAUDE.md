@@ -11,6 +11,8 @@ verdict. Next.js app with route handlers only (see `AGENTS.md`: this Next.js ver
     npm run eval                       # labelled cases → eval/report.md, eval/summary.json (live Gemini; test DB)
     npm run eval:slide / eval:labels   # slide table / missing-labels list in eval/LABELLING.md
     npm run label                      # local labelling page, http://127.0.0.1:4870 (eval/label/)
+    npm run eval:baseline              # one plain Gemini call per case, same scoring → side-by-side in report.md
+    npm run eval:photos                # restore gitignored eval photos from the main DB (checks sha256)
 
 Scripts run with `npx tsx <file>`; top-level await needs the project's ESM setup, so put throwaway scripts that import
 project code **inside** the repo tree or symlink `node_modules` next to them (tsx won't resolve packages from /tmp).
@@ -67,6 +69,10 @@ Happy-dom prints iframe stack traces during tests: noise, not failures.
 - Labels are never filled from Sleuth's output, and the labelling tool must never show it (no summary/report/DB reads;
   `offerColours` is hidden because it names Sleuth's offers). Boxes are `[ymin, xmin, ymax, xmax]` on 0–1000 (Gemini's format);
   matches need IoU ≥ 0.3 (`OVERLAP_THRESHOLD`).
+- Baseline (`eval/baseline.ts`, `eval/run-baseline.ts`): fixed user prompt + buyer line from `EVAL_PROFILE`, same
+  page text (`prepareText`), same photos, structured output mapped to `CaseRun`, scored by the same `summarise()`.
+  `eval/write.ts` regenerates report.md/slide.md from summary.json + baseline-summary.json; summaries carry
+  `caseIds` + `labelsHash` so stale comparisons are flagged. Keep it fair: any change to inputs applies to both.
 - Percentages are rounded against Sleuth (`fraction()` in `eval/metrics.ts`); every figure carries n/d.
 
 ## Conventions
