@@ -109,7 +109,7 @@ describe("new prices: client", () => {
     await expect(client.getNewPrices("Dropset 3", "Adidas")).rejects.toThrow("HTTP 429"); // 429, 429
     await expect(client.getNewPrices("Samba OG", "Adidas")).rejects.toThrow("HTTP 401"); // no retry
     expect(calls).toBe(5);
-    expect(logs).toEqual([expect.stringMatching(/^\[shopping\] provider=serpapi q="Nike Pegasus 40" gl=uk raw=40 kept=3 \d+ms$/)]);
+    expect(logs).toEqual([expect.stringMatching(/^\[shopping\] provider=serpapi q="Nike Pegasus 40" gl=uk raw=40 kept=3 \d+ms serpapi_calls shopping=\d+ web=\d+ lens=\d+ total=\d+$/)]);
     expect(logs.join("\n")).not.toContain("SECRET-KEY-123");
   });
 
