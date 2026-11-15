@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { BroadColourSchema, ConditionGradeSchema, DefectLabelSchema, VerdictLabelSchema } from "../schemas/domain";
+import { BroadColourSchema, ConditionGradeSchema, DefectLabelSchema, SeveritySchema, VerdictLabelSchema } from "../schemas/domain";
 
 /**
  * label.json: what a person found by looking at the listing (photos and text), written before running the pipeline.
@@ -9,7 +9,12 @@ import { BroadColourSchema, ConditionGradeSchema, DefectLabelSchema, VerdictLabe
  * How to label: eval/LABELLING.md.
  */
 
-const Box = z.tuple([z.number().min(0).max(1000), z.number().min(0).max(1000), z.number().min(0).max(1000), z.number().min(0).max(1000)]);
+const Box = z
+  .tuple([z.number().min(0).max(1000), z.number().min(0).max(1000), z.number().min(0).max(1000), z.number().min(0).max(1000)])
+  .refine(([ymin, xmin, ymax, xmax]) => ymin < ymax && xmin < xmax, "box must be [ymin, xmin, ymax, xmax] with ymin < ymax and xmin < xmax");
+
+/** One hand-marked defect. Severity is optional so older labels still parse; the labelling tool always sets it. */
+export const LabelDefectSchema = z.object({ label: DefectLabelSchema, box2d: Box, severity: SeveritySchema.optional() });
 
 export const LabelSchema = z.object({
   /** Could a person tell the exact model (and version) from this listing? false: Sleuth should refuse to name one. */
@@ -23,9 +28,13 @@ export const LabelSchema = z.object({
   styleCode: z.object({ value: z.string().min(1).nullable(), visible: z.boolean() }).nullable().default(null),
   /** Broad colours of the shoe, main colour first. */
   colourway: z.array(BroadColourSchema).min(1).nullable().default(null),
-  /** The size as the listing states it. "multiple": a multi-size listing. System "unknown" when the listing doesn't say. */
+  /**
+   * The size as the listing states it. "multiple": a multi-size listing; "not_stated": the listing gives no size (system
+   * "unknown"). System "unknown" when the listing doesn't say which system.
+   */
   size: z
-    .object({ value: z.union([z.number().positive(), z.literal("multiple")]), system: z.enum(["UK", "US", "EU", "unknown"]) })
+    .object({ value: z.union([z.number().positive(), z.literal("multiple"), z.literal("not_stated")]), system: z.enum(["UK", "US", "EU", "unknown"]) })
+    .refine((s) => s.value !== "not_stated" || s.system === "unknown", "a size that isn't stated has system \"unknown\"")
     .nullable()
     .default(null),
   conditionGrade: ConditionGradeSchema.nullable().default(null),
@@ -33,7 +42,7 @@ export const LabelSchema = z.object({
    * Hand-marked defects, by photo number (photo-01 is "1"). Only photos you checked appear; [] means checked, no
    * defects. Boxes are [ymin, xmin, ymax, xmax] on a 0-1000 scale.
    */
-  defects: z.record(z.string().regex(/^\d+$/), z.array(z.object({ label: DefectLabelSchema, box2d: Box }))).nullable().default(null),
+  defects: z.record(z.string().regex(/^\d+$/), z.array(LabelDefectSchema)).nullable().default(null),
   /** Optional: new-price offers whose colour you checked by eye against the listing, matched by URL. */
   offerColours: z.array(z.object({ url: z.string().url(), colourMatch: z.enum(["same", "different"]) })).nullable().default(null),
   /** Optional: the verdict you'd expect. */

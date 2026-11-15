@@ -10,6 +10,7 @@ verdict. Next.js app with route handlers only (see `AGENTS.md`: this Next.js ver
     npm run ext:build                  # extension → extension/dist
     npm run eval                       # labelled cases → eval/report.md, eval/summary.json (live Gemini; test DB)
     npm run eval:slide / eval:labels   # slide table / missing-labels list in eval/LABELLING.md
+    npm run label                      # local labelling page, http://127.0.0.1:4870 (eval/label/)
 
 Scripts run with `npx tsx <file>`; top-level await needs the project's ESM setup, so put throwaway scripts that import
 project code **inside** the repo tree or symlink `node_modules` next to them (tsx won't resolve packages from /tmp).
@@ -31,6 +32,7 @@ Happy-dom prints iframe stack traces during tests: noise, not failures.
 | `lib/store.ts`, `lib/prismaStore.ts` | Store interface (memory + Prisma/Neon). `CaseInput.kind` is a free string (no migration to add kinds) |
 | `extension/src/lib/capture.ts` | What the extension reads from the page (`prepareCapture`, `structuredListing`) |
 | `eval/` | Eval set and metrics: `labels.ts` (label schema), `collect.ts` (runs a case), `metrics.ts`, `report.ts` |
+| `eval/label/` | Labelling tool: `api.ts` (reads capture/photos/label only, validates and saves), `server.ts` (node:http), `page.html` (vanilla JS, no build). Tested by driving the page in happy-dom (`tests/labelTool.test.ts`) |
 | `scripts/export-eval-case.ts` | Main DB case → `eval/listings/<platform>-<itemId>/` (read-only on the DB) |
 | `tests/` | Vitest; `tests/helpers.ts` `makeDeps` gives a mocked Gemini + memory store |
 
@@ -59,7 +61,8 @@ Happy-dom prints iframe stack traces during tests: noise, not failures.
 
 - Case folder: `capture.json` (redacted capture, may include `capture.listing` structured fields), `photo-NN.*`
   (gitignored, see `eval/LABELLING.md`), `label.json` (hand labels, validated by `LabelSchema` in `eval/labels.ts`).
-- Labels are never filled from Sleuth's output. Boxes are `[ymin, xmin, ymax, xmax]` on 0–1000 (Gemini's format);
+- Labels are never filled from Sleuth's output, and the labelling tool must never show it (no summary/report/DB reads;
+  `offerColours` is hidden because it names Sleuth's offers). Boxes are `[ymin, xmin, ymax, xmax]` on 0–1000 (Gemini's format);
   matches need IoU ≥ 0.3 (`OVERLAP_THRESHOLD`).
 - Percentages are rounded against Sleuth (`fraction()` in `eval/metrics.ts`); every figure carries n/d.
 

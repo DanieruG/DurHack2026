@@ -88,6 +88,8 @@ describe("matching names and sizes with labels", () => {
     expect(sizeAgrees({ text: "9", system: "unknown", options: null }, { value: 9, system: "unknown" })).toBe(true);
     expect(sizeAgrees({ text: "US 10", system: "US", options: null }, { value: 9, system: "UK" })).toBe(false);
     expect(sizeAgrees({ text: null, system: null, options: { system: "UK" } }, { value: "multiple", system: "UK" })).toBe(true);
+    expect(sizeAgrees({ text: null, system: null, options: null }, { value: "not_stated", system: "unknown" })).toBe(true);
+    expect(sizeAgrees({ text: "UK 9", system: "UK", options: null }, { value: "not_stated", system: "unknown" })).toBe(false);
   });
 });
 

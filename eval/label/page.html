@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sleuth labelling</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #deded9; --accent: #2457c5;
+    --ok: #1f7a3e; --warn: #a35a00; --bad: #b3261e; --sel: #ffd400;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b9a93; --line: #34342f; --accent: #7ea2ff; --ok: #5cc285; --warn: #f0a640; --bad: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; gap: 16px; align-items: baseline; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; }
+  header .muted { color: var(--muted); }
+  #app { display: grid; grid-template-columns: 250px 1fr; height: calc(100vh - 43px); }
+  aside { overflow: auto; border-right: 1px solid var(--line); background: var(--panel); }
+  aside button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line); background: none; color: inherit; font: inherit; cursor: pointer; }
+  aside button:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  aside button.current { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  aside .id { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; }
+  aside .st { font-size: 12px; color: var(--muted); }
+  aside .st.ok { color: var(--ok); }
+  aside .st.bad { color: var(--bad); }
+  main { overflow: hidden; display: flex; flex-direction: column; }
+  .bar { display: flex; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  .bar .id { font-family: ui-monospace, monospace; font-weight: 600; }
+  .bar .grow { flex: 1; }
+  #status { font-size: 13px; }
+  #status.bad { color: var(--bad); } #status.ok { color: var(--ok); } #status.warn { color: var(--warn); }
+  button.primary { background: var(--accent); color: white; border: 0; border-radius: 6px; padding: 6px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.small { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: inherit; cursor: pointer; }
+  button.small:disabled { opacity: .45; cursor: default; }
+  .cols { flex: 1; display: grid; grid-template-columns: minmax(380px, 1.25fr) minmax(300px, .8fr) minmax(280px, 1fr); gap: 0; overflow: hidden; }
+  .cols > section { overflow: auto; padding: 12px 16px; border-right: 1px solid var(--line); }
+  .cols > section:last-child { border-right: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 8px; }
+  .photoNav { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--line); }
+  .chip.checked { border-color: var(--ok); color: var(--ok); }
+  .chip.unchecked { color: var(--muted); }
+  #stage { position: relative; display: inline-block; user-select: none; touch-action: none; max-width: 100%; }
+  #photo { display: block; max-width: 100%; max-height: 58vh; }
+  #overlay { position: absolute; inset: 0; cursor: crosshair; }
+  .box { position: absolute; border: 2px solid var(--c, #f33); background: color-mix(in srgb, var(--c, #f33) 12%, transparent); cursor: move; }
+  .box.sel { outline: 2px dashed var(--sel); outline-offset: 2px; }
+  .box .tag { position: absolute; left: -2px; top: -20px; background: var(--c, #f33); color: #fff; font-size: 11px; padding: 1px 5px; white-space: nowrap; border-radius: 3px 3px 0 0; pointer-events: none; }
+  .box .h { position: absolute; width: 10px; height: 10px; background: var(--sel); border: 1px solid #000; }
+  .h.nw { left: -6px; top: -6px; cursor: nwse-resize; } .h.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+  .h.sw { left: -6px; bottom: -6px; cursor: nesw-resize; } .h.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+  .thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+  .thumbs button { position: relative; padding: 0; border: 2px solid transparent; border-radius: 4px; background: none; cursor: pointer; }
+  .thumbs button.cur { border-color: var(--accent); }
+  .thumbs img { width: 56px; height: 56px; object-fit: cover; display: block; border-radius: 2px; }
+  .thumbs .dot { position: absolute; right: 2px; bottom: 2px; min-width: 16px; height: 16px; border-radius: 8px; font-size: 10px; line-height: 16px; text-align: center; color: #fff; background: #888; }
+  .thumbs .dot.c { background: var(--ok); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+  .boxes { margin: 8px 0; border-top: 1px solid var(--line); }
+  .boxes .b { display: flex; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .boxes .b.sel { background: color-mix(in srgb, var(--sel) 18%, transparent); }
+  .boxes .sw { width: 12px; height: 12px; border-radius: 2px; background: var(--c); flex: none; }
+  .boxes code { font-size: 11px; color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; }
+  label.f { display: block; margin: 10px 0 3px; font-weight: 600; font-size: 13px; }
+  .f .opt { font-weight: 400; color: var(--muted); }
+  input[type=text], input[type=number], select, textarea { font: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: inherit; }
+  input[type=text], textarea { width: 100%; }
+  input:disabled { opacity: .5; }
+  .colours { display: flex; flex-wrap: wrap; gap: 5px; }
+  .colours button { font: inherit; font-size: 12px; padding: 3px 8px 3px 5px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: inherit; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+  .colours button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .colours .sw { width: 12px; height: 12px; border-radius: 6px; border: 1px solid #8886; }
+  .colours .n { font-weight: 700; color: var(--accent); }
+  .missing { color: var(--warn); font-size: 12px; }
+  .errors { color: var(--bad); font-size: 12px; margin: 6px 0; white-space: pre-wrap; }
+  table.fields { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
+  table.fields td { border-bottom: 1px solid var(--line); padding: 3px 4px; vertical-align: top; }
+  table.fields td:first-child { color: var(--muted); white-space: nowrap; }
+  table.fields .src { color: var(--muted); font-size: 11px; }
+  #pageText { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; margin: 0; }
+  mark { background: var(--sel); color: #000; }
+  .empty { color: var(--muted); padding: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sleuth labelling</h1>
+  <span id="progress" class="muted"></span>
+  <span class="muted">Label what you see. Sleuth's answers are never shown here.</span>
+</header>
+<div id="app">
+  <aside id="list"></aside>
+  <main id="main"><div class="empty">Choose a case on the left.</div></main>
+</div>
+
+<template id="caseTpl">
+  <div class="bar">
+    <span class="id" data-k="id"></span>
+    <a data-k="url" target="_blank" rel="noopener noreferrer">open listing ↗</a>
+    <span class="grow"></span>
+    <span id="status"></span>
+    <button class="primary" id="save">Save (⌘S)</button>
+  </div>
+  <div class="cols">
+    <section>
+      <h2>Photos and defects</h2>
+      <div class="photoNav">
+        <button class="small" id="prev">◀</button>
+        <span id="photoNo"></span>
+        <button class="small" id="next">▶</button>
+        <span id="photoState" class="chip"></span>
+      </div>
+      <div id="stage"><img id="photo" alt="" draggable="false"><div id="overlay"></div></div>
+      <div class="thumbs" id="thumbs"></div>
+      <div class="row">
+        <span class="hint">New boxes:</span>
+        <select id="newLabel"></select>
+        <select id="newSeverity"></select>
+      </div>
+      <div class="row">
+        <button class="small" id="noDefects">Checked: no defects on this photo</button>
+        <button class="small" id="unchecked">Mark as not checked</button>
+      </div>
+      <div class="boxes" id="boxes"></div>
+      <p class="hint">Drag on the photo to draw a box. Click a box to select it; drag it to move, drag a corner to resize; change its type and severity in the list. Delete or Backspace removes the selected box. ← → change photo. Boxes are saved as [ymin, xmin, ymax, xmax] on 0–1000.</p>
+    </section>
+    <section>
+      <h2>Label</h2>
+      <div id="missing" class="missing"></div>
+      <form id="form" autocomplete="off" onsubmit="return false"></form>
+      <div id="errors" class="errors"></div>
+    </section>
+    <section>
+      <h2>Listing</h2>
+      <div id="fields"></div>
+      <div class="row"><input type="text" id="find" placeholder="Find in page text"><span id="findCount" class="hint"></span></div>
+      <pre id="pageText"></pre>
+    </section>
+  </div>
+</template>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const DEFECT_COLOURS = { outsole_wear: "#e6194b", heel_wear: "#f58231", upper_creasing: "#3cb44b", stitching_damage: "#4363d8", discolouration: "#911eb4", tear_or_hole: "#e6007e", sole_separation: "#008080", dirt_or_staining: "#9a6324" };
+const SWATCH = { black: "#111", white: "#fff", grey: "#999", navy: "#1b2a5c", blue: "#2f6fe0", red: "#d22", green: "#2a8a3a", brown: "#7a4a22", beige: "#d8c7a0", pink: "#f4a6c0", purple: "#7d3fb0", orange: "#f28a1a", yellow: "#f3d21b" };
+const pretty = (s) => String(s).replace(/_/g, " ");
+
+let OPTIONS = null;
+let LIST = null;
+const S = { view: null, label: null, photo: 0, sel: null, dirty: false, newLabel: "upper_creasing", newSeverity: "minor" };
+
+async function api(path, init) {
+  const r = await fetch(path, init);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok && !body.errors) throw new Error(body.error || `HTTP ${r.status}`);
+  return body;
+}
+
+// ---------- case list ----------
+
+async function loadList() {
+  LIST = await api("/api/cases");
+  const done = LIST.cases.filter((c) => c.complete).length;
+  const d = LIST.defectPhotos;
+  $("#progress").textContent = `${done} of ${LIST.cases.length} cases complete · defect boxes checked on ${d.marked} of ${d.needed} photos needed${d.marked >= d.needed ? " ✓" : ""}`;
+  $("#list").innerHTML = LIST.cases
+    .map((c) => {
+      const st = c.error ? `<span class="st bad">label.json doesn't parse</span>` : c.complete ? `<span class="st ok">✓ complete</span>` : `<span class="st">missing: ${esc(c.missing.join(", "))}</span>`;
+      return `<button data-id="${esc(c.id)}" class="${S.view?.id === c.id ? "current" : ""}"><div class="id">${esc(c.id)}</div>${st}<div class="st">${c.photos} photos · defects checked on ${c.defectPhotos}${c.defectBoxes ? ` · ${c.defectBoxes} box${c.defectBoxes === 1 ? "" : "es"}` : ""}</div></button>`;
+    })
+    .join("");
+}
+
+$("#list").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-id]");
+  if (b) openCase(b.dataset.id);
+});
+
+async function openCase(id) {
+  if (S.dirty && !confirm("You have unsaved changes on this case. Discard them?")) return;
+  const view = await api(`/api/cases/${encodeURIComponent(id)}`);
+  Object.assign(S, { view, label: structuredClone(view.label), photo: 0, sel: null, dirty: false });
+  location.hash = id;
+  renderCase();
+  loadList();
+}
+
+// ---------- one case ----------
+
+function renderCase() {
+  const v = S.view;
+  const main = $("#main");
+  main.innerHTML = "";
+  main.append($("#caseTpl").content.cloneNode(true));
+  $('[data-k="id"]').textContent = v.id;
+  const a = $('[data-k="url"]');
+  if (v.pageUrl) a.href = v.pageUrl; else a.remove();
+  $("#save").onclick = save;
+  $("#prev").onclick = () => showPhoto(S.photo - 1);
+  $("#next").onclick = () => showPhoto(S.photo + 1);
+  $("#noDefects").onclick = () => { setDefects(S.photo + 1, []); };
+  $("#unchecked").onclick = () => {
+    const k = String(S.photo + 1);
+    const n = S.label.defects?.[k]?.length ?? 0;
+    if (n && !confirm(`Remove the ${n} box${n === 1 ? "" : "es"} on this photo too?`)) return;
+    if (S.label.defects) delete S.label.defects[k];
+    if (S.label.defects && !Object.keys(S.label.defects).length) S.label.defects = null;
+    S.sel = null; touch(); drawPhoto();
+  };
+  $("#newLabel").innerHTML = OPTIONS.defectLabels.map((l) => `<option value="${l}">${pretty(l)}</option>`).join("");
+  $("#newSeverity").innerHTML = OPTIONS.severities.map((l) => `<option value="${l}">${l}</option>`).join("");
+  $("#newLabel").value = S.newLabel;
+  $("#newSeverity").value = S.newSeverity;
+  $("#newLabel").onchange = (e) => (S.newLabel = e.target.value);
+  $("#newSeverity").onchange = (e) => (S.newSeverity = e.target.value);
+  renderThumbs();
+  showPhoto(0);
+  renderForm();
+  renderListing();
+  status(v.labelError ? `label.json didn't parse (${v.labelError}); starting from an empty label` : "", v.labelError ? "warn" : "");
+}
+
+function status(text, kind = "") {
+  const el = $("#status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = kind;
+}
+
+function touch() {
+  S.dirty = true;
+  status("Unsaved changes", "warn");
+  renderMissing();
+}
+
+// ---------- photos and boxes ----------
+
+const boxesOf = (n) => S.label.defects?.[String(n)] ?? null;
+
+function setDefects(n, list) {
+  S.label.defects = S.label.defects ?? {};
+  S.label.defects[String(n)] = list;
+  touch();
+  drawPhoto();
+}
+
+function renderThumbs() {
+  $("#thumbs").innerHTML = S.view.photos
+    .map((f, i) => {
+      const b = boxesOf(i + 1);
+      return `<button data-i="${i}" class="${i === S.photo ? "cur" : ""}" title="photo ${i + 1}"><img src="/photos/${encodeURIComponent(S.view.id)}/${encodeURIComponent(f)}" alt="photo ${i + 1}" loading="lazy"><span class="dot ${b ? "c" : ""}">${b ? b.length || "✓" : i + 1}</span></button>`;
+    })
+    .join("");
+  $("#thumbs").onclick = (e) => {
+    const b = e.target.closest("button[data-i]");
+    if (b) showPhoto(Number(b.dataset.i));
+  };
+}
+
+function showPhoto(i) {
+  const n = S.view.photos.length;
+  if (!n) {
+    $("#photoNo").textContent = "No photos in this case";
+    return;
+  }
+  S.photo = (i + n) % n;
+  S.sel = null;
+  $("#photo").src = `/photos/${encodeURIComponent(S.view.id)}/${encodeURIComponent(S.view.photos[S.photo])}`;
+  drawPhoto();
+}
+
+function drawPhoto() {
+  const num = S.photo + 1;
+  const list = boxesOf(num);
+  $("#photoNo").textContent = `Photo ${num} of ${S.view.photos.length}`;
+  const st = $("#photoState");
+  st.textContent = list === null ? "not checked" : list.length ? `checked · ${list.length} defect${list.length === 1 ? "" : "s"}` : "checked · no defects";
+  st.className = `chip ${list === null ? "unchecked" : "checked"}`;
+  $("#noDefects").disabled = list !== null;
+  $("#unchecked").disabled = list === null;
+
+  const ov = $("#overlay");
+  ov.innerHTML = (list ?? [])
+    .map((d, j) => {
+      const [y0, x0, y1, x1] = d.box2d;
+      const sel = S.sel === j;
+      return `<div class="box ${sel ? "sel" : ""}" data-j="${j}" style="--c:${DEFECT_COLOURS[d.label]};top:${y0 / 10}%;left:${x0 / 10}%;height:${(y1 - y0) / 10}%;width:${(x1 - x0) / 10}%"><span class="tag">${j + 1}. ${pretty(d.label)} · ${d.severity ?? "no severity"}</span>${sel ? '<i class="h nw" data-h="nw"></i><i class="h ne" data-h="ne"></i><i class="h sw" data-h="sw"></i><i class="h se" data-h="se"></i>' : ""}</div>`;
+    })
+    .join("");
+
+  $("#boxes").innerHTML = (list ?? [])
+    .map(
+      (d, j) => `<div class="b ${S.sel === j ? "sel" : ""}" data-j="${j}"><span class="sw" style="--c:${DEFECT_COLOURS[d.label]}"></span><b>${j + 1}</b>
+      <select data-f="label">${OPTIONS.defectLabels.map((l) => `<option value="${l}" ${l === d.label ? "selected" : ""}>${pretty(l)}</option>`).join("")}</select>
+      <select data-f="severity">${d.severity ? "" : '<option value="" selected>severity?</option>'}${OPTIONS.severities.map((l) => `<option value="${l}" ${l === d.severity ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <code>[${d.box2d.join(", ")}]</code><button class="small" data-del="${j}">Delete</button></div>`,
+    )
+    .join("");
+  if (!drag) renderThumbs();
+}
+
+$("#main").addEventListener("change", (e) => {
+  const row = e.target.closest(".boxes .b");
+  if (!row) return;
+  const d = boxesOf(S.photo + 1)[Number(row.dataset.j)];
+  d[e.target.dataset.f] = e.target.value;
+  if (e.target.dataset.f === "label") S.newLabel = e.target.value;
+  if (e.target.dataset.f === "severity") S.newSeverity = e.target.value;
+  touch();
+  drawPhoto();
+});
+
+$("#main").addEventListener("click", (e) => {
+  const del = e.target.closest("[data-del]");
+  if (del) return deleteBox(Number(del.dataset.del));
+  const row = e.target.closest(".boxes .b");
+  if (row && e.target.tagName !== "SELECT") {
+    S.sel = Number(row.dataset.j);
+    drawPhoto();
+  }
+});
+
+function deleteBox(j) {
+  const list = boxesOf(S.photo + 1);
+  if (!list) return;
+  list.splice(j, 1);
+  S.sel = null;
+  touch();
+  drawPhoto();
+}
+
+const clamp = (v) => Math.max(0, Math.min(1000, Math.round(v)));
+function units(e) {
+  const r = $("#overlay").getBoundingClientRect();
+  return { y: clamp(((e.clientY - r.top) / r.height) * 1000), x: clamp(((e.clientX - r.left) / r.width) * 1000) };
+}
+
+let drag = null;
+document.addEventListener("pointerdown", (e) => {
+  const ov = $("#overlay");
+  if (!ov || !ov.contains(e.target)) return;
+  e.preventDefault();
+  const p = units(e);
+  const handle = e.target.dataset.h;
+  const boxEl = e.target.closest(".box");
+  const num = S.photo + 1;
+  if (boxEl) {
+    const j = Number(boxEl.dataset.j);
+    S.sel = j;
+    const b = boxesOf(num)[j].box2d.slice();
+    drag = { mode: handle ? "resize" : "move", handle, j, start: p, orig: b };
+    if (!handle) drawPhoto();
+  } else {
+    const hadKey = boxesOf(num) !== null;
+    const list = boxesOf(num) ?? [];
+    list.push({ label: S.newLabel, severity: S.newSeverity, box2d: [p.y, p.x, p.y, p.x] });
+    S.label.defects = S.label.defects ?? {};
+    S.label.defects[String(num)] = list;
+    S.sel = list.length - 1;
+    drag = { mode: "draw", j: S.sel, start: p, hadKey };
+    drawPhoto();
+  }
+  ov.setPointerCapture(e.pointerId);
+});
+
+document.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const p = units(e);
+  const d = boxesOf(S.photo + 1)[drag.j];
+  if (drag.mode === "draw") {
+    d.box2d = [Math.min(drag.start.y, p.y), Math.min(drag.start.x, p.x), Math.max(drag.start.y, p.y), Math.max(drag.start.x, p.x)];
+  } else if (drag.mode === "move") {
+    const [y0, x0, y1, x1] = drag.orig;
+    const dy = Math.max(-y0, Math.min(1000 - y1, p.y - drag.start.y));
+    const dx = Math.max(-x0, Math.min(1000 - x1, p.x - drag.start.x));
+    d.box2d = [y0 + dy, x0 + dx, y1 + dy, x1 + dx];
+  } else {
+    let [y0, x0, y1, x1] = drag.orig;
+    if (drag.handle.includes("n")) y0 = p.y; else y1 = p.y;
+    if (drag.handle.includes("w")) x0 = p.x; else x1 = p.x;
+    d.box2d = [Math.min(y0, y1), Math.min(x0, x1), Math.max(y0, y1), Math.max(x0, x1)];
+  }
+  drawPhoto();
+});
+
+document.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const list = boxesOf(S.photo + 1);
+  const [y0, x0, y1, x1] = list[drag.j].box2d;
+  // A click without a drag (or a sliver) isn't a box.
+  if (drag.mode === "draw" && (y1 - y0 < 8 || x1 - x0 < 8)) {
+    list.splice(drag.j, 1);
+    S.sel = null;
+    if (!list.length && !drag.hadKey) {
+      delete S.label.defects[String(S.photo + 1)];
+      if (!Object.keys(S.label.defects).length) S.label.defects = null;
+    }
+  } else if (drag.mode !== "move" || list[drag.j].box2d.join() !== drag.orig.join()) {
+    touch();
+  }
+  drag = null;
+  drawPhoto();
+});
+
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    e.preventDefault();
+    if (S.view) save();
+    return;
+  }
+  if (!S.view || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  if (e.key === "ArrowLeft") showPhoto(S.photo - 1);
+  else if (e.key === "ArrowRight") showPhoto(S.photo + 1);
+  else if ((e.key === "Delete" || e.key === "Backspace") && S.sel !== null) {
+    e.preventDefault();
+    deleteBox(S.sel);
+  } else if (e.key === "Escape") {
+    S.sel = null;
+    drawPhoto();
+  }
+});
+
+// ---------- the form ----------
+
+function renderForm() {
+  const L = S.label;
+  const sel = (name, opts, value, blank = "— not labelled —") =>
+    `<select name="${name}"><option value="">${blank}</option>${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(value) === String(v) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  const sizeMode = !L.size ? "" : L.size.value === "multiple" ? "multiple" : L.size.value === "not_stated" ? "not_stated" : "single";
+  const styleMode = !L.styleCode ? "" : L.styleCode.visible ? "visible" : "not_visible";
+  $("#form").innerHTML = `
+    <label class="f">Identifiable <span class="opt">can you tell the exact model and version?</span></label>
+    ${sel("identifiable", [["true", "Yes"], ["false", "No: Sleuth should refuse to name one"]], L.identifiable)}
+    <label class="f">Brand</label><input type="text" name="brand" value="${esc(L.brand)}" placeholder="Nike">
+    <label class="f">Model <span class="opt">without the version</span></label><input type="text" name="model" value="${esc(L.model)}" placeholder="Pegasus, Air Max, Samba OG">
+    <label class="f">Version</label>
+    <div class="row"><input type="text" name="version" value="${esc(L.version === "none" ? "" : L.version)}" placeholder="40, 95" style="width:120px">
+      <label><input type="checkbox" name="versionNone" ${L.version === "none" ? "checked" : ""}> model has no versions</label></div>
+    <label class="f">Style code</label>
+    <div class="row">${sel("styleMode", [["visible", "Visible in the photos or text"], ["not_visible", "Not visible"]], styleMode)}
+      <input type="text" name="styleCode" value="${esc(L.styleCode?.value)}" placeholder="FV6603-101" style="width:140px"></div>
+    <label class="f">Colourway <span class="opt">broad colours, main colour first (click in order)</span></label>
+    <div class="colours" id="colours"></div>
+    <label class="f">Size <span class="opt">as the listing states it</span></label>
+    <div class="row">${sel("sizeMode", [["single", "One size"], ["multiple", "Several sizes offered"], ["not_stated", "Not stated"]], sizeMode)}
+      <input type="number" name="sizeValue" step="0.5" min="1" max="60" value="${typeof L.size?.value === "number" ? L.size.value : ""}" style="width:80px">
+      ${sel("sizeSystem", [["UK", "UK"], ["US", "US"], ["EU", "EU"], ["unknown", "System not stated"]], L.size?.system ?? "", "system…")}</div>
+    <label class="f">Condition grade</label>
+    ${sel("conditionGrade", OPTIONS.conditionGrades.map((g) => [g, pretty(g)]), L.conditionGrade)}
+    <label class="f">Expected verdict <span class="opt">optional</span></label>
+    ${sel("expectedVerdict", OPTIONS.verdicts.map((g) => [g, pretty(g)]), L.expectedVerdict, "— none —")}
+    <label class="f">Notes <span class="opt">optional</span></label>
+    <textarea name="notes" rows="3">${esc(L.notes ?? "")}</textarea>`;
+  renderColours();
+  syncDisabled();
+  renderMissing();
+}
+
+function renderColours() {
+  const cw = S.label.colourway ?? [];
+  $("#colours").innerHTML = OPTIONS.colours
+    .map((c) => {
+      const n = cw.indexOf(c);
+      return `<button type="button" data-c="${c}" class="${n >= 0 ? "on" : ""}"><span class="sw" style="background:${SWATCH[c]}"></span>${c}${n >= 0 ? ` <span class="n">${n + 1}</span>` : ""}</button>`;
+    })
+    .join("");
+  $("#colours").onclick = (e) => {
+    const b = e.target.closest("button[data-c]");
+    if (!b) return;
+    const cw = [...(S.label.colourway ?? [])];
+    const i = cw.indexOf(b.dataset.c);
+    if (i >= 0) cw.splice(i, 1); else cw.push(b.dataset.c);
+    S.label.colourway = cw.length ? cw : null;
+    renderColours();
+    touch();
+  };
+}
+
+function syncDisabled() {
+  const f = $("#form");
+  const notId = f.identifiable.value === "false";
+  f.model.disabled = notId;
+  f.version.disabled = notId || f.versionNone.checked;
+  f.versionNone.disabled = notId;
+  f.styleCode.disabled = f.styleMode.value === "";
+  const mode = f.sizeMode.value;
+  f.sizeValue.disabled = mode !== "single";
+  f.sizeSystem.disabled = mode === "" || mode === "not_stated";
+}
+
+/** The form's values into the working label (null = not labelled). */
+function readForm() {
+  const f = $("#form");
+  const L = S.label;
+  const text = (v) => (v.trim() ? v.trim() : null);
+  L.identifiable = f.identifiable.value === "" ? null : f.identifiable.value === "true";
+  L.brand = text(f.brand.value);
+  L.model = L.identifiable === false ? null : text(f.model.value);
+  L.version = L.identifiable === false ? null : f.versionNone.checked ? "none" : text(f.version.value);
+  const sm = f.styleMode.value;
+  L.styleCode = sm === "" ? null : { value: text(f.styleCode.value), visible: sm === "visible" };
+  const mode = f.sizeMode.value;
+  const sys = f.sizeSystem.value || null;
+  if (mode === "") L.size = null;
+  else if (mode === "not_stated") L.size = { value: "not_stated", system: "unknown" };
+  else if (mode === "multiple") L.size = sys ? { value: "multiple", system: sys } : null;
+  else L.size = f.sizeValue.value && sys ? { value: Number(f.sizeValue.value), system: sys } : null;
+  L.conditionGrade = f.conditionGrade.value || null;
+  L.expectedVerdict = f.expectedVerdict.value || null;
+  const notes = f.notes.value.trim();
+  if (notes) L.notes = notes; else delete L.notes;
+}
+
+document.addEventListener("input", (e) => {
+  if (!e.target.closest?.("#form")) return;
+  syncDisabled();
+  readForm();
+  touch();
+});
+document.addEventListener("change", (e) => {
+  if (!e.target.closest?.("#form")) return;
+  syncDisabled();
+  readForm();
+  touch();
+});
+
+/** Problems the schema can't see (a half-filled size, a visible style code with no value). */
+function formWarnings() {
+  const f = $("#form");
+  const w = [];
+  if (f.sizeMode.value === "single" && (!f.sizeValue.value || !f.sizeSystem.value)) w.push("Size: give the size and its system (or “System not stated”).");
+  if (f.sizeMode.value === "multiple" && !f.sizeSystem.value) w.push("Size: choose the size menu's system (or “System not stated”).");
+  if (f.styleMode.value === "visible" && !f.styleCode.value.trim()) w.push("Style code: type the code you can see, or choose “Not visible”.");
+  for (const [k, list] of Object.entries(S.label.defects ?? {})) list.forEach((d, j) => !d.severity && w.push(`Photo ${k}, box ${j + 1}: choose a severity.`));
+  return w;
+}
+
+function renderMissing() {
+  const L = S.label;
+  const req = ["identifiable", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"];
+  const miss = req.filter((k) => L[k] === null && !(L.identifiable === false && (k === "model" || k === "version")));
+  const el = $("#missing");
+  if (el) el.textContent = miss.length ? `Still missing: ${miss.join(", ")}` : "All required fields filled.";
+}
+
+async function save() {
+  readForm();
+  const warn = formWarnings();
+  $("#errors").textContent = warn.join("\n");
+  if (warn.length) {
+    status("Not saved: fix the fields below", "bad");
+    return;
+  }
+  const r = await api(`/api/cases/${encodeURIComponent(S.view.id)}/label`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(S.label) });
+  if (!r.ok) {
+    $("#errors").textContent = r.errors.join("\n");
+    status("Not saved: the label doesn't pass the eval schema", "bad");
+    return;
+  }
+  S.dirty = false;
+  S.view.label = structuredClone(S.label);
+  status(r.complete ? "Saved ✓ case complete" : `Saved ✓ still missing: ${r.missing.join(", ")}`, "ok");
+  loadList();
+}
+
+// ---------- listing text ----------
+
+function renderListing() {
+  const l = S.view.listing;
+  const rows = [];
+  if (l) {
+    for (const [k, v] of Object.entries(l)) {
+      if (v && typeof v === "object" && "value" in v && "source" in v) rows.push([k, v.value, v.source + (v.foundIn ? `, ${v.foundIn}` : "") + (v.quote ? `: “${v.quote}”` : "")]);
+      else if (k === "itemSpecifics") v.forEach((s) => rows.push([`item specific: ${s.label}`, s.value, ""]));
+      else if (k === "sizeOptions") rows.push([`size options (${v.label})`, v.options.map((o) => o.value + (o.outOfStock ? " (out of stock)" : "")).join(", "), `${v.system}, ${v.source}`]);
+      else if (k === "sellerPrice") rows.push(["seller's price", `${v.amount} ${v.currency}`, ""]);
+      else if (k === "photos") rows.push(["photos", `${v.captured} captured${v.shown != null ? ` of ${v.shown} shown` : ""}`, ""]);
+      else if (k === "notes") rows.push(["notes", v.join("; "), ""]);
+      else rows.push([k, typeof v === "object" ? JSON.stringify(v) : String(v), ""]);
+    }
+  }
+  $("#fields").innerHTML = rows.length
+    ? `<table class="fields">${rows.map(([k, v, s]) => `<tr><td>${esc(pretty(k))}</td><td>${esc(v)}${s ? `<div class="src">${esc(s)}</div>` : ""}</td></tr>`).join("")}</table>`
+    : `<p class="hint">No structured fields were captured for this case: page text only.</p>`;
+  renderText("");
+  $("#find").oninput = (e) => renderText(e.target.value);
+}
+
+function renderText(q) {
+  const t = S.view.pageText || "(no page text)";
+  if (!q.trim()) {
+    $("#pageText").textContent = t;
+    $("#findCount").textContent = "";
+    return;
+  }
+  let n = 0;
+  $("#pageText").innerHTML = esc(t).replace(new RegExp(esc(q.trim()).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (m) => (n++, `<mark>${m}</mark>`));
+  $("#findCount").textContent = `${n} match${n === 1 ? "" : "es"}`;
+  $("#pageText").querySelector("mark")?.scrollIntoView({ block: "center" });
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if (S.dirty) e.preventDefault();
+});
+
+(async () => {
+  OPTIONS = await api("/api/options");
+  await loadList();
+  const id = decodeURIComponent(location.hash.slice(1));
+  if (id && LIST.cases.some((c) => c.id === id)) openCase(id);
+})();
+</script>
+</body>
+</html>

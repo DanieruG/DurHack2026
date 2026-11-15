@@ -4,6 +4,12 @@ Each folder in `eval/listings/` is one real listing: `capture.json` (the page te
 card facts), the listing's photos `photo-01`, `photo-02`, … in the order Sleuth sees them, and `label.json`, which you
 fill in.
 
+**Use the labelling tool:** `npm run label`, then open http://127.0.0.1:4870. It lists every case with what's still
+missing; for each case it shows the photos one at a time (drag a box around each defect, pick its type and severity),
+the label form, and the page text with the listing's structured fields alongside. Save writes the case's `label.json`,
+checked against the eval schema. It never shows Sleuth's answers for a case, and it never shows `offerColours` (those
+name the offers Sleuth found); edit that field by hand in `label.json` if you need it.
+
 **Label what you see, before looking at what Sleuth said.** Read the page text in `capture.json`, open the listing URL
 if it's still live, and look at every photo. Never copy a label from Sleuth's output or a report, and don't guess:
 leave a field `null` when you can't tell. A `null` field leaves that case out of that one figure, and the report says
@@ -22,9 +28,9 @@ brand sizes, priorities "all-day comfort", light wear accepted (`EVAL_PROFILE` i
 | `version` | The version, or `"none"` if the model has no versions. Leave `null` when `identifiable` is `false`. | `"40"`, `"95"`, `"none"` |
 | `styleCode` | The style code if you know it, and whether it can be read in the photos or text (`visible`). `{ "value": null, "visible": false }` when there's none to read. | `{ "value": "FV6603-101", "visible": true }` |
 | `colourway` | The shoe's broad colours, main colour first, from: black, white, grey, navy, blue, red, green, brown, beige, pink, purple, orange, yellow. | `["white", "grey"]` |
-| `size` | The size as the listing states it, and its system: `UK`, `US`, `EU`, or `unknown` if the listing doesn't say. A listing that offers several sizes: `"value": "multiple"`. | `{ "value": 9, "system": "UK" }` |
+| `size` | The size as the listing states it, and its system: `UK`, `US`, `EU`, or `unknown` if the listing doesn't say. A listing that offers several sizes: `"value": "multiple"`. A listing that gives no size at all: `{ "value": "not_stated", "system": "unknown" }`. | `{ "value": 9, "system": "UK" }` |
 | `conditionGrade` | `new_with_tags`, `like_new`, `good` or `worn`, from the photos and description. | `"good"` |
-| `defects` | Defects you can see, per photo you checked (see below). | `{ "3": [{ "label": "heel_wear", "box2d": [520, 610, 760, 900] }], "4": [] }` |
+| `defects` | Defects you can see, per photo you checked (see below), each with a severity: `minor`, `moderate` or `major`. | `{ "3": [{ "label": "heel_wear", "severity": "minor", "box2d": [520, 610, 760, 900] }], "4": [] }` |
 | `offerColours` | Optional. New-price offers whose colour you checked by eye against the listing, by URL. | `[{ "url": "https://…", "colourMatch": "same" }]` |
 | `expectedVerdict` | Optional. The verdict you'd expect: `hidden_gem`, `worth_a_look`, `proceed_with_caution`, `wrong_fit`, `overpriced`, `not_enough_evidence`. | `"worth_a_look"` |
 | `notes` | Optional. Anything odd about the case. | |
@@ -36,8 +42,8 @@ you check, add its number (photo-03 is `"3"`) with a list of defects; `[]` means
 `outsole_wear`, `heel_wear`, `upper_creasing`, `stitching_damage`, `discolouration`, `tear_or_hole`, `sole_separation`,
 `dirt_or_staining`.
 
-A box is `[ymin, xmin, ymax, xmax]` on a 0–1000 scale of the photo's height and width (top left is `[0, 0, …]`). To
-measure one: open the photo in Preview, Tools > Show Inspector, drag a selection around the defect, and read its pixel
+A box is `[ymin, xmin, ymax, xmax]` on a 0–1000 scale of the photo's height and width (top left is `[0, 0, …]`), the
+same format Gemini uses. The labelling tool measures it for you. To measure one by hand: open the photo in Preview, Tools > Show Inspector, drag a selection around the defect, and read its pixel
 position and size; then `y × 1000 ÷ photo height` and `x × 1000 ÷ photo width`. A box Sleuth reports counts as finding
 your defect when the two overlap by at least 0.3 (intersection over union), so it doesn't need to be tight.
 

@@ -101,6 +101,8 @@ export function matchBoxes(marked: Box2d[], found: Box2d[], threshold = OVERLAP_
 
 /** Did Sleuth read the listing's size as labelled: same value and system, "unknown" when it isn't stated, or a size menu? */
 export function sizeAgrees(run: CaseRun["size"], label: NonNullable<CaseRun["label"]["size"]>): boolean {
+  // No size on the listing: right only when nothing was read as one.
+  if (label.value === "not_stated") return !run.options && !parseSizeText(run.text ?? undefined, undefined);
   if (label.value === "multiple") return !!run.options && (label.system === "unknown" ? run.options.system === "unknown" : run.options.system === label.system);
   const parsed = parseSizeText(run.text ?? undefined, run.system && run.system !== "unknown" ? (run.system as "UK") : undefined);
   if (!parsed) return false;
