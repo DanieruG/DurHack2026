@@ -29,6 +29,8 @@ export function Button(props: {
   type?: "button" | "submit";
   wide?: boolean;
   small?: boolean;
+  /** Accessible name, when the visible text alone is ambiguous (several "Investigate" buttons). */
+  label?: string;
   children: ReactNode;
 }) {
   const { kind = "primary", wide, small } = props;
@@ -38,6 +40,7 @@ export function Button(props: {
       className={`btn btn-${kind}${wide ? " btn-wide" : ""}${small ? " btn-small" : ""}`}
       onClick={props.onClick}
       disabled={props.disabled}
+      aria-label={props.label}
     >
       {props.children}
     </button>

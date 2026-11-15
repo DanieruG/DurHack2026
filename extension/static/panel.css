@@ -371,6 +371,24 @@ a.offer:hover .offer-title { text-decoration: underline; text-decoration-color: 
 .offers-slot { margin-top: 26px; min-height: 392px; }
 .offers-slot .offers { margin-top: 10px; }
 
+/* ---------- "Worth looking at": the same card, with Investigate; the title link stretches over the whole card ---------- */
+.alts { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.alts > .offers-note { margin-top: 6px; }
+.alts .offers { margin-top: 8px; }
+.offer-has-action { position: relative; }
+.offer-has-action:hover { box-shadow: inset 0 0 0 1px var(--mid); }
+.offer-has-action:hover .offer-title { text-decoration: underline; text-decoration-color: var(--mid); text-underline-offset: 3px; }
+.offer-link { color: inherit; text-decoration: none; }
+.offer-link::after { content: ""; position: absolute; inset: 0; }
+.offer-link:focus-visible { outline: none; }
+.offer-has-action:has(.offer-link:focus-visible) { outline: 2px solid var(--text); outline-offset: 2px; }
+.offer-has-action .btn { position: relative; z-index: 1; white-space: nowrap; }
+.alt { height: auto; min-height: 88px; padding: 10px 12px 10px 10px; align-items: start; }
+.alt .offer-thumb { margin-top: 2px; }
+.alt .offer-retailer, .alt .offer-diff { white-space: normal; }
+.offer-tags { font-size: 12px; color: var(--muted); }
+.alt .flag { color: var(--text); }
+
 .add { margin-top: 34px; padding-top: 26px; border-top: 1px solid var(--line); }
 .add .h2 { margin-bottom: 18px; }
 .add-sources { display: flex; gap: 22px; margin-top: 12px; }
@@ -418,8 +436,3 @@ a.offer:hover .offer-title { text-decoration: underline; text-decoration-color: 
 .survey-summary { font-size: 15px; font-weight: 500; }
 .survey-storage { text-align: center; margin-top: 10px; }
 .observed { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
-.observed-sub { font-size: 13px; font-weight: 600; margin: 14px 0 8px; }
-.suggestion .offer-side .btn { white-space: nowrap; }
-.suggestion .flag { color: var(--text); }
-.suggestion { height: auto; min-height: 88px; padding: 10px 12px 10px 10px; }
-.suggestion .offer-diff, .suggestion .offer-retailer { white-space: normal; }

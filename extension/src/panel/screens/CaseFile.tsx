@@ -3,13 +3,11 @@ import type { CaseDetail } from "@/schemas/api";
 import type { CheckName, CheckResult } from "@/schemas/domain";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
-import { conditionView, evidenceLines, leadsView, observedView, priceView, sourceRefs, suggestionLabel, suggestionSize, type ConditionView, type ObservedView, type SourceRef } from "../../lib/evidence";
-import type { ObservedSuggestion } from "@/schemas/domain";
-import { safeThumbnail } from "../../lib/offers";
+import { conditionView, evidenceLines, leadsView, observedView, priceView, sourceRefs, type ConditionView, type ObservedView, type SourceRef } from "../../lib/evidence";
 import { Button, CopyButton, Label, Notice, StatusMark, Tags, Verdict } from "../ui";
 import { checkTags, runTotals } from "../../lib/tags";
 import { BUY_NEW_MOVE_ID } from "../../lib/offers";
-import { OfferCards } from "../offers";
+import { AlternativeCards, OfferCards } from "../offers";
 
 const ORDER: CheckName[] = ["condition", "fit", "comfort", "price"];
 
@@ -233,8 +231,9 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
               {l}
             </p>
           ))}
-          <ObservedExhibit view={observedView(detail.observedComparison)} onInvestigate={onInvestigateListing} />
+          <ObservedExhibit view={observedView(detail.observedComparison)} />
           {detail.newOffers && <OfferCards data={detail.newOffers} />}
+          <AlternativeCards data={detail.observedAlternatives} onInvestigate={onInvestigateListing} />
           {sourceRefs(check).length > 0 && <SourceList refs={sourceRefs(check)} />}
         </>
       );
@@ -252,8 +251,8 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
   }
 }
 
-/** The user's own search survey, inside the Price exhibit: what it was compared with, and up to 2 cheaper exact matches. */
-function ObservedExhibit({ view, onInvestigate }: { view: ObservedView | null; onInvestigate?: (url: string) => void }) {
+/** The user's own search survey, inside the Price exhibit: what it was compared with (its cheaper listings are under "Worth looking at"). */
+function ObservedExhibit({ view }: { view: ObservedView | null }) {
   if (!view) return null;
   return (
     <div className="observed" aria-label="Your search">
@@ -264,50 +263,6 @@ function ObservedExhibit({ view, onInvestigate }: { view: ObservedView | null; o
         </p>
       ))}
       <p className="note dim">{view.counts}</p>
-      {view.suggestions.length > 0 && (
-        <>
-          <p className="observed-sub">Cheaper in your search</p>
-          <ul className="offer-list" aria-label="Cheaper similar listings from your search">
-            {view.suggestions.map((s) => (
-              <li key={s.id}>
-                <SuggestionCard s={s} onInvestigate={onInvestigate} />
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
-  );
-}
-
-function SuggestionCard({ s, onInvestigate }: { s: ObservedSuggestion; onInvestigate?: (url: string) => void }) {
-  const [failed, setFailed] = useState(false);
-  const thumb = safeThumbnail(s.thumbnailUrl);
-  return (
-    <div className="offer suggestion" aria-label={suggestionLabel(s)}>
-      {thumb && !failed ? (
-        <span className="offer-thumb" aria-hidden="true">
-          <img src={thumb} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} />
-        </span>
-      ) : (
-        <span className="offer-thumb offer-thumb-none" aria-hidden="true" />
-      )}
-      <span className="offer-text">
-        <span className="offer-title">{s.title}</span>
-        <span className="offer-retailer">
-          {PLATFORM_NAMES[s.platform]} · <span className={s.sizeNotStated ? "flag" : ""}>{suggestionSize(s)}</span>
-          {s.sponsored && <span className="flag"> · Sponsored</span>}
-        </span>
-        <span className="offer-diff">{gbp(s.savingGBP)} cheaper · Not investigated yet</span>
-      </span>
-      <span className="offer-side">
-        <span className="offer-price">{gbp(s.priceGBP)}</span>
-        {onInvestigate && (
-          <Button kind="secondary" small onClick={() => onInvestigate(s.url)}>
-            Investigate
-          </Button>
-        )}
-      </span>
     </div>
   );
 }

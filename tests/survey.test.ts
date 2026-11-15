@@ -21,7 +21,7 @@ import {
   type SurveyCard,
   type SurveyRecord,
 } from "@/extension/src/lib/survey";
-import { observedView, suggestionLabel, suggestionSize } from "@/extension/src/lib/evidence";
+import { observedView } from "@/extension/src/lib/evidence";
 import { OBSERVED } from "@/extension/src/preview/fixtures";
 import { ObservedListingSchema } from "@/schemas/domain";
 
@@ -238,14 +238,11 @@ describe("survey summary", () => {
 });
 
 describe("Price exhibit: your search", () => {
-  it("explains the comparison, counts and suggestions", () => {
+  it("explains the comparison and counts", () => {
     const v = observedView(OBSERVED)!;
     expect(v.lines[0]).toBe("6 similar listings seen, £28 to £55 (4 exact, 2 not stating the version) in your search for “nike pegasus 40” on 14 Nov. Too few exact matches to compare the price with.");
     expect(v.lines).toContain("Vinted prices without the buyer protection fee.");
     expect(v.counts).toBe("Surveyed 21 listings: 4 exact, 2 not stating the version, 6 other versions, 9 not this model.");
-    expect(v.suggestions).toHaveLength(2);
-    expect(suggestionSize(OBSERVED.suggestions[1])).toBe("Size not stated");
-    expect(suggestionLabel(OBSERVED.suggestions[1])).toBe("Pegasus 40 running shoes Nike, £34, £8 cheaper, Vinted, Size not stated, sponsored, not investigated yet");
     expect(observedView({ ...OBSERVED, note: "Couldn't compare: model unknown.", context: null })!.lines[0]).toBe("Couldn't compare: model unknown.");
     expect(observedView({ ...OBSERVED, stats: { n: 8, excluded: 0, median: 40, p10: 30, p25: 35, p75: 45, p90: 50 }, source: "observed_listings" })!.lines[0]).toBe(
       "Compared with 8 listings from your search for “nike pegasus 40” on 14 Nov: median £40, middle half £35–£45.",

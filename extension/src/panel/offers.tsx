@@ -1,7 +1,9 @@
-import { useState } from "react";
-import type { NewOffer, NewOffers } from "@/schemas/domain";
-import { gbp } from "../lib/format";
+import { useState, type ReactNode } from "react";
+import type { NewOffer, NewOffers, ObservedAlternative, ObservedAlternatives } from "@/schemas/domain";
+import { gbp, PLATFORM_NAMES } from "../lib/format";
 import { colourLabel, differenceText, notEnoughLine, offerLabel, offersFootnote, OFFERS_SHOWN, openableOffers, safeHref, safeThumbnail } from "../lib/offers";
+import { alternativeLabel, alternativesView, ALTERNATIVES_TITLE, alternativeTags, basisLabel, sizeLabel } from "../lib/alternatives";
+import { Button, Label } from "./ui";
 
 /** Product thumbnail, or a plain block when there is none or it fails to load. */
 function OfferThumb({ url }: { url?: string }) {
@@ -15,24 +17,150 @@ function OfferThumb({ url }: { url?: string }) {
   );
 }
 
+/**
+ * The card both new-price offers and surveyed listings use: thumbnail, a two-line title, where it's from, the difference
+ * from this listing, then the price column. The whole card opens `href` in a new tab. Without an action the card is
+ * itself the one link; with one (Investigate) the title link is stretched over the card and the button sits above it,
+ * so there is still exactly one link and no control inside a link.
+ */
+export function ListingCard(props: {
+  href: string;
+  label: string;
+  thumbnailUrl?: string;
+  title: string;
+  source: ReactNode;
+  difference: string;
+  extra?: ReactNode;
+  side: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  const body = (
+    <>
+      <OfferThumb url={props.thumbnailUrl} />
+      <span className="offer-text">
+        {props.action ? (
+          <a className="offer-title offer-link" href={props.href} target="_blank" rel="noopener noreferrer" aria-label={props.label}>
+            {props.title}
+          </a>
+        ) : (
+          <span className="offer-title">{props.title}</span>
+        )}
+        <span className="offer-retailer">{props.source}</span>
+        <span className="offer-diff">{props.difference}</span>
+        {props.extra}
+      </span>
+      <span className="offer-side">
+        {props.side}
+        {props.action}
+      </span>
+    </>
+  );
+  const cls = `offer${props.className ? ` ${props.className}` : ""}`;
+  return props.action ? (
+    <div className={`${cls} offer-has-action`}>{body}</div>
+  ) : (
+    <a className={cls} href={props.href} target="_blank" rel="noopener noreferrer" aria-label={props.label}>
+      {body}
+    </a>
+  );
+}
+
 /** One retailer offer: the whole card is a single link to the retailer page, opening in a new tab. */
 function OfferCard({ offer: o }: { offer: NewOffer }) {
   return (
-    <a className="offer" href={safeHref(o.url)!} target="_blank" rel="noopener noreferrer" aria-label={offerLabel(o)}>
-      <OfferThumb url={o.thumbnailUrl} />
-      <span className="offer-text">
-        <span className="offer-title">{o.title}</span>
-        <span className="offer-retailer">{o.retailer}</span>
-        <span className="offer-diff">{differenceText(o.differenceGBP)}</span>
-      </span>
-      <span className="offer-side">
-        <span className="offer-price">{gbp(o.priceGBP)}</span>
-        <span className={`offer-colour offer-colour-${o.colourMatch ?? "unknown"}`} title={o.colourEvidence}>
-          {colourLabel(o)}
+    <ListingCard
+      href={safeHref(o.url)!}
+      label={offerLabel(o)}
+      thumbnailUrl={o.thumbnailUrl}
+      title={o.title}
+      source={o.retailer}
+      difference={differenceText(o.differenceGBP)}
+      side={
+        <>
+          <span className="offer-price">{gbp(o.priceGBP)}</span>
+          <span className={`offer-colour offer-colour-${o.colourMatch ?? "unknown"}`} title={o.colourEvidence}>
+            {colourLabel(o)}
+          </span>
+          {o.isLowest && <span className="tag offer-lowest">Lowest</span>}
+        </>
+      }
+    />
+  );
+}
+
+/** One cheaper listing from the user's survey: opens the listing in a new tab; Investigate opens it and investigates it. */
+function AlternativeCard({ alt: a, onInvestigate }: { alt: ObservedAlternative; onInvestigate?: (url: string) => void }) {
+  const size = sizeLabel(a);
+  const href = safeHref(a.url)!;
+  return (
+    <ListingCard
+      className="alt"
+      href={href}
+      label={alternativeLabel(a)}
+      thumbnailUrl={a.thumbnailUrl}
+      title={a.title}
+      source={
+        <>
+          {PLATFORM_NAMES[a.platform]} · <span className={size.flag ? "flag" : ""}>{size.text}</span>
+        </>
+      }
+      difference={differenceText(a.differenceGBP)}
+      extra={
+        <span className="offer-tags">
+          {alternativeTags(a).map((t, i) => (
+            <span key={t.text} className={t.flag ? "flag" : ""}>
+              {i > 0 ? " · " : ""}
+              {t.text}
+            </span>
+          ))}
         </span>
-        {o.isLowest && <span className="tag offer-lowest">Lowest</span>}
-      </span>
-    </a>
+      }
+      side={
+        <>
+          <span className="offer-price">{gbp(a.priceGBP)}</span>
+          <span className="offer-colour">{basisLabel(a)}</span>
+        </>
+      }
+      action={
+        <Button kind="secondary" small label={`Investigate ${a.title}`} onClick={() => onInvestigate ? onInvestigate(href) : window.open(href, "_blank", "noopener")}>
+          Investigate
+        </Button>
+      }
+    />
+  );
+}
+
+/**
+ * "Worth looking at", under the Price exhibit: cheaper listings from the user's own survey, three cards then "Show all",
+ * and the line saying where they came from. One quiet line instead when there was no survey, or nothing qualified.
+ */
+export function AlternativeCards({ data, onInvestigate }: { data: ObservedAlternatives | null | undefined; onInvestigate?: (url: string) => void }) {
+  const [all, setAll] = useState(false);
+  const view = alternativesView(data);
+  return (
+    <section className="alts" aria-label={ALTERNATIVES_TITLE}>
+      <Label>{ALTERNATIVES_TITLE}</Label>
+      {view.kind === "empty" ? (
+        <p className="offers-note dim">{view.line}</p>
+      ) : (
+        <div className="offers">
+          <ul className="offer-list" aria-label="Cheaper listings from your search">
+            {(all ? view.alternatives : view.alternatives.slice(0, OFFERS_SHOWN)).map((a) => (
+              <li key={a.listingId}>
+                <AlternativeCard alt={a} onInvestigate={onInvestigate} />
+              </li>
+            ))}
+          </ul>
+          {view.alternatives.length > OFFERS_SHOWN && (
+            <button type="button" className="btn btn-text offers-more" aria-expanded={all} onClick={() => setAll((x) => !x)}>
+              {all ? "Show fewer" : `Show all ${view.alternatives.length}`}
+            </button>
+          )}
+          {view.footnote && <p className="offers-note dim">{view.footnote}</p>}
+        </div>
+      )}
+    </section>
   );
 }
 

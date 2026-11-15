@@ -1,5 +1,5 @@
 import type { CaseDetail } from "@/schemas/api";
-import type { CheckResult, ConditionFinding, DefectLabel, Evidence, Lead, ObservedComparison, ObservedSuggestion, SampleStats } from "@/schemas/domain";
+import type { CheckResult, ConditionFinding, DefectLabel, Evidence, Lead, ObservedComparison, SampleStats } from "@/schemas/domain";
 import { domainOf, gbp, PLATFORM_NAMES, shortDate } from "./format";
 
 const DEFECT_WORDS: Record<DefectLabel, string> = {
@@ -134,11 +134,11 @@ export function priceView(check: CheckResult): PriceView {
 
 // ---------- the user's search survey (Price exhibit) ----------
 
-export type ObservedView = { lines: string[]; counts: string; suggestions: ObservedSuggestion[] };
+export type ObservedView = { lines: string[]; counts: string };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** What the Price exhibit says about the user's search survey: the comparison used (or why not), counts, suggestions. */
+/** What the Price exhibit says about the user's search survey: the comparison used (or why not), and counts. */
 export function observedView(c: ObservedComparison | null | undefined): ObservedView | null {
   if (!c) return null;
   const q = c.searchQuery ? ` for “${c.searchQuery}”` : "";
@@ -161,19 +161,7 @@ export function observedView(c: ObservedComparison | null | undefined): Observed
   ].filter(Boolean);
   const left = [k.auctionsExcluded ? plural(k.auctionsExcluded, "auction") : null, k.unpricedExcluded ? `${k.unpricedExcluded} without a £ price` : null].filter(Boolean);
   const counts = `Surveyed ${plural(k.surveyed, "listing")}: ${parts.join(", ")}${left.length ? ` (left out: ${left.join(", ")})` : ""}.`;
-  return { lines, counts, suggestions: c.suggestions };
-}
-
-/** "UK 9", or "Size not stated". */
-export function suggestionSize(s: ObservedSuggestion): string {
-  return s.sizeLabel ?? "Size not stated";
-}
-
-/** The card's accessible summary. */
-export function suggestionLabel(s: ObservedSuggestion): string {
-  return [s.title, gbp(s.priceGBP), `${gbp(s.savingGBP)} cheaper`, PLATFORM_NAMES[s.platform], suggestionSize(s), s.sponsored ? "sponsored" : null, "not investigated yet"]
-    .filter(Boolean)
-    .join(", ");
+  return { lines, counts };
 }
 
 /** Fit and identity evidence is already worded by the backend ("Your saved Nike size: UK 9"). */
