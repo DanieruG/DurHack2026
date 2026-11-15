@@ -11,6 +11,7 @@ import { sniffImageMime, type StoredImage } from "@/lib/images";
 import { createGeminiClient, createLiveTransport, type GeminiClient } from "@/gemini/client";
 import { createNewPriceClient, type NewPriceClient } from "@/lib/newPrices";
 import { createWebSearchClient, type WebSearchClient } from "@/lib/webSearch";
+import { createLensClient, type LensClient } from "@/lib/lens";
 import { EventHub } from "./events";
 
 export type Deps = {
@@ -21,6 +22,8 @@ export type Deps = {
   newPrices: NewPriceClient;
   /** SerpApi web search for comfort reviews, cached in CacheEntry for 7 days. */
   webSearch: WebSearchClient;
+  /** Google Lens visual matches (SerpApi), for listings whose model isn't clear. */
+  lens: LensClient;
   hub: EventHub;
   fetchImage: ImageFetcher;
   /** Catalogue reference images (data/images/catalogue/<file>). */
@@ -75,6 +78,7 @@ async function buildDefaultDeps(): Promise<Deps> {
     gemini: createGeminiClient({ config, transport: createLiveTransport(config.geminiApiKey), cache }),
     newPrices: createNewPriceClient({ apiKey: config.shoppingApiKey, mode: config.cacheMode, store }),
     webSearch: createWebSearchClient({ apiKey: config.shoppingApiKey, mode: config.cacheMode, store }),
+    lens: createLensClient({ apiKey: config.shoppingApiKey, mode: config.cacheMode, store }),
     hub: new EventHub(),
     fetchImage: cachedFetcher((url) => safeFetchImage(url, { maxBytes: config.maxImageBytes }), cache),
     readReferenceImage: readReferenceImageFromDisk,

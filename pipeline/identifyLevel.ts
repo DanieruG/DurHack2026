@@ -44,6 +44,14 @@ function photosConflict(result: IdentifyResult): boolean {
   return !(a === b || a.includes(b) || b.includes(a));
 }
 
+/** Do the listing's own title and model field name this model (with its version)? The page's "similar items" etc. don't count. */
+export function listingNamesModel(result: IdentifyResult, facts: ListingFacts, catalogue: CatalogueModel[]): boolean {
+  const cat = result.catalogueModelId ? catalogue.find((m) => m.id === result.catalogueModelId) : undefined;
+  const name = fullModelName(result.modelName, result.bestGuess?.version);
+  const listingText = [facts.title, facts.modelText].filter(Boolean).join("\n");
+  return (name ? [name, ...(cat ? [cat.name, ...cat.aliases] : [])] : []).some((n) => titleMatchesModel(listingText, "", n));
+}
+
 /**
  * The best guess and level for a result, once the listing's facts are known. Keeps Flash/Pro disagreement
  * (`proDisagrees`) and a user's confirmation as they are.
@@ -53,17 +61,12 @@ export function withLevel(
   args: { facts: ListingFacts; pageText: string; catalogue: CatalogueModel[]; proDisagrees?: boolean },
 ): IdentifyResult {
   if (result.confidenceLevel === "user_confirmed") return result;
-  const cat = result.catalogueModelId ? args.catalogue.find((m) => m.id === result.catalogueModelId) : undefined;
   const name = fullModelName(result.modelName, result.bestGuess?.version);
-  const listingText = [args.facts.title, args.facts.modelText].filter(Boolean).join("\n");
-  const names = name ? [name, ...(cat ? [cat.name, ...cat.aliases] : [])] : [];
-  // The page text also holds "similar items" etc., so only the listing's own title and model field count as it naming the model.
-  const listingNamesModel = names.some((n) => titleMatchesModel(listingText, "", n));
   const confidenceLevel = assignLevel({
     confidence: result.confidence,
     hasModel: !!name,
     styleCodeRead: !!args.facts.styleCode,
-    listingNamesModel,
+    listingNamesModel: listingNamesModel(result, args.facts, args.catalogue),
     conflicting: photosConflict(result),
     proDisagrees: args.proDisagrees ?? false,
   });

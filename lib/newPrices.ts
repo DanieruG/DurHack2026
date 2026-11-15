@@ -3,6 +3,7 @@ import type { CacheMode } from "./cache";
 import type { Store } from "./store";
 import type { NewOffer, NewOffers } from "@/schemas/domain";
 import { hasStyleCode } from "./colourWords";
+import { recordSerpCall } from "./serpQuota";
 
 /**
  * Current new retail prices from Google Shopping (SerpApi), UK results in GBP.
@@ -350,7 +351,7 @@ export function createNewPriceClient(opts: NewPriceClientOptions): NewPriceClien
     if (opts.mode === "replay") throw new ShoppingError(`replay mode: no cached Shopping response for "${query}"`);
     const started = Date.now();
     const results = await live(query);
-    log(`[shopping] provider=${SHOPPING_PROVIDER} q="${query}" gl=${SHOPPING_GL} raw=${results.length} kept=${filterOffers(results, filterArgs).length} ${Date.now() - started}ms`);
+    log(`[shopping] provider=${SHOPPING_PROVIDER} q="${query}" gl=${SHOPPING_GL} raw=${results.length} kept=${filterOffers(results, filterArgs).length} ${Date.now() - started}ms ${recordSerpCall("shopping")}`);
     try {
       await opts.store?.cacheSet(key, { fetchedAt: now().toISOString(), results } satisfies CachedResponse);
     } catch {

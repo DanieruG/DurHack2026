@@ -93,6 +93,7 @@ const STAGE_TEXT: Partial<Record<string, string>> = {
   comfort: "Reading reviews",
   condition: "Inspecting photos",
   version_check: "Checking the exact version",
+  lens: "Checking visual matches",
   leads: "Deciding what to follow up",
   verdict: "Weighing the evidence",
   reopen: "Reading the new evidence",

@@ -12,6 +12,7 @@ import { scopeListingImages } from "@/lib/listingScope";
 import { finalise, instrumented, loadImages, loadPageText, saveSurvey } from "./core";
 import { guardSearchHint } from "./identify";
 import { withLevel } from "./identifyLevel";
+import { runLens, shouldRunLens } from "./lens";
 import { prepareSurvey, sanitiseQuery, type Survey } from "@/lib/observed";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
 import { factsFromPageOnly, mergeListingFacts, redactListingData } from "./listingData";
@@ -132,6 +133,16 @@ export async function runInvestigation(
       identifyCheck = toIdentifyCheck(ctx, ctx.identify);
     }
     emit("check_done", identifyCheck);
+
+    // Vague listing or low confidence: Google Lens visual matches, then identify again with them as evidence.
+    if (shouldRunLens(ctx.identify, ctx.facts, ref.catalogue)) {
+      const before = ctx.identify;
+      ctx.identify = await runLens(ctx, ctx.identify!);
+      if (ctx.identify !== before) {
+        identifyCheck = { ...toIdentifyCheck(ctx, ctx.identify), usage: identifyCheck.usage };
+        emit("check_done", identifyCheck);
+      }
+    }
 
     // A model read only from the photos is checked by Gemini Pro. Fit and condition (which don't need the exact model) run
     // meanwhile; price and comfort wait for Pro's answer, because it can change the model they search for.

@@ -4,6 +4,7 @@ import { testConfig, type Config } from "@/lib/config";
 import type { CacheMode } from "@/lib/cache";
 import { createNewPriceClient, type RawShoppingResult } from "@/lib/newPrices";
 import { createWebSearchClient, type WebSearchFetch } from "@/lib/webSearch";
+import { createLensClient } from "@/lib/lens";
 import { MemoryStore } from "@/lib/store";
 import { RateLimiter } from "@/lib/rateLimit";
 import type { ReferenceData } from "@/lib/seedData";
@@ -153,7 +154,7 @@ export function happyHandlers(): Record<string, Handler> {
   };
 }
 
-export type Recorded = { calls: GenRequest[]; shoppingRequests: string[]; webSearchRequests: string[] };
+export type Recorded = { calls: GenRequest[]; shoppingRequests: string[]; webSearchRequests: string[]; lensRequests: string[] };
 
 /** Saved SerpApi google_shopping results (tests/fixtures/shopping/<name>.json). */
 export function shoppingFixture(name: string): RawShoppingResult[] {
@@ -204,6 +205,28 @@ export function fakeWebSearch(opts: { results?: unknown[]; fetch?: WebSearchFetc
   return { client, requests };
 }
 
+/**
+ * A real LensClient whose network is a stub: `byImage` maps an image URL to its visual matches (default: none). Every
+ * live request is recorded (the image URL only; there is no key in tests).
+ */
+export function fakeLens(byImage: Record<string, { title: string; source?: string; link: string }[]> = {}, opts: { mode?: CacheMode; store?: MemoryStore } = {}) {
+  const requests: string[] = [];
+  const client = createLensClient({
+    apiKey: "test-key",
+    mode: opts.mode ?? "off",
+    store: opts.store ?? new MemoryStore(fixtureReference()),
+    now: () => new Date("2026-11-14T12:00:00Z"),
+    logger: () => undefined,
+    retryBackoffMs: 1,
+    fetch: async (url) => {
+      const u = new URL(url);
+      requests.push(u.searchParams.get("url") ?? "");
+      return { ok: true, status: 200, json: async () => ({ visual_matches: byImage[u.searchParams.get("url") ?? ""] ?? [] }) };
+    },
+  });
+  return { client, requests };
+}
+
 export function makeDeps(
   opts: {
     handlers?: Record<string, Handler>;
@@ -212,10 +235,12 @@ export function makeDeps(
     images?: Record<string, Uint8Array>;
     shopping?: Record<string, RawShoppingResult[]>;
     webSearch?: Parameters<typeof fakeWebSearch>[0];
+    lens?: Parameters<typeof fakeLens>[0];
   } = {},
 ): Deps & Recorded {
   const shopping = fakeNewPrices(opts.shopping);
   const web = fakeWebSearch(opts.webSearch);
+  const lens = fakeLens(opts.lens);
   const handlers = { ...happyHandlers(), ...(opts.handlers ?? {}) };
   const calls: GenRequest[] = [];
   const config = testConfig(opts.config);
@@ -258,6 +283,8 @@ export function makeDeps(
     shoppingRequests: shopping.requests,
     webSearch: web.client,
     webSearchRequests: web.requests,
+    lens: lens.client,
+    lensRequests: lens.requests,
     hub: new EventHub(),
     fetchImage,
     readReferenceImage: async () => null,

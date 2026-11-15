@@ -1,6 +1,7 @@
 import { sha256 } from "./hash";
 import type { CacheMode } from "./cache";
 import type { Store } from "./store";
+import { recordSerpCall } from "./serpQuota";
 
 /**
  * Google web search via SerpApi (engine=google), UK results. Used by the comfort check instead of Gemini's built-in
@@ -152,7 +153,7 @@ export function createWebSearchClient(opts: WebSearchClientOptions): WebSearchCl
       if (opts.mode === "replay") throw new WebSearchError(`replay mode: no cached web search for "${query}"`);
       const started = Date.now();
       const results = await live(query, extra.signal);
-      log(`[websearch] provider=${WEB_SEARCH_PROVIDER} q="${query}" gl=${WEB_SEARCH_GL} results=${results.length} ${Date.now() - started}ms`);
+      log(`[websearch] provider=${WEB_SEARCH_PROVIDER} q="${query}" gl=${WEB_SEARCH_GL} results=${results.length} ${Date.now() - started}ms ${recordSerpCall("web")}`);
       // Cache only non-empty answers: an empty page is more likely a transient miss than the truth for a week.
       if (results.length) {
         try {

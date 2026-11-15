@@ -22,6 +22,7 @@ export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listi
 - catalogueModelId: ONLY when the pair is exactly one of the candidate catalogue ids given; otherwise null. A wrong id is far worse than none.
 - confidence: your probability (0-1) that modelName (and catalogueModelId, if set) is exactly right; 0 when modelName is null.
 - version: the version or edition if the listing or photos show it (e.g. "Essential", "OG", "GTX"), else null. colourway: the colourway name if shown, else null.
+- sideProfilePhotoIndex: the index of the listing photo that shows the shoe's side profile most clearly, or null.
 - alternatives: up to 2 other models this pair could be, most likely first, each with its own confidence and a short reason. Always suggest
   at least one model when the brand is known, even a poor guess: say so in confidence. Leave modelName null only when you can't suggest any model at all,
   and then give noModelReason.
@@ -84,6 +85,7 @@ export function identifyWireSchema(ids: string[]) {
     modelName: z.string().nullish(),
     version: z.string().nullish(),
     colourway: z.string().nullish(),
+    sideProfilePhotoIndex: z.number().int().nonnegative().nullish(),
     noModelReason: z.string().nullish(),
     alternatives: z
       .array(
@@ -246,9 +248,20 @@ export function toIdentifyResult(
     bestGuess: { brand: finalBrand, model: finalModel, version, colourway, confidence, evidence },
     alternatives,
     lensMatches: [],
+    ...(data.sideProfilePhotoIndex != null && data.sideProfilePhotoIndex < args.photoCount ? { sideProfilePhotoIndex: data.sideProfilePhotoIndex } : {}),
     ...(!finalModel && finalBrand ? { brandOnlyReason: data.noModelReason?.trim() || "Gemini couldn't suggest any model from this listing." } : {}),
     photoModel: data.photoModel && photoModelName ? { modelName: photoModelName, confidence: clamp01(data.photoModel.confidence) } : null,
   };
+}
+
+/** Lens matches for the prompt: clearly marked as visual matches, not facts about this listing. */
+export function visualMatchesText(matches: { title: string; source: string | null }[]): string {
+  return (
+    "VISUAL MATCHES from Google Lens (NOT facts about this listing): titles of other pages showing shoes that look like this pair. " +
+    "They can be a different model or version. Use them only to suggest candidates; never let them override a label, text or " +
+    "photo detail in this listing, and lower your confidence if they disagree with it.\n" +
+    matches.map((m, i) => `${i + 1}. ${m.title}${m.source ? ` (${m.source})` : ""}`).join("\n")
+  );
 }
 
 /**
@@ -266,6 +279,8 @@ export async function identifyProduct(
     /** Lead "recheck_identification" sends a single photo. */
     onlyPhotoIndex?: number;
     tier?: Tier;
+    /** Google Lens visual matches: other pages' titles for look-alike shoes. Evidence, never facts. */
+    visualMatches?: { title: string; source: string | null }[];
   },
 ): Promise<IdentifyResult> {
   const shortlist = identifyShortlist(args.facts, args.catalogue);
@@ -278,6 +293,7 @@ export async function identifyProduct(
         candidateList(shortlist),
     },
   ];
+  if (args.visualMatches?.length) parts.push({ text: visualMatchesText(args.visualMatches) });
   for (const p of photos) parts.push({ text: `Listing photo ${p.index}:` }, imagePart(p));
   parts.push(...(await referenceParts(shortlist, args.readReferenceImage)));
 

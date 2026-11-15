@@ -327,6 +327,10 @@ export const IdentifyResultSchema = z.object({
   brandOnlyReason: z.string().optional(),
   /** Google Lens visual matches used as extra evidence (never facts); also stored as `source` evidence with links. */
   lensMatches: z.array(z.object({ title: z.string(), source: z.string().nullable().default(null), url: z.string().optional() })).optional(),
+  /** The photo that shows the shoe's side profile most clearly (Google Lens searches it with the main photo). */
+  sideProfilePhotoIndex: z.number().int().nonnegative().optional(),
+  /** Google Lens: how many photos were searched, how many of those calls were live (spent quota), and whether it changed the best guess. */
+  lens: z.object({ photos: z.number().int(), live: z.number().int(), changedAnswer: z.boolean() }).optional(),
   /** Set when the user confirmed or corrected the identification. */
   userChoice: z.object({ choice: z.enum(["best_guess", "alternative", "custom", "skip"]), at: z.string() }).optional(),
   /** Recognised brand (catalogue casing when the brand is in the catalogue), or null. */

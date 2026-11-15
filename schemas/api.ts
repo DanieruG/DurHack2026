@@ -96,6 +96,7 @@ export const StageNameSchema = z.enum([
   "comfort",
   "condition",
   "version_check",
+  "lens",
   "leads",
   "verdict",
   "next_moves",
