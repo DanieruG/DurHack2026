@@ -49,6 +49,7 @@ describe("schemas round-trip fixtures", () => {
         checkedOn: "2026-11-14",
         enoughForComparison: false,
       },
+      observed_alternatives: { surveyUsed: false, platform: null, surveyedOn: null, alternatives: [] },
       lead_started: { id: "lead_1", type: "deeper_price_comparison", reason: "r", status: "pending" },
       lead_done: { id: "lead_1", type: "deeper_price_comparison", reason: "r", status: "done", outcome: "o" },
       leads_skipped: { reason: "Skipped: the review search was unavailable." },

@@ -100,7 +100,7 @@ describe("survey preparation", () => {
     const stored = toStoredSurvey(s, matchSurvey(s, peg40, nikeChart));
     expect(stored.counts).toEqual({ exact: 1, version_unknown: 1, different_version: 1, none: 2 });
     expect(stored.listings.map((l) => l.matchLevel)).toEqual(["exact", "version_unknown", "different_version"]);
-    expect(Object.keys(stored.listings[0]).sort()).toEqual(["id", "matchLevel", "priceGBP", "sponsored", "title", "url"]);
+    expect(Object.keys(stored.listings[0]).sort()).toEqual(["id", "matchLevel", "priceGBP", "seenOn", "sponsored", "title", "url"]);
     // Reopen re-matches the stored cards; the unmatched ones still count as none.
     const again = fromStoredSurvey(stored);
     expect(toStoredSurvey(again, matchSurvey(again, peg40, nikeChart)).counts).toEqual(stored.counts);

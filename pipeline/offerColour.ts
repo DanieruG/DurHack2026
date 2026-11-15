@@ -46,12 +46,15 @@ export function thumbnailColourMatch(a: ColourAnalysis, listing: ListingColour):
   return { match: "unknown", evidence };
 }
 
-/** Mark every offer's colour match (thumbnails only for offers the title couldn't settle). */
-export async function matchOfferColours(
-  offers: ShoppingOffer[],
+/**
+ * Mark every offer's colour match (thumbnails only for offers the title couldn't settle, the first MAX_THUMBNAILS in
+ * order). Also used for the user's surveyed listings ("Worth looking at"), with the same rules.
+ */
+export async function matchOfferColours<T extends { title: string; thumbnailUrl?: string }>(
+  offers: T[],
   listing: ListingColour | undefined,
   opts: { fetchThumbnail?: (url: string) => Promise<Uint8Array | null>; analyse?: typeof analyseColours } = {},
-): Promise<ShoppingOffer[]> {
+): Promise<(T & { colourMatch: ColourMatch; colourEvidence?: string })[]> {
   const analyse = opts.analyse ?? analyseColours;
   let thumbnails = 0;
   return Promise.all(

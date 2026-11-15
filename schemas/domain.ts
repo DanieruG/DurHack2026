@@ -564,5 +564,42 @@ export const ObservedComparisonSchema = z.object({
 });
 export type ObservedComparison = z.infer<typeof ObservedComparisonSchema>;
 
+/**
+ * A cheaper listing from the user's own survey worth a look ("Worth looking at" under the Price exhibit). Card facts
+ * only, never seller details. Not investigated: it matched on its title, size and colour, nothing more.
+ */
+export const ObservedAlternativeSchema = z.object({
+  listingId: z.string(),
+  title: z.string(),
+  priceGBP: z.number(),
+  /** total: both prices include buyer protection and postage. listed: listed prices, postage not included. */
+  priceBasis: z.enum(["total", "listed"]),
+  platform: PlatformSchema,
+  url: z.string(),
+  thumbnailUrl: z.string().optional(),
+  /** "UK 9" (or "US 9" when it couldn't be converted), or null when the card states no size. */
+  size: z.string().nullable(),
+  /** exact, or version_unknown ("Version not stated"). */
+  matchLevel: z.enum(["exact", "version_unknown"]),
+  /** same, or unknown ("Colour unclear"). A different colour is never an alternative. */
+  colourMatch: z.enum(["same", "unknown"]),
+  /** Alternative price minus listing price, on the same basis: always negative (cheaper). */
+  differenceGBP: z.number(),
+  /** When the user surveyed it (YYYY-MM-DD). */
+  observedOn: z.string(),
+});
+export type ObservedAlternative = z.infer<typeof ObservedAlternativeSchema>;
+
+export const ObservedAlternativesSchema = z.object({
+  /** False when the case was sent without a survey (alternatives is then empty). */
+  surveyUsed: z.boolean(),
+  /** The survey's platform and date, for "From your Vinted search on 14 Nov"; null without a survey. */
+  platform: PlatformSchema.nullable(),
+  surveyedOn: z.string().nullable(),
+  /** Exact matches before version-not-stated ones, then cheapest first. */
+  alternatives: z.array(ObservedAlternativeSchema),
+});
+export type ObservedAlternatives = z.infer<typeof ObservedAlternativesSchema>;
+
 export const FitMatchSchema = z.enum(["exact", "close", "mismatch", "estimated"]);
 export type FitMatch = z.infer<typeof FitMatchSchema>;

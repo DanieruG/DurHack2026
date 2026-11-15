@@ -13,7 +13,7 @@ import type { NewPrices } from "@/lib/newPrices";
 import { checkComfort } from "./checks/comfort";
 import { checkCondition } from "./checks/condition";
 import { plainError, runStage, today, unknownCheck, type StageStats } from "./util";
-import { familyComparison, FAMILY_CONFIDENCE_CAP, matchSurvey, modelUnknownComparison, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
+import { familyComparison, FAMILY_CONFIDENCE_CAP, matchSurvey, modelUnknownComparison, noAlternatives, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
 import { catalogueTokens, deriveTokens, type ModelTokens } from "@/lib/titleMatch";
 import { matchOfferColours } from "./offerColour";
 
@@ -124,7 +124,10 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
   if (name === "fit" && !subject.brand) return unknownCheck("fit", "I couldn't tell the brand, so I can't check the fit.");
   if ((name === "price" || name === "comfort") && !subject.modelName) {
     const what = name === "price" ? "compare the price" : "check reviews for comfort";
-    const observed = name === "price" && ctx.survey ? { details: { observedComparison: modelUnknownComparison(ctx.survey) } } : {};
+    const observed =
+      name === "price"
+        ? { details: { ...(ctx.survey ? { observedComparison: modelUnknownComparison(ctx.survey) } : {}), observedAlternatives: emitNoAlternatives(ctx) } }
+        : {};
     return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`, observed);
   }
   if (name === "price" && subject.tier === "family") {
@@ -135,7 +138,8 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     const comparison = obs ? familyComparison(obs.survey, obs.matched) : null;
     return {
       ...unknownCheck("price", comparison?.context ? `${base} ${comparison.context.line} in your search.` : base, {
-        details: { versionUnclear: true, ...(comparison ? { observedComparison: comparison } : {}) },
+        // The version is unclear, so no listing can be called the same pair: no alternatives.
+        details: { versionUnclear: true, ...(comparison ? { observedComparison: comparison } : {}), observedAlternatives: emitNoAlternatives(ctx) },
       }),
       ...(comparison?.context ? { confidence: FAMILY_CONFIDENCE_CAP } : {}),
     };
@@ -167,6 +171,8 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             onNewOffers: (offers) => ctx.emit("new_offers", offers),
             assessOfferColours: (offers) => matchOfferColours(offers, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
             observed: observedFor(ctx, subject),
+            assessListingColours: (candidates) => matchOfferColours(candidates, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
+            onAlternatives: (alternatives) => ctx.emit("observed_alternatives", alternatives),
           });
         case "comfort":
           return checkComfort({
@@ -190,6 +196,13 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     const searchFailed = name === "price" || name === "comfort";
     return unknownCheck(name, plainError(name, err), searchFailed ? { details: { searchFailed: true } } : {});
   }
+}
+
+/** No alternatives (no survey, or nothing to compare against), sent as the observed_alternatives event too. */
+function emitNoAlternatives(ctx: RunCtx) {
+  const none = noAlternatives(ctx.survey);
+  ctx.emit("observed_alternatives", none);
+  return none;
 }
 
 /** Record what the check actually did (Gemini calls, cache hits, a live or cached search). */

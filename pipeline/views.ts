@@ -2,7 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { CaseDetail } from "@/schemas/api";
-import { NewOffersSchema, ObservedComparisonSchema, type CaseSummary, type CheckResult, type NewOffers, type ObservedComparison, type SizeSystem } from "@/schemas/domain";
+import {
+  NewOffersSchema,
+  ObservedAlternativesSchema,
+  ObservedComparisonSchema,
+  type CaseSummary,
+  type CheckResult,
+  type NewOffers,
+  type ObservedAlternatives,
+  type ObservedComparison,
+  type SizeSystem,
+} from "@/schemas/domain";
+import { noAlternatives } from "@/lib/observed";
 import { FeedSeedItemSchema, type FeedItem, type FeedSeedItem, type SizeChart } from "@/schemas/seed";
 import { convertSize, parseSizeText } from "@/lib/sizes";
 import type { CaseRow } from "@/lib/store";
@@ -37,6 +48,17 @@ export function observedComparisonOf(checks: CheckResult[]): ObservedComparison 
   return parsed?.success ? parsed.data : null;
 }
 
+/**
+ * The price check's alternatives from the user's survey (details.observedAlternatives). A price check that stopped
+ * before recording them (an error, or a case run before they existed) counts as surveyed when it has a comparison.
+ */
+export function observedAlternativesOf(checks: CheckResult[]): ObservedAlternatives {
+  const raw = (checks.find((c) => c.check === "price")?.details as { observedAlternatives?: unknown } | undefined)?.observedAlternatives;
+  const parsed = raw === undefined ? null : ObservedAlternativesSchema.safeParse(raw);
+  if (parsed?.success) return parsed.data;
+  return noAlternatives(observedComparisonOf(checks));
+}
+
 export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promise<CaseDetail> {
   const { checks, leads, revision } = await latestChecks(deps, c);
   const images = await deps.store.getInputs(c.id, { kinds: ["image"], withData: false });
@@ -59,6 +81,7 @@ export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promis
     nextMoves: c.nextMoves ?? [],
     newOffers: newOffersOf(checks),
     observedComparison: observedComparisonOf(checks),
+    observedAlternatives: observedAlternativesOf(checks),
     warningSignals: entry?.warningSignals ?? [],
     evidenceIndex: indexEvidence(c.listingFacts?.evidence, c.identify?.evidence, ...checks.map((x) => x.evidence)),
     imageUrls: images.map((_, i) => imageUrl(origin, c.id, i)),
@@ -98,6 +121,7 @@ export async function synthesizeEvents(deps: Deps, c: CaseRow): Promise<SseEvent
   push("investigation_started", { caseId: c.id, revision });
   const offers = newOffersOf(checks);
   if (offers) push("new_offers", offers);
+  if (checks.some((c) => c.check === "price")) push("observed_alternatives", observedAlternativesOf(checks));
   for (const ch of checks) push("check_done", ch);
   for (const l of leads) push("lead_done", l);
   const skipped = c.history.find((h) => h.revision === revision)?.leads?.skipped;

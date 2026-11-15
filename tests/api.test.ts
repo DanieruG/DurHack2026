@@ -185,7 +185,7 @@ describe("SSE stream", () => {
     setDeps({ ...deps, hub: new (deps.hub.constructor as new () => typeof deps.hub)() });
     const res = await streamRoute.GET(new Request(`${BASE}/api/cases/${caseId}/stream`), params({ id: caseId }));
     const events = await readSse(res, "investigation_done");
-    expect(events.map((e) => e.event)).toEqual(["investigation_started", ...Array(5).fill("check_done"), "warning_signals", "verdict", "next_moves", "investigation_done"]);
+    expect(events.map((e) => e.event)).toEqual(["investigation_started", "observed_alternatives", ...Array(5).fill("check_done"), "warning_signals", "verdict", "next_moves", "investigation_done"]);
   });
 
   it("404s unknown cases", async () => {

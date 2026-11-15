@@ -7,6 +7,7 @@ import type {
   GeminiFeature,
   ListingFacts,
   NewOffers,
+  ObservedAlternatives,
   PricePosition,
   SampleStats,
   UserNeeds,
@@ -16,7 +17,11 @@ import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
 import { summariseOffers, toNewOffers, type NewPrices, type ShoppingOffer } from "@/lib/newPrices";
 import { colourBasis } from "../offerColour";
 import {
+  alternativeCandidates,
   baseComparison,
+  noAlternatives,
+  toAlternatives,
+  type AlternativeCandidate,
   observedConfidence,
   observedContext,
   observedEvidenceLabel,
@@ -143,16 +148,39 @@ export type PriceCheckArgs = {
   onNewOffers?: (offers: NewOffers) => void;
   /** The user's survey of a search on this platform, matched to this model (Source C). */
   observed?: { survey: Survey; matched: MatchedListing[]; userSizeUK: number | null };
+  /** Marks each candidate alternative's colour match against the listing's colour (same rules as the offers). */
+  assessListingColours?: (candidates: AlternativeCandidate[]) => Promise<(AlternativeCandidate & { colourMatch: "same" | "different" | "unknown" })[]>;
+  /** Called as soon as the survey has been evaluated, before the check finishes: the observed_alternatives event. */
+  onAlternatives?: (alternatives: ObservedAlternatives) => void;
 };
+
+/** "Worth looking at": cheaper listings from the user's survey, colour checked. Never throws (empty instead). */
+export async function findAlternatives(args: Pick<PriceCheckArgs, "facts" | "observed" | "assessListingColours">): Promise<ObservedAlternatives> {
+  const obs = args.observed;
+  if (!obs) return noAlternatives(null);
+  const candidates = alternativeCandidates(obs.matched, { listing: args.facts, userSizeUK: obs.userSizeUK, platform: obs.survey.platform });
+  if (!candidates.length) return noAlternatives(obs.survey);
+  const coloured = args.assessListingColours ? await args.assessListingColours(candidates).catch(() => candidates) : candidates;
+  return toAlternatives(coloured, obs.survey);
+}
 
 export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   const price = args.facts.priceGBP;
   const priceEv = args.facts.evidence.filter((e) => e.label.startsWith("Asking price"));
   if (price === undefined) {
+    const none = noAlternatives(args.observed?.survey);
+    args.onAlternatives?.(none);
     return unknownCheck("price", "The listing doesn't show a clear price in GBP, so I can't compare it.", {
-      details: { position: null },
+      details: { position: null, observedAlternatives: none },
     });
   }
+  // Evaluated alongside the Shopping lookup; sent as soon as it's ready.
+  const alternativesP = findAlternatives(args)
+    .catch(() => noAlternatives(args.observed?.survey))
+    .then((a) => {
+      args.onAlternatives?.(a);
+      return a;
+    });
   const modelId = args.model.id;
   const inCatalogue = modelId !== null;
   // Source C (the user's own search) when it has 5+ exact matches; otherwise the catalogue sample (A), which needs a
@@ -192,6 +220,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
     }
   }
 
+  const observedAlternatives = await alternativesP;
   const decision = decidePrice({ price, sample, newPrice, budgetGBP: args.needs.budgetGBP, totalPrice });
   const nextId = evidenceIds("price");
   const evidence: Evidence[] = [...priceEv];
@@ -267,6 +296,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       ...(shoppingLive !== undefined ? { shoppingLive } : {}),
       ...(newOffers ? { newOffers } : {}),
       ...(observedComparison ? { observedComparison } : {}),
+      observedAlternatives,
       inCatalogue,
     },
   };

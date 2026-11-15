@@ -1,5 +1,8 @@
 import type {
+  ListingFacts,
   MatchCounts,
+  ObservedAlternative,
+  ObservedAlternatives,
   ObservedComparison,
   ObservedListing,
   ObservedSuggestion,
@@ -42,6 +45,10 @@ export type SurveyListing = {
   thumbnailUrl?: string;
   sizeText?: string;
   sponsored: boolean;
+  /** When the card was surveyed (YYYY-MM-DD). */
+  seenOn?: string;
+  /** What the buyer pays (item, buyer protection and postage), when the card gives it. Surveyed cards don't yet. */
+  totalGBP?: number;
 };
 
 export type Survey = {
@@ -65,7 +72,7 @@ export type MatchedListing = SurveyListing & { level: MatchLevel; sizeUK: number
 /** What is stored with the case: the matched subset only (no unmatched cards), with each card's match level. */
 export type StoredSurvey = Omit<Survey, "listings"> & {
   counts: MatchCounts;
-  listings: (Pick<SurveyListing, "id" | "title" | "priceGBP" | "url" | "thumbnailUrl" | "sizeText" | "sponsored"> & { matchLevel: MatchLevel })[];
+  listings: (Pick<SurveyListing, "id" | "title" | "priceGBP" | "url" | "thumbnailUrl" | "sizeText" | "sponsored" | "seenOn" | "totalGBP"> & { matchLevel: MatchLevel })[];
 };
 
 export const sanitiseQuery = (q: string | undefined | null) => {
@@ -118,6 +125,7 @@ export function prepareSurvey(
     ...(o.thumbnailUrl ? { thumbnailUrl: o.thumbnailUrl } : {}),
     ...(o.sizeText ? { sizeText: o.sizeText } : {}),
     sponsored: o.sponsored,
+    seenOn: o.seenAt.slice(0, 10),
   }));
   return {
     searchQuery: sanitiseQuery(ctx.searchQuery),
@@ -168,6 +176,8 @@ export function toStoredSurvey(survey: Survey, matched: MatchedListing[]): Store
         ...(m.thumbnailUrl ? { thumbnailUrl: m.thumbnailUrl } : {}),
         ...(m.sizeText ? { sizeText: m.sizeText } : {}),
         sponsored: m.sponsored,
+        ...(m.seenOn ? { seenOn: m.seenOn } : {}),
+        ...(m.totalGBP !== undefined ? { totalGBP: m.totalGBP } : {}),
         matchLevel: m.level,
       })),
   };
@@ -308,4 +318,89 @@ export function modelUnknownComparison(survey: Survey): ObservedComparison {
 export function familyComparison(survey: Survey, matched: MatchedListing[]): ObservedComparison {
   const context = observedContext(matched, { familyLevel: true });
   return { ...baseComparison(survey, matched), source: "none", stats: null, context, note: null, suggestions: [] };
+}
+
+// ---------- "Worth looking at": cheaper alternatives from the survey ----------
+
+/** Most alternatives kept with the case (the panel shows 3, then "Show all"). */
+export const MAX_ALTERNATIVES = 20;
+
+export const noAlternatives = (survey: Pick<Survey, "platform" | "surveyedOn"> | null | undefined): ObservedAlternatives =>
+  survey ? { surveyUsed: true, platform: survey.platform, surveyedOn: survey.surveyedOn, alternatives: [] } : { surveyUsed: false, platform: null, surveyedOn: null, alternatives: [] };
+
+/**
+ * The two prices to compare, on the same basis: what the buyer pays (buyer protection and postage included) when both
+ * the card and the listing give it, otherwise the listed prices (postage not included). Surveyed cards only carry the
+ * item price today, so in practice that is listed price against listed price.
+ */
+export function comparedPrices(
+  card: Pick<SurveyListing, "priceGBP" | "totalGBP">,
+  listing: Pick<ListingFacts, "priceGBP" | "totalGBP" | "totalIncludes">,
+): { basis: ObservedAlternative["priceBasis"]; card: number; listing: number } | null {
+  if (listing.priceGBP === undefined) return null;
+  const listingTotal = listing.totalGBP !== undefined && listing.totalIncludes?.includes("buyer_protection") && listing.totalIncludes.includes("postage");
+  if (card.totalGBP !== undefined && listingTotal) return { basis: "total", card: card.totalGBP, listing: listing.totalGBP! };
+  return { basis: "listed", card: card.priceGBP, listing: listing.priceGBP };
+}
+
+export type AlternativeCandidate = MatchedListing & { compared: NonNullable<ReturnType<typeof comparedPrices>> };
+
+const LEVEL_ORDER = { exact: 0, version_unknown: 1 } as const;
+
+/**
+ * Surveyed listings that could be alternatives, before the colour check: exact or version-not-stated matches, in the
+ * user's size or stating no size (any adult size when the user's size isn't known), same platform with an https link,
+ * and cheaper by at least 10% or £5 (whichever is larger) on the same price basis. Auctions and the listing being
+ * investigated never reach here (prepareSurvey). Exact before version-not-stated, then cheapest first.
+ */
+export function alternativeCandidates(
+  matched: MatchedListing[],
+  args: { listing: Pick<ListingFacts, "priceGBP" | "totalGBP" | "totalIncludes">; userSizeUK: number | null; platform: Platform },
+): AlternativeCandidate[] {
+  const inSize = (m: MatchedListing) => {
+    if (m.sizeLabel === null) return true; // "Size not stated"
+    if (args.userSizeUK === null) return isAdult(m);
+    return m.sizeUK !== null && Math.abs(m.sizeUK - args.userSizeUK) < 0.01; // a size that couldn't be converted can't be checked
+  };
+  const out: AlternativeCandidate[] = [];
+  for (const m of matched) {
+    if (m.level !== "exact" && m.level !== "version_unknown") continue;
+    if (!inSize(m) || detectPlatform(m.url) !== args.platform || !httpsOnly(m.url)) continue;
+    const compared = comparedPrices(m, args.listing);
+    if (!compared || compared.listing - compared.card < minSaving(compared.listing) - 1e-9) continue;
+    out.push({ ...m, compared });
+  }
+  return out.sort(
+    (a, b) =>
+      LEVEL_ORDER[a.level as keyof typeof LEVEL_ORDER] - LEVEL_ORDER[b.level as keyof typeof LEVEL_ORDER] ||
+      a.compared.card - b.compared.card ||
+      a.id.localeCompare(b.id),
+  );
+}
+
+/** Candidates with their colour checked, as stored and sent: a different colour is left out, an unclear one is kept. */
+export function toAlternatives(
+  candidates: (AlternativeCandidate & { colourMatch?: "same" | "different" | "unknown" })[],
+  survey: Pick<Survey, "platform" | "surveyedOn">,
+): ObservedAlternatives {
+  const alternatives = candidates
+    .filter((c) => c.colourMatch !== "different")
+    .slice(0, MAX_ALTERNATIVES)
+    .map(
+      (c): ObservedAlternative => ({
+        listingId: c.id,
+        title: c.title,
+        priceGBP: c.compared.card,
+        priceBasis: c.compared.basis,
+        platform: survey.platform,
+        url: c.url,
+        ...(httpsOnly(c.thumbnailUrl) ? { thumbnailUrl: c.thumbnailUrl } : {}),
+        size: c.sizeLabel,
+        matchLevel: c.level as ObservedAlternative["matchLevel"],
+        colourMatch: c.colourMatch === "same" ? "same" : "unknown",
+        differenceGBP: round2(c.compared.card - c.compared.listing),
+        observedOn: c.seenOn ?? survey.surveyedOn,
+      }),
+    );
+  return { ...noAlternatives(survey), alternatives };
 }

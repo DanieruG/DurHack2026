@@ -1,5 +1,5 @@
 import type { CaseDetail } from "@/schemas/api";
-import type { CaseDiff, CheckResult, NewOffers, ObservedComparison, Profile } from "@/schemas/domain";
+import type { CaseDiff, CheckResult, NewOffers, ObservedAlternatives, ObservedComparison, Profile } from "@/schemas/domain";
 import type { ListingPreview } from "../lib/capture";
 import { applyEvent, newInvestigation, type IncomingEvent, type Investigation } from "../lib/progress";
 
@@ -114,6 +114,19 @@ export const OBSERVED: ObservedComparison = {
   ],
 };
 
+/** Cheaper listings from the same survey ("Worth looking at"): 4 qualify, so 3 show with "Show all 4". */
+export const ALTERNATIVES: ObservedAlternatives = {
+  surveyUsed: true,
+  platform: "vinted",
+  surveyedOn: "2026-11-14",
+  alternatives: [
+    { listingId: "4410001", title: "Nike Air Zoom Pegasus 40 UK 9 grey and white, worn twice", priceGBP: 28, priceBasis: "listed", platform: "vinted", url: "https://www.vinted.co.uk/items/4410001-nike-pegasus-40", thumbnailUrl: TRAINER_URL, size: "UK 9", matchLevel: "exact", colourMatch: "same", differenceGBP: -14, observedOn: "2026-11-14" },
+    { listingId: "4410003", title: "Nike Pegasus 40 trainers", priceGBP: 31, priceBasis: "listed", platform: "vinted", url: "https://www.vinted.co.uk/items/4410003-nike-pegasus-40", size: null, matchLevel: "exact", colourMatch: "unknown", differenceGBP: -11, observedOn: "2026-11-14" },
+    { listingId: "4410002", title: "Pegasus running shoes Nike", priceGBP: 34, priceBasis: "listed", platform: "vinted", url: "https://www.vinted.co.uk/items/4410002-pegasus", thumbnailUrl: TRAINER_URL, size: "UK 9", matchLevel: "version_unknown", colourMatch: "same", differenceGBP: -8, observedOn: "2026-11-14" },
+    { listingId: "4410004", title: "Nike Pegasus grey", priceGBP: 36, priceBasis: "listed", platform: "vinted", url: "https://www.vinted.co.uk/items/4410004-pegasus", size: "UK 9", matchLevel: "version_unknown", colourMatch: "same", differenceGBP: -6, observedOn: "2026-11-14" },
+  ],
+};
+
 const price: CheckResult = {
   check: "price",
   status: "pass",
@@ -131,6 +144,7 @@ const price: CheckResult = {
     position: "below",
     newOffers: NEW_OFFERS,
     observedComparison: OBSERVED,
+    observedAlternatives: ALTERNATIVES,
   },
 };
 
@@ -161,6 +175,7 @@ export const CASE_FILE: CaseDetail = {
   leadsReport: { considered: true },
   newOffers: NEW_OFFERS,
   observedComparison: OBSERVED,
+  observedAlternatives: ALTERNATIVES,
   warningSignals: [{
     id: "stock_photos",
     strength: "medium",

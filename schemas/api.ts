@@ -13,6 +13,7 @@ import {
   ListingFactsSchema,
   NewOffersSchema,
   NextMoveSchema,
+  ObservedAlternativesSchema,
   ObservedComparisonSchema,
   PlatformSchema,
   SizeSystemSchema,
@@ -69,6 +70,8 @@ export const CaseDetailSchema = z.object({
   newOffers: NewOffersSchema.nullable().default(null),
   /** The shown revision's comparison with the user's search survey (price details.observedComparison); null without a survey. */
   observedComparison: ObservedComparisonSchema.nullable().default(null),
+  /** Cheaper listings from the user's survey ("Worth looking at"); surveyUsed false when no survey came with the case. */
+  observedAlternatives: ObservedAlternativesSchema.default({ surveyUsed: false, platform: null, surveyedOn: null, alternatives: [] }),
   warningSignals: z.array(WarningSignalSchema).default([]),
   evidenceIndex: z.record(z.string(), EvidenceSchema),
   imageUrls: z.array(z.string()),
@@ -114,6 +117,8 @@ export const SseEventSchemas = {
   check_done: CheckResultSchema,
   /** Sent as soon as the price check's Shopping lookup completes (live or cached), before the check itself finishes. */
   new_offers: NewOffersSchema,
+  /** Sent as soon as the price check has evaluated the user's survey: its cheaper alternatives. */
+  observed_alternatives: ObservedAlternativesSchema,
   lead_started: LeadSchema,
   lead_done: LeadSchema,
   leads_skipped: z.object({ reason: z.string() }),

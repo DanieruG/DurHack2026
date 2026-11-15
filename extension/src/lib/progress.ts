@@ -1,5 +1,5 @@
 import { SseEventSchemas, type SseEventData, type SseEventName } from "@/schemas/api";
-import { NewOffersSchema, type CaseDiff, type CheckName, type CheckResult, type Lead, type NewOffers, type NextMove, type Verdict, type WarningSignal } from "@/schemas/domain";
+import { NewOffersSchema, type CaseDiff, type CheckName, type CheckResult, type Lead, type NewOffers, type NextMove, type ObservedAlternatives, type Verdict, type WarningSignal } from "@/schemas/domain";
 import { openableOffers } from "./offers";
 import { checkTags, stepTags } from "./tags";
 
@@ -29,6 +29,8 @@ export type Investigation = {
   warningSignals: WarningSignal[];
   /** New-price offers: from new_offers as soon as the Shopping lookup finishes, then from the price check itself. */
   newOffers: NewOffers | null;
+  /** Cheaper listings from the user's survey: from observed_alternatives as soon as the price check has them. */
+  observedAlternatives: ObservedAlternatives | null;
   /** The price check has started and not reported yet: the offers slot is reserved. */
   priceRunning: boolean;
   diff: CaseDiff | null;
@@ -55,6 +57,7 @@ export function newInvestigation(revision: number, at: number): Investigation {
     nextMoves: [],
     warningSignals: [],
     newOffers: null,
+    observedAlternatives: null,
     priceRunning: false,
     diff: null,
     done: false,
@@ -241,6 +244,8 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
     }
     case "new_offers":
       return { ...s, newOffers: e.data as NewOffers };
+    case "observed_alternatives":
+      return { ...s, observedAlternatives: e.data as ObservedAlternatives };
     case "verdict":
       return { ...s, verdict: e.data as Verdict };
     case "warning_signals":

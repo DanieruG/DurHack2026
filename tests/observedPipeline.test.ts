@@ -4,7 +4,7 @@ import * as caseRoute from "@/app/api/cases/[id]/route";
 import { createCase } from "@/pipeline";
 import { setDeps } from "@/pipeline/deps";
 import { CaseDetailSchema } from "@/schemas";
-import type { ObservedComparison, ObservedListing } from "@/schemas/domain";
+import type { ObservedAlternatives, ObservedComparison, ObservedListing } from "@/schemas/domain";
 import type { StoredSurvey } from "@/lib/observed";
 import { checksFrom, happyHandlers, json, makeDeps, PAGE_TEXT, PROFILE, promptText, type Handler } from "./helpers";
 
@@ -73,13 +73,48 @@ describe("observed listings through the pipeline", () => {
     expect(stored.counts).toEqual({ exact: 5, version_unknown: 1, different_version: 1, none: 1 });
     expect(stored.listings).toHaveLength(7);
     expect(stored.listings.some((l) => l.title === "Adidas Samba OG")).toBe(false);
-    expect(Object.keys(stored.listings[0]).sort()).toEqual(["id", "matchLevel", "priceGBP", "sponsored", "thumbnailUrl", "title", "url"]);
+    expect(Object.keys(stored.listings[0]).sort()).toEqual(["id", "matchLevel", "priceGBP", "seenOn", "sponsored", "thumbnailUrl", "title", "url"]);
 
     setDeps(deps);
     const res = await caseRoute.GET(new Request(`${BASE}/api/cases/${caseId}`, { headers: { origin: ORIGIN } }), { params: Promise.resolve({ id: caseId }) });
     const detail = CaseDetailSchema.parse(await res.json());
     expect(detail.observedComparison?.source).toBe("observed_listings");
     expect(detail.observedComparison?.suggestions).toHaveLength(2);
+  });
+
+  it("streams and returns cheaper alternatives from the survey, never the listing itself", async () => {
+    const deps = makeDeps();
+    const { caseId } = await investigate(deps, { observedListings: surveyCards(), searchQuery: "Nike Pegasus 40" });
+    const events = deps.hub.events(caseId);
+    const altIdx = events.findIndex((e) => e.event === "observed_alternatives");
+    const priceIdx = events.findIndex((e) => e.event === "check_done" && (e.data as { check: string }).check === "price");
+    expect(altIdx).toBeGreaterThan(-1);
+    expect(altIdx).toBeLessThan(priceIdx); // sent as soon as the survey is evaluated, before the check finishes
+    const streamed = events[altIdx].data as ObservedAlternatives;
+    // £38 listing: £30 and £32 exact in UK 9, then "Nike Pegasus trainers" (£20, version and size not stated).
+    // Not the UK 10 pair, Pegasus 39, the Samba, or the listing itself (£1).
+    expect(streamed.alternatives.map((a) => [a.priceGBP, a.matchLevel, a.size])).toEqual([
+      [30, "exact", "UK 9"],
+      [32, "exact", "UK 9"],
+      [20, "version_unknown", null],
+    ]);
+    expect(streamed.alternatives.every((a) => a.listingId !== "123" && a.differenceGBP < 0 && a.priceBasis === "listed" && a.colourMatch !== ("different" as string))).toBe(true);
+
+    setDeps(deps);
+    const res = await caseRoute.GET(new Request(`${BASE}/api/cases/${caseId}`, { headers: { origin: ORIGIN } }), { params: Promise.resolve({ id: caseId }) });
+    const detail = CaseDetailSchema.parse(await res.json());
+    expect(detail.observedAlternatives).toEqual(streamed);
+    expect(detail.observedAlternatives).toMatchObject({ surveyUsed: true, platform: "vinted", surveyedOn: "2026-11-14" });
+  });
+
+  it("without a survey: alternatives [] and surveyUsed false", async () => {
+    const deps = makeDeps();
+    const { caseId } = await investigate(deps, {});
+    setDeps(deps);
+    const res = await caseRoute.GET(new Request(`${BASE}/api/cases/${caseId}`, { headers: { origin: ORIGIN } }), { params: Promise.resolve({ id: caseId }) });
+    const detail = CaseDetailSchema.parse(await res.json());
+    expect(detail.observedAlternatives).toEqual({ surveyUsed: false, platform: null, surveyedOn: null, alternatives: [] });
+    expect(deps.hub.events(caseId).find((e) => e.event === "observed_alternatives")?.data).toEqual(detail.observedAlternatives);
   });
 
   it("says it couldn't compare when only the brand is known", async () => {
@@ -91,6 +126,7 @@ describe("observed listings through the pipeline", () => {
     const { checks } = await investigate(deps, { observedListings: surveyCards() });
     expect(checks.price.status).toBe("unknown");
     expect((checks.price.details as { observedComparison: ObservedComparison }).observedComparison).toMatchObject({ note: "Couldn't compare: model unknown.", source: "none", suggestions: [] });
+    expect((checks.price.details as { observedAlternatives: ObservedAlternatives }).observedAlternatives).toMatchObject({ surveyUsed: true, alternatives: [] });
   });
 
   it("version unclear: family-level context only, price confidence capped at 0.4", async () => {
@@ -110,6 +146,7 @@ describe("observed listings through the pipeline", () => {
     expect(c.context).toMatchObject({ familyLevel: true, n: 7 });
     expect(c.stats).toBeNull();
     expect(c.suggestions).toEqual([]);
+    expect((checks.price.details as { observedAlternatives: ObservedAlternatives }).observedAlternatives).toMatchObject({ surveyUsed: true, alternatives: [] });
     expect(checks.price.summary).toMatch(/version is unclear.*7 similar listings seen/);
   });
 
