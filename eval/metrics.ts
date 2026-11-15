@@ -3,6 +3,7 @@ import type { EvalSummary, Figure, Fraction, HeadlineId, Spread } from "../schem
 import { brandToken, tokenise } from "../lib/titleMatch";
 import { parseSizeText } from "../lib/sizes";
 import type { CaseRun } from "./collect";
+import { isKnown } from "./labels";
 import { createHash } from "node:crypto";
 
 /** A hash of the labels a run was scored against (case ids and labels, in order). */
@@ -132,13 +133,17 @@ export function summarise(
   brandCases.filter((r) => !brandOk.includes(r)).forEach((r) => fail(r.id, "Brand", `labelled ${r.label.brand}, Sleuth said ${say(r.tier === "none" ? null : r.brand)}`));
 
   const named = (r: CaseRun) => (EXACT_TIERS.has(r.tier) ? nameMatch(r.modelName, r.label) : { model: false, version: false });
-  const modelCases = runs.filter((r) => r.label.identifiable === true && r.label.model);
+  // Every case with a known model is scored, however vague the listing: Sleuth always owes a best guess, and naming
+  // only the brand (or nothing) counts as wrong.
+  const modelCases = runs.filter((r) => isKnown(r.label.model));
   const modelOk = modelCases.filter((r) => named(r).model);
+  const vagueCases = modelCases.filter((r) => r.label.listingShowsModel === false);
+  const vagueOk = vagueCases.filter((r) => modelOk.includes(r));
   const wrongPassed = modelCases.filter((r) => EXACT_TIERS.has(r.tier) && !named(r).model);
   modelCases
     .filter((r) => !modelOk.includes(r))
     .forEach((r) => fail(r.id, "Model", `labelled ${r.label.model}, Sleuth ${EXACT_TIERS.has(r.tier) ? `said ${say(r.modelName)}` : `named no exact model (${r.tier})`}`));
-  const versionCases = modelCases.filter((r) => r.label.version);
+  const versionCases = modelCases.filter((r) => isKnown(r.label.version));
   const versionOk = versionCases.filter((r) => named(r).version);
   versionCases
     .filter((r) => modelOk.includes(r) && !versionOk.includes(r))
@@ -146,15 +151,12 @@ export function summarise(
   const styleCases = runs.filter((r) => r.label.styleCode?.visible && r.label.styleCode.value);
   const styleOk = styleCases.filter((r) => styleKey(r.styleCode) === styleKey(r.label.styleCode!.value));
   styleCases.filter((r) => !styleOk.includes(r)).forEach((r) => fail(r.id, "Style code", `labelled ${r.label.styleCode!.value}, read ${say(r.styleCode)}`));
-  const refuseCases = runs.filter((r) => r.label.identifiable === false);
-  const refused = refuseCases.filter((r) => !EXACT_TIERS.has(r.tier));
-  refuseCases.filter((r) => !refused.includes(r)).forEach((r) => fail(r.id, "Gate", `not identifiable, but Sleuth named ${say(r.modelName)}`));
 
   // Flash and Pro
   const rechecks = runs.filter((r) => r.proRecheck);
   const answered = rechecks.filter((r) => r.proRecheck!.outcome === "agree" || r.proRecheck!.outcome === "disagree");
   const disagreed = answered.filter((r) => r.proRecheck!.outcome === "disagree");
-  const judged = disagreed.filter((r) => r.label.identifiable === true && r.label.model && r.label.version);
+  const judged = disagreed.filter((r) => isKnown(r.label.model) && isKnown(r.label.version));
   const right = (name: string | null, r: CaseRun) => nameMatch(name, r.label).version;
   const flashRight = judged.filter((r) => right(r.proRecheck!.flash, r));
   const proRight = judged.filter((r) => right(r.proRecheck!.pro, r));
@@ -224,7 +226,7 @@ export function summarise(
     versionAccuracy: fraction("Version identified correctly", versionOk.length, versionCases.length),
     wrongModel: fraction("Wrong model named", wrongPassed.length, modelCases.length, false),
     styleCodeRead: fraction("Style code read (when visible)", styleOk.length, styleCases.length),
-    gateRefusal: fraction("Unidentifiable listings correctly refused", refused.length, refuseCases.length),
+    vagueModel: fraction("Model identified correctly when the listing doesn't show it", vagueOk.length, vagueCases.length),
     proDisagreement: fraction("Flash and Pro disagreed", disagreed.length, answered.length, false),
     flashRight: fraction("Flash was right when they disagreed", flashRight.length, judged.length),
     proRight: fraction("Pro was right when they disagreed", proRight.length, judged.length),
@@ -258,7 +260,7 @@ export function summarise(
     labelsHash: labelsHash(runs),
     overlapThreshold: OVERLAP_THRESHOLD,
     sections: [
-      section("Identification", ["brandAccuracy", "modelIdentification", "versionAccuracy", "wrongModel", "styleCodeRead", "gateRefusal"]),
+      section("Identification", ["brandAccuracy", "modelIdentification", "versionAccuracy", "wrongModel", "styleCodeRead", "vagueModel"]),
       section("Gemini Flash vs Pro (model read only from photos)", ["proDisagreement", "flashRight", "proRight", "neitherRight", "proNoAnswer"]),
       section("Condition", ["defectDetection", "falseAlarms", "defectPhotos"]),
       section("Fit", ["fitAccuracy"]),

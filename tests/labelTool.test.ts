@@ -24,7 +24,7 @@ function makeCase(id: string, label: object = EMPTY_LABEL, capture: object = { p
 
 const FULL = {
   ...EMPTY_LABEL,
-  identifiable: true,
+  listingShowsModel: true,
   brand: "Nike",
   model: "Pegasus",
   version: "40",
@@ -136,7 +136,7 @@ describe("labelling tool: the page", () => {
     new Function(html.match(/<script>([\s\S]*)<\/script>/)![1])();
     await until(() => document.querySelector("#list button[data-id]"));
     expect(document.querySelector("header")?.textContent ?? document.querySelector("#progress")!.textContent).toMatch(/0 of 1 cases complete/);
-    expect(document.querySelector("#list")!.textContent).toMatch(/missing: identifiable, brand/);
+    expect(document.querySelector("#list")!.textContent).toMatch(/missing: listingShowsModel, brand/);
 
     (document.querySelector("#list button[data-id]") as HTMLElement).click();
     await until(() => document.querySelector("#overlay"));
@@ -165,7 +165,7 @@ describe("labelling tool: the page", () => {
       el.value = value;
       el.dispatchEvent(new Event("change", { bubbles: true }));
     };
-    set("identifiable", "true");
+    set("listingShowsModel", "true");
     set("brand", "Nike");
     set("model", "Pegasus");
     set("version", "40");
@@ -182,7 +182,7 @@ describe("labelling tool: the page", () => {
     await until(() => /Saved/.test(document.querySelector("#status")!.textContent ?? ""));
     expect(document.querySelector("#status")!.textContent).toBe("Saved ✓ case complete");
     expect(LabelSchema.parse(JSON.parse(fs.readFileSync(path.join(dir, "label.json"), "utf8")))).toMatchObject({
-      identifiable: true,
+      listingShowsModel: true,
       brand: "Nike",
       model: "Pegasus",
       version: "40",
@@ -193,5 +193,17 @@ describe("labelling tool: the page", () => {
       expectedVerdict: "worth_a_look",
       defects: { "1": [{ label: "outsole_wear", severity: "minor", box2d: [100, 200, 500, 600] }], "2": [] },
     });
+
+    // A vague listing: never "refuse"; the labeller gives the real model, or "unknown" after looking it up.
+    expect(form.textContent).not.toMatch(/refuse/i);
+    set("listingShowsModel", "false");
+    const unknown = form.elements.namedItem("modelUnknown") as HTMLInputElement;
+    unknown.checked = true;
+    unknown.dispatchEvent(new Event("change", { bubbles: true }));
+    expect((form.elements.namedItem("version") as HTMLInputElement).disabled).toBe(true);
+    expect(document.querySelector("#missing")!.textContent).toBe("All required fields filled.");
+    (document.querySelector("#save") as HTMLElement).click();
+    await until(() => JSON.parse(fs.readFileSync(path.join(dir, "label.json"), "utf8")).model === "unknown");
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "label.json"), "utf8"))).toMatchObject({ listingShowsModel: false, model: "unknown", version: "unknown" });
   });
 });

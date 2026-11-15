@@ -429,6 +429,10 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- the form ----------
 
+// "unknown": the labeller looked it up and still can't tell (eval/labels.ts UNKNOWN). Not the same as null.
+const UNKNOWN = "unknown";
+const isUnknown = (v) => typeof v === "string" && v.trim().toLowerCase() === UNKNOWN;
+
 function renderForm() {
   const L = S.label;
   const sel = (name, opts, value, blank = "— not labelled —") =>
@@ -436,13 +440,17 @@ function renderForm() {
   const sizeMode = !L.size ? "" : L.size.value === "multiple" ? "multiple" : L.size.value === "not_stated" ? "not_stated" : "single";
   const styleMode = !L.styleCode ? "" : L.styleCode.visible ? "visible" : "not_visible";
   $("#form").innerHTML = `
-    <label class="f">Identifiable <span class="opt">can you tell the exact model and version?</span></label>
-    ${sel("identifiable", [["true", "Yes"], ["false", "No: Sleuth should refuse to name one"]], L.identifiable)}
+    <label class="f">Does the listing show the exact model? <span class="opt">title, details, a readable style code or the photos</span></label>
+    ${sel("listingShowsModel", [["true", "Yes: the listing settles model and version"], ["false", "No: Sleuth should still give its best guess, and ask to confirm"]], L.listingShowsModel)}
+    <p class="hint" style="margin:4px 0 0">Either way, write below what the pair really is: look it up if the listing doesn't say. Sleuth's best guess is scored against it.</p>
     <label class="f">Brand</label><input type="text" name="brand" value="${esc(L.brand)}" placeholder="Nike">
-    <label class="f">Model <span class="opt">without the version</span></label><input type="text" name="model" value="${esc(L.model)}" placeholder="Pegasus, Air Max, Samba OG">
+    <label class="f">Model <span class="opt">without the version</span></label>
+    <div class="row"><input type="text" name="model" value="${esc(isUnknown(L.model) ? "" : L.model)}" placeholder="Pegasus, Air Max, Samba OG">
+      <label><input type="checkbox" name="modelUnknown" ${isUnknown(L.model) ? "checked" : ""}> can't tell, even after looking it up</label></div>
     <label class="f">Version</label>
-    <div class="row"><input type="text" name="version" value="${esc(L.version === "none" ? "" : L.version)}" placeholder="40, 95" style="width:120px">
-      <label><input type="checkbox" name="versionNone" ${L.version === "none" ? "checked" : ""}> model has no versions</label></div>
+    <div class="row"><input type="text" name="version" value="${esc(L.version === "none" || isUnknown(L.version) ? "" : L.version)}" placeholder="40, 95" style="width:120px">
+      <label><input type="checkbox" name="versionNone" ${L.version === "none" ? "checked" : ""}> model has no versions</label>
+      <label><input type="checkbox" name="versionUnknown" ${isUnknown(L.version) ? "checked" : ""}> can't tell which version</label></div>
     <label class="f">Style code</label>
     <div class="row">${sel("styleMode", [["visible", "Visible in the photos or text"], ["not_visible", "Not visible"]], styleMode)}
       <input type="text" name="styleCode" value="${esc(L.styleCode?.value)}" placeholder="FV6603-101" style="width:140px"></div>
@@ -485,10 +493,12 @@ function renderColours() {
 
 function syncDisabled() {
   const f = $("#form");
-  const notId = f.identifiable.value === "false";
-  f.model.disabled = notId;
-  f.version.disabled = notId || f.versionNone.checked;
-  f.versionNone.disabled = notId;
+  // An unknown model has no version to give; "no versions" and "can't tell" exclude each other.
+  const noModel = f.modelUnknown.checked;
+  f.model.disabled = noModel;
+  f.versionNone.disabled = noModel || f.versionUnknown.checked;
+  f.versionUnknown.disabled = noModel || f.versionNone.checked;
+  f.version.disabled = noModel || f.versionNone.checked || f.versionUnknown.checked;
   f.styleCode.disabled = f.styleMode.value === "";
   const mode = f.sizeMode.value;
   f.sizeValue.disabled = mode !== "single";
@@ -500,10 +510,10 @@ function readForm() {
   const f = $("#form");
   const L = S.label;
   const text = (v) => (v.trim() ? v.trim() : null);
-  L.identifiable = f.identifiable.value === "" ? null : f.identifiable.value === "true";
+  L.listingShowsModel = f.listingShowsModel.value === "" ? null : f.listingShowsModel.value === "true";
   L.brand = text(f.brand.value);
-  L.model = L.identifiable === false ? null : text(f.model.value);
-  L.version = L.identifiable === false ? null : f.versionNone.checked ? "none" : text(f.version.value);
+  L.model = f.modelUnknown.checked ? UNKNOWN : text(f.model.value);
+  L.version = f.modelUnknown.checked || f.versionUnknown.checked ? UNKNOWN : f.versionNone.checked ? "none" : text(f.version.value);
   const sm = f.styleMode.value;
   L.styleCode = sm === "" ? null : { value: text(f.styleCode.value), visible: sm === "visible" };
   const mode = f.sizeMode.value;
@@ -544,8 +554,9 @@ function formWarnings() {
 
 function renderMissing() {
   const L = S.label;
-  const req = ["identifiable", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"];
-  const miss = req.filter((k) => L[k] === null && !(L.identifiable === false && (k === "model" || k === "version")));
+  // Same rule as missingFields in eval/labels.ts.
+  const req = ["listingShowsModel", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"];
+  const miss = req.filter((k) => L[k] === null && !(k === "version" && L.model !== null && isUnknown(L.model)));
   const el = $("#missing");
   if (el) el.textContent = miss.length ? `Still missing: ${miss.join(", ")}` : "All required fields filled.";
 }

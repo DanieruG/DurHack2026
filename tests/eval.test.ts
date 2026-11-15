@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { fraction, iou, matchBoxes, median, nameMatch, OVERLAP_THRESHOLD, sizeAgrees, spread, summarise } from "@/eval/metrics";
-import { EMPTY_LABEL, LabelSchema, missingFields, missingLabelsMarkdown, readLabels, updateLabellingDoc, type Label } from "@/eval/labels";
+import { EMPTY_LABEL, LabelSchema, missingFields, missingLabelsMarkdown, readLabels, UNKNOWN, updateLabellingDoc, type Label } from "@/eval/labels";
 import { reportMarkdown, slideMarkdown } from "@/eval/report";
 import { EVAL_PROFILE, runCase, type CaseRun } from "@/eval/collect";
 import { redact } from "@/lib/redact";
@@ -97,7 +97,7 @@ describe("matching names and sizes with labels", () => {
 describe("summary", () => {
   const runs: CaseRun[] = [
     run("a", {
-      label: label({ identifiable: true, brand: "Nike", model: "Pegasus", version: "40", size: { value: 9, system: "UK" }, colourway: ["grey", "white"], defects: { "2": [{ label: "heel_wear", box2d: [0, 0, 100, 100] }], "3": [] }, expectedVerdict: "worth_a_look" }),
+      label: label({ listingShowsModel: true, brand: "Nike", model: "Pegasus", version: "40", size: { value: 9, system: "UK" }, colourway: ["grey", "white"], defects: { "2": [{ label: "heel_wear", box2d: [0, 0, 100, 100] }], "3": [] }, expectedVerdict: "worth_a_look" }),
       size: { text: "UK 9", system: "UK", options: null },
       colours: ["grey", "white"],
       findings: [
@@ -109,13 +109,14 @@ describe("summary", () => {
       durationMs: 30_000,
     }),
     run("b", {
-      label: label({ identifiable: true, brand: "Nike", model: "Pegasus", version: "40", size: { value: 9, system: "UK" } }),
+      label: label({ listingShowsModel: true, brand: "Nike", model: "Pegasus", version: "40", size: { value: 9, system: "UK" } }),
       modelName: "Pegasus 41",
       size: { text: "UK 10", system: "UK", options: null },
       proRecheck: { outcome: "disagree", flash: "Nike Pegasus 41", pro: "Nike Pegasus 40" },
       durationMs: 50_000,
     }),
-    run("c", { label: label({ identifiable: false, brand: "Adidas" }), tier: "brand", brand: "Adidas", modelName: null, durationMs: 45_000 }),
+    // A vague listing still has a true model to score against: naming only the brand counts as wrong.
+    run("c", { label: label({ listingShowsModel: false, brand: "Adidas", model: "Samba", version: "OG" }), tier: "brand", brand: "Adidas", modelName: null, durationMs: 45_000 }),
     run("d", { label: EMPTY_LABEL, error: "boom", durationMs: 0 }), // nothing labelled: in no figure but time and errors
   ];
   const s = summarise(runs, META);
@@ -123,9 +124,9 @@ describe("summary", () => {
 
   it("counts only labelled cases, each figure with its own sample size", () => {
     expect(fractionText(fig("brandAccuracy") as never)).toBe("3 of 3 (100%)");
-    expect(fractionText(s.headline.modelIdentification as never)).toBe("2 of 2 (100%)");
-    expect(fractionText(fig("versionAccuracy") as never)).toBe("1 of 2 (50%)");
-    expect(fractionText(fig("gateRefusal") as never)).toBe("1 of 1 (100%)");
+    expect(fractionText(s.headline.modelIdentification as never)).toBe("2 of 3 (66%)");
+    expect(fractionText(fig("versionAccuracy") as never)).toBe("1 of 3 (33%)");
+    expect(fractionText(fig("vagueModel") as never)).toBe("0 of 1 (0%)");
     expect(fractionText(s.headline.fitAccuracy as never)).toBe("1 of 2 (50%)");
     expect(fractionText(fig("colourAll") as never)).toBe("1 of 1 (100%)");
     expect(fractionText(fig("verdict") as never)).toBe("1 of 1 (100%)");
@@ -150,6 +151,7 @@ describe("summary", () => {
     expect(s.failures).toContainEqual({ caseId: "b", metric: "Version", detail: 'labelled Pegasus 40, Sleuth said "Pegasus 41"' });
     expect(s.failures).toContainEqual({ caseId: "b", metric: "Fit", detail: 'labelled UK 9, read "UK 10" (UK)' });
     expect(s.failures).toContainEqual({ caseId: "d", metric: "Error", detail: "boom" });
+    expect(s.failures).toContainEqual({ caseId: "c", metric: "Model", detail: "labelled Samba, Sleuth named no exact model (brand)" });
     expect(EvalSummarySchema.parse(JSON.parse(JSON.stringify(s)))).toEqual(s);
   });
 
@@ -157,10 +159,10 @@ describe("summary", () => {
     const md = reportMarkdown(s, [{ id: "d", photos: 3, label: EMPTY_LABEL }]);
     expect(md).toContain("Run 2026-11-15T10:00:00.000Z · 4 labelled listings · PIPELINE_VERSION=3");
     expect(md).toContain("Models: fast=flash-x, strong=pro-x");
-    expect(md).toContain("| Version identified correctly | 1 of 2 (50%) |");
+    expect(md).toContain("| Version identified correctly | 1 of 3 (33%) |");
     expect(md).toContain(`at least ${OVERLAP_THRESHOLD}`);
     expect(md).toContain("| b | Version | labelled Pegasus 40, Sleuth said \"Pegasus 41\" |");
-    expect(md).toContain("| d | 3 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |");
+    expect(md).toContain("| d | 3 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |");
     expect(md).toContain(honestLine(4));
   });
 
@@ -169,7 +171,7 @@ describe("summary", () => {
       [
         "| How accurate is Sleuth? | Result |",
         "| --- | --- |",
-        "| Model identified correctly | 2 of 2 (100%) |",
+        "| Model identified correctly | 2 of 3 (66%) |",
         "| Marked defects found | 1 of 1 (100%) |",
         "| Reported defects that weren't marked (false alarms) | 1 of 2 (50%) |",
         "| Listed size read as labelled | 1 of 2 (50%) |",
@@ -185,9 +187,18 @@ describe("summary", () => {
 describe("labels", () => {
   it("an empty label is all null, and every required field is reported missing", () => {
     expect(Object.values(EMPTY_LABEL).every((v) => v === null)).toBe(true);
-    expect(missingFields(EMPTY_LABEL)).toEqual(["identifiable", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"]);
-    // An unidentifiable listing needs no model or version.
-    expect(missingFields(label({ identifiable: false }))).toEqual(["brand", "styleCode", "colourway", "size", "conditionGrade"]);
+    expect(missingFields(EMPTY_LABEL)).toEqual(["listingShowsModel", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"]);
+    // A vague listing still needs the model it really is.
+    expect(missingFields(label({ listingShowsModel: false }))).toEqual(["brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"]);
+    // "unknown" (looked it up, still can't tell) counts as labelled, and an unknown model needs no version.
+    expect(missingFields(label({ listingShowsModel: false, model: UNKNOWN }))).toEqual(["brand", "styleCode", "colourway", "size", "conditionGrade"]);
+  });
+
+  it("a model labelled unknown is left out of model accuracy, not scored as a refusal", () => {
+    const s = summarise([run("u", { label: label({ listingShowsModel: false, brand: "Nike", model: UNKNOWN, version: UNKNOWN }), modelName: "Air Max 90" })], META);
+    const figs = s.sections.flatMap((x) => x.figures);
+    expect(fractionText(s.headline.modelIdentification as never)).toBe("not measured yet (0 labelled)");
+    expect(figs.some((f) => f.id === "gateRefusal")).toBe(false);
   });
 
   it("rejects labels that aren't in the format (colours, sizes, boxes)", () => {

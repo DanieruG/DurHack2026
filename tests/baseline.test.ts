@@ -25,7 +25,7 @@ const ANSWER: BaselineAnswer = {
 };
 const LABEL: Label = {
   ...EMPTY_LABEL,
-  identifiable: true,
+  listingShowsModel: true,
   brand: "Nike",
   model: "Pegasus",
   version: "40",

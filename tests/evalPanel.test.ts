@@ -33,7 +33,7 @@ async function render(el: ReturnType<typeof h>) {
 
 const runs: CaseRun[] = Array.from({ length: 12 }, (_, i) => ({
   id: `c${i}`,
-  label: { ...EMPTY_LABEL, identifiable: true, brand: "Nike", model: "Pegasus", version: "40", size: { value: 9, system: "UK" } },
+  label: { ...EMPTY_LABEL, listingShowsModel: true, brand: "Nike", model: "Pegasus", version: "40", size: { value: 9, system: "UK" } },
   tier: "catalogue",
   brand: "Nike",
   modelName: i < 10 ? "Pegasus 40" : "Vomero 17",

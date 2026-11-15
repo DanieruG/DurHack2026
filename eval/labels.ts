@@ -17,12 +17,20 @@ const Box = z
 export const LabelDefectSchema = z.object({ label: DefectLabelSchema, box2d: Box, severity: SeveritySchema.optional() });
 
 export const LabelSchema = z.object({
-  /** Could a person tell the exact model (and version) from this listing? false: Sleuth should refuse to name one. */
-  identifiable: z.boolean().nullable().default(null),
+  /**
+   * Does the listing itself (title, item details, a readable style code, the photos) settle the exact model and
+   * version? true: Sleuth should reach "confirmed" or "likely" and carry on. false: Sleuth still names its best guess
+   * ("possible" or "best guess") and, outside the eval, asks the user to confirm it. Sleuth never refuses to guess.
+   */
+  listingShowsModel: z.boolean().nullable().default(null),
   brand: z.string().min(1).nullable().default(null),
-  /** Model name without the version: "Pegasus", "Air Max", "Samba OG", "P-6000". */
+  /**
+   * What the pair really is, model name without the version: "Pegasus", "Air Max", "Samba OG", "P-6000". Work it out
+   * by any means when the listing doesn't say (style code lookup, the brand's site, a reverse image search): Sleuth's
+   * best guess is scored against it. UNKNOWN only when you still can't tell; that leaves the case out of model accuracy.
+   */
   model: z.string().min(1).nullable().default(null),
-  /** "40", "95", "7"; "none" when the model has no versions. */
+  /** "40", "95", "7"; "none" when the model has no versions; UNKNOWN when you can't tell which version it is. */
   version: z.string().min(1).nullable().default(null),
   /** The style code when known ("FV6603-101", "JP9997"), and whether it can be read in the listing's photos or text. */
   styleCode: z.object({ value: z.string().min(1).nullable(), visible: z.boolean() }).nullable().default(null),
@@ -54,13 +62,18 @@ export type Label = z.infer<typeof LabelSchema>;
 export const EMPTY_LABEL: Label = LabelSchema.parse({});
 
 /** Fields every case needs (offer colours and the expected verdict are optional; defects are counted across the set). */
-export const REQUIRED_FIELDS = ["identifiable", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"] as const;
+/** model/version value for "I can't tell what it is, even after looking it up" (not the same as null: not labelled yet). */
+export const UNKNOWN = "unknown";
+/** A model or version that a prediction can be scored against. */
+export const isKnown = (s: string | null): s is string => !!s && s.trim().toLowerCase() !== UNKNOWN;
+
+export const REQUIRED_FIELDS = ["listingShowsModel", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"] as const;
 /** Hand-marked defect boxes are needed on at least this many photos across the whole set. */
 export const MIN_DEFECT_PHOTOS = 10;
 
-/** Required fields still empty. An unidentifiable listing doesn't need model or version. */
+/** Required fields still empty. Every case needs a model and version, even if it's UNKNOWN (no version needed then). */
 export function missingFields(l: Label): string[] {
-  return REQUIRED_FIELDS.filter((f) => l[f] === null && !(l.identifiable === false && (f === "model" || f === "version")));
+  return REQUIRED_FIELDS.filter((f) => l[f] === null && !(f === "version" && l.model !== null && !isKnown(l.model)));
 }
 
 export const defectPhotoCount = (l: Label) => (l.defects ? Object.keys(l.defects).length : 0);

@@ -31,7 +31,8 @@ name the offers Sleuth found); edit that field by hand in `label.json` if you ne
 
 **Label what you see, before looking at what Sleuth said.** Read the page text in `capture.json`, open the listing URL
 if it's still live, and look at every photo. Never copy a label from Sleuth's output or a report, and don't guess:
-leave a field `null` when you can't tell. A `null` field leaves that case out of that one figure, and the report says
+leave a field `null` when you can't tell. The exception is the model: research it beyond the listing (above all for vague
+listings, which are the ones that test Sleuth's best guess), and write `"unknown"` rather than `null` when you can't. A `null` field leaves that case out of that one figure, and the report says
 how many cases each figure covers.
 
 Every case runs with the same profile, so fit doesn't depend on whoever captured the listing: a usual size of UK 9, no
@@ -41,10 +42,10 @@ brand sizes, priorities "all-day comfort", light wear accepted (`EVAL_PROFILE` i
 
 | Field | What to write | Example |
 | --- | --- | --- |
-| `identifiable` | `true` if you can tell the exact model and version from the listing; `false` if you can't. Sleuth should refuse to name a model when it's `false`. | `true` |
+| `listingShowsModel` | `true` if the listing itself (title, item details, a readable style code, the photos) settles the exact model and version; `false` if it doesn't. It describes the listing, not what Sleuth may say: Sleuth always names a best guess. On `true` it should be "confirmed" or "likely" and carry on; on `false`, "possible" or "best guess", and outside the eval it asks the buyer to confirm. | `true` |
 | `brand` | The brand, as on the shoe. | `"Nike"` |
-| `model` | The model without its version. Leave `null` when `identifiable` is `false`. | `"Pegasus"`, `"Air Max"`, `"Samba OG"`, `"P-6000"` |
-| `version` | The version, or `"none"` if the model has no versions. Leave `null` when `identifiable` is `false`. | `"40"`, `"95"`, `"none"` |
+| `model` | What the pair really is, without its version, even when the listing doesn't say: look up the style code, check the brand's site, or reverse-image-search the photos. Sleuth's best guess is scored against it. `"unknown"` only if you still can't tell; the case is then left out of model accuracy. | `"Pegasus"`, `"Air Max"`, `"Samba OG"`, `"P-6000"` |
+| `version` | The version, `"none"` if the model has no versions, or `"unknown"` if you can't tell which version it is (also when `model` is `"unknown"`). | `"40"`, `"95"`, `"none"` |
 | `styleCode` | The style code if you know it, and whether it can be read in the photos or text (`visible`). `{ "value": null, "visible": false }` when there's none to read. | `{ "value": "FV6603-101", "visible": true }` |
 | `colourway` | The shoe's broad colours, main colour first, from: black, white, grey, navy, blue, red, green, brown, beige, pink, purple, orange, yellow. | `["white", "grey"]` |
 | `size` | The size as the listing states it, and its system: `UK`, `US`, `EU`, or `unknown` if the listing doesn't say. A listing that offers several sizes: `"value": "multiple"`. A listing that gives no size at all: `{ "value": "not_stated", "system": "unknown" }`. | `{ "value": 9, "system": "UK" }` |
@@ -105,20 +106,20 @@ Things to know while labelling (not labels):
 ## Cases with missing labels
 
 <!-- missing-labels:start -->
-Defect boxes: marked on 0 of the 10 photos needed.
+Defect boxes: marked on 3 of the 10 photos needed.
 
 | Case | Photos | Missing | Defect photos marked |
 | --- | --- | --- | --- |
-| ebay-168811552330 | 6 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-178485489023 | 7 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-198622268078 | 8 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-206390698933 | 4 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-206627552126 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-206683004216 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-287724614047 | 8 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-366787843200 | 7 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-820336095090 | 6 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-860128293708 | 8 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| vinted-10503713940 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| vinted-10751853310 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-168811552330 | 6 | none | 3 |
+| ebay-178485489023 | 7 | none | 0 |
+| ebay-198622268078 | 8 | none | 0 |
+| ebay-206390698933 | 4 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-206627552126 | 5 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-206683004216 | 5 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-287724614047 | 8 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-366787843200 | 7 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-820336095090 | 6 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-860128293708 | 8 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| vinted-10503713940 | 5 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| vinted-10751853310 | 5 | listingShowsModel, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 <!-- missing-labels:end -->
