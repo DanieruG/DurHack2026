@@ -106,7 +106,7 @@ export async function finalise(
 
   // The label is decided by code rules, so wording the verdict and phrasing next moves can run at the same time.
   const label = decideVerdict(args.checks, identifyPassed, warningSignals).label;
-  const movesArgs = { checks: args.checks, leads: args.leads, label, answered: args.answered, signals: warningSignals, platform: ctx.facts.platform };
+  const movesArgs = { checks: args.checks, leads: args.leads, label, answered: args.answered, signals: warningSignals, platform: ctx.facts.platform, verificationAvailable: ctx.facts.verificationAvailable };
   const [{ verdict }, nextMoves] = await Promise.all([
     runStage("verdict", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () =>
       decideAndWordVerdict(deps.gemini, { checks: args.checks, identifyPassed, signals: warningSignals, extraEvidence: ctx.facts.evidence }),

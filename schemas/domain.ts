@@ -127,6 +127,8 @@ export const ListingDataSchema = z.object({
   photos: z.object({ captured: z.number().int().nonnegative(), shown: z.number().int().nonnegative().nullable() }).optional(),
   /** The platform indicates its own item verification may apply (Vinted). */
   verificationAvailable: z.boolean().optional(),
+  /** Vinted's dominant colour of the main photo: mostly the backdrop, so a weak hint only. */
+  dominantColourHint: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   /** Plain notes about what couldn't be read, e.g. "Seller description not captured". */
   notes: z.array(z.string().max(200)).max(10).optional(),
 });

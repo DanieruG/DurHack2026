@@ -98,7 +98,7 @@ export function prepareText(capture: Capture): { platform: Platform; pageText: s
   const platform = detectPlatform(capture.pageUrl);
   const { text, removedLines } = redact(capture.pageText);
   // Only this listing's own text: drop site navigation and other listings ("Similar items", "Sponsored", ...).
-  const scoped = scopeListingText(text, platform);
+  const scoped = scopeListingText(text, platform, capture.listing?.title?.value);
   return { platform, pageText: scoped.text, removedLines: removedLines + scoped.removedLines };
 }
 

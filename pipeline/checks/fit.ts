@@ -63,7 +63,8 @@ export function checkFit({ facts, needs, brand, chart, charts }: FitInput): Chec
       return unknownCheck("fit", `Your saved ${userSizeLabel} isn't on the ${brand} chart, so I can't compare.`, { evidence });
     }
     evidence.push(chartEv);
-    const steps = Math.abs(listedRow.index - userRow.index);
+    // Count sizes by UK size, not chart rows: charts skip half sizes at the top (Nike UK 12 -> 13).
+    const steps = Math.round(Math.abs(listedRow.uk - userRow.uk) * 2);
     const listedInYours = formatSize(sizeIn(listedRow, own.system), own.system);
     if (steps === 0) {
       status = "pass";
@@ -73,12 +74,12 @@ export function checkFit({ facts, needs, brand, chart, charts }: FitInput): Chec
     } else if (steps === 1) {
       status = "warn";
       match = "close";
-      summary = `Listed ${listedLabel} (${listedInYours}) is half a size ${listedRow.index > userRow.index ? "bigger" : "smaller"} than your ${brand} size.`;
+      summary = `Listed ${listedLabel} (${listedInYours}) is half a size ${listedRow.uk > userRow.uk ? "bigger" : "smaller"} than your ${brand} size.`;
       confidence = 0.9;
     } else {
       status = "fail";
       match = "mismatch";
-      summary = `Listed ${listedLabel} (${listedInYours}) is ${steps / 2} sizes ${listedRow.index > userRow.index ? "bigger" : "smaller"} than your ${brand} size.`;
+      summary = `Listed ${listedLabel} (${listedInYours}) is ${steps / 2} sizes ${listedRow.uk > userRow.uk ? "bigger" : "smaller"} than your ${brand} size.`;
       confidence = 0.9;
     }
   } else {

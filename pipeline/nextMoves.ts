@@ -148,7 +148,9 @@ function platformName(platform: Platform | undefined): string {
   }
 }
 
-function signalMoves(args: { checks: CheckResult[]; signals: WarningSignal[]; platform?: Platform }): { beforeYouPay: NextMove[]; questions: NextMove[] } {
+export const VERIFICATION_MOVE_ID = "nm_platform_verification";
+
+function signalMoves(args: { checks: CheckResult[]; signals: WarningSignal[]; platform?: Platform; verificationAvailable?: boolean }): { beforeYouPay: NextMove[]; questions: NextMove[] } {
   const beforeYouPay: NextMove[] = [];
   const questions: NextMove[] = [];
   if (args.signals.length) {
@@ -162,7 +164,16 @@ function signalMoves(args: { checks: CheckResult[]; signals: WarningSignal[]; pl
   const price = args.checks.find((c) => c.check === "price");
   const priceDetails = price?.details as Details;
   const listingPrice = priceDetails?.listingPriceGBP;
-  if (typeof listingPrice === "number" && listingPrice >= 150) {
+  // The listing says the platform's own item verification may apply: suggest it when any warning sign fired.
+  const verification = args.signals.length > 0 && args.verificationAvailable === true && args.platform === "vinted";
+  if (verification) {
+    beforeYouPay.push({
+      id: VERIFICATION_MOVE_ID,
+      kind: "before_you_pay",
+      text: "Choose Vinted's item verification at checkout, if it's offered for this item, so the pair is checked before it reaches you.",
+      relatesTo: ["condition", "identify"],
+    });
+  } else if (typeof listingPrice === "number" && listingPrice >= 150) {
     beforeYouPay.push({
       id: AUTHENTICITY_MOVE_ID,
       kind: "before_you_pay",
@@ -219,11 +230,11 @@ Never use: scam, fake, fraud, liar, rip-off, guaranteed, counterfeit, replica, r
 
 export async function generateNextMoves(
   gemini: GeminiClient | null,
-  args: { checks: CheckResult[]; leads: Lead[]; label: VerdictLabel; answered?: CheckName[]; signals?: WarningSignal[]; platform?: Platform },
+  args: { checks: CheckResult[]; leads: Lead[]; label: VerdictLabel; answered?: CheckName[]; signals?: WarningSignal[]; platform?: Platform; verificationAvailable?: boolean },
 ): Promise<NextMove[]> {
   const gaps = computeGaps({ ...args, answered: args.answered ?? [] });
   const signals = args.signals ?? [];
-  const specials = signalMoves({ checks: args.checks, signals, platform: args.platform });
+  const specials = signalMoves({ checks: args.checks, signals, platform: args.platform, verificationAvailable: args.verificationAvailable });
   const byp = args.label === "hidden_gem" || args.label === "worth_a_look"
     ? (signals.length ? BEFORE_YOU_PAY.filter((b) => b.id !== "byp_protection") : BEFORE_YOU_PAY)
     : [];

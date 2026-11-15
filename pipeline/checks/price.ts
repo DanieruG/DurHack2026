@@ -25,6 +25,21 @@ import {
   type Survey,
 } from "@/lib/observed";
 import { evidenceIds, gbp, round2, unknownCheck } from "../util";
+import { totalWords } from "../listingData";
+
+/**
+ * What the buyer pays, for comparing with the new price: Vinted's total including buyer protection and postage, or eBay's
+ * price plus postage when the page data gives it. `line` says so ("£31.18 including protection and postage"), or
+ * "Postage not included" when the postage isn't known.
+ */
+export function listingTotal(facts: ListingFacts): { total: number; line: string | null; includes: ("buyer_protection" | "postage")[] } | null {
+  const price = facts.priceGBP;
+  if (price === undefined) return null;
+  if (facts.totalGBP !== undefined && facts.totalIncludes?.length) {
+    return { total: facts.totalGBP, line: `${gbp(facts.totalGBP)} ${totalWords(facts.totalIncludes)}`, includes: facts.totalIncludes };
+  }
+  return { total: price, line: facts.platform === "ebay" || facts.platform === "vinted" ? "Postage not included" : null, includes: [] };
+}
 
 export const SAMPLE_CONFIDENCE_CAP = 0.7;
 /** New price only (no sample): 0.7 with 5+ retailer offers, 0.6 with 3-4. */
@@ -63,14 +78,17 @@ export function decidePrice(args: {
   sample: SampleStats | null;
   newPrice: { gbp: number } | null;
   budgetGBP?: number;
+  /** What the buyer pays (price plus known fees and postage), compared with the new price. Defaults to `price`. */
+  totalPrice?: number;
 }): PriceDecision {
   const { price, sample, newPrice } = args;
+  const total = args.totalPrice ?? price;
   let status: CheckStatus;
   let position: PricePosition | null;
   if (!sample && !newPrice) {
     status = "unknown";
     position = null;
-  } else if (newPrice && price >= newPrice.gbp) {
+  } else if (newPrice && total >= newPrice.gbp) {
     status = "fail";
     position = "at_or_above_new";
   } else if (sample && price > sample.p90) {
@@ -79,7 +97,7 @@ export function decidePrice(args: {
   } else if (sample && price < sample.p10) {
     status = "warn";
     position = "suspiciously_low";
-  } else if ((sample && price <= sample.p25) || (!sample && newPrice && price <= 0.6 * newPrice.gbp)) {
+  } else if ((sample && price <= sample.p25) || (!sample && newPrice && total <= 0.6 * newPrice.gbp)) {
     status = "pass";
     position = "below";
   } else {
@@ -135,6 +153,8 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   const usedGrade = restricted ? args.condition : undefined;
   const context = obs && !observed ? observedContext(obs.matched, { familyLevel: false }) : null;
 
+  const paid = listingTotal(args.facts)!;
+  const totalPrice = paid.total;
   let newPrice: NewPrice | null = null;
   let ranB = false;
   let offersSeen = 0;
@@ -147,7 +167,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       const r = await args.lookupNewPrices();
       offersSeen = r.offers.length;
       shoppingLive = !r.fromCache;
-      newOffers = toNewOffers(r, price);
+      newOffers = toNewOffers(r, totalPrice);
       args.onNewOffers?.(newOffers);
       newPrice = toNewPrice(r);
     } catch (err) {
@@ -156,7 +176,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
     }
   }
 
-  const decision = decidePrice({ price, sample, newPrice, budgetGBP: args.needs.budgetGBP });
+  const decision = decidePrice({ price, sample, newPrice, budgetGBP: args.needs.budgetGBP, totalPrice });
   const nextId = evidenceIds("price");
   const evidence: Evidence[] = [...priceEv];
   const sampleLabel = sample ? (observed ? observedEvidenceLabel(observed, obs!.survey.surveyedOn) : sampleEvidenceLabel(sample)) : "";
@@ -180,7 +200,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
     }
   }
 
-  const body = decision.position === null ? NO_NEW_PRICE : priceSummary({ price, sample, sampleLabel, newPrice, decision, grade: usedGrade });
+  const body = decision.position === null ? NO_NEW_PRICE : priceSummary({ price, sample, sampleLabel, newPrice, decision, grade: usedGrade, paid });
   const withContext = context ? `${body} ${context.line} in your search.` : body;
   const summary = inCatalogue || observed ? withContext : `${NOT_IN_SAMPLE_NOTE} ${withContext}`;
   const features: GeminiFeature[] = args.calledViaTool?.() ? ["function_calling"] : [];
@@ -216,6 +236,8 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
     geminiFeatures: features,
     details: {
       listingPriceGBP: price,
+      listingTotalGBP: totalPrice,
+      ...(paid.line ? { priceBasis: paid.line } : {}),
       ...(sample ? { sample } : {}),
       ...(newPrice ? { newPrice: { gbp: newPrice.gbp, lowestGBP: newPrice.lowestGBP, sources: newPrice.offers.length, observedOn: newPrice.observedOn } } : {}),
       position: decision.position,
@@ -242,8 +264,12 @@ function priceSummary(a: {
   newPrice: NewPrice | null;
   decision: PriceDecision;
   grade?: ConditionGrade;
+  /** What the buyer pays, for the new-price comparisons. */
+  paid?: { total: number; line: string | null; includes: string[] };
 }): string {
   const p = gbp(a.price);
+  // New-price comparisons use what the buyer pays and say so ("£31.18 including protection and postage").
+  const pNew = a.paid?.line ? (a.paid.includes.length ? a.paid.line : `${p} (${a.paid.line.toLowerCase()})`) : p;
   const sampled = a.sample ? a.sampleLabel.replace(/^Compared with/, "compared with") : "";
   const newBit = a.newPrice ? `new it's about ${gbp(a.newPrice.gbp)} (median of ${a.newPrice.offers.length} UK retailers, checked ${shortDate(a.newPrice.observedOn)})` : "";
   let s: string;
@@ -251,7 +277,7 @@ function priceSummary(a: {
     case null:
       return NO_NEW_PRICE;
     case "at_or_above_new":
-      s = `At ${p} it costs as much as buying new: ${newBit}.`;
+      s = `At ${pNew} it costs as much as buying new: ${newBit}.`;
       break;
     case "above":
       s = `At ${p} it's well above ${/your search/.test(a.sampleLabel) ? "the listings in your search" : "the sampled listings"} (${sampled}, median ${gbp(a.sample!.median)}).`;
@@ -262,12 +288,12 @@ function priceSummary(a: {
     case "below":
       s = a.sample
         ? `At ${p} it's below most comparable listings (${sampled}, median ${gbp(a.sample.median)}).`
-        : `At ${p} it's well under the new price: ${newBit}.`;
+        : `At ${pNew} it's well under the new price: ${newBit}.`;
       break;
     default:
       s = a.sample
         ? `At ${p} it's a typical price (${sampled}, median ${gbp(a.sample.median)}).`
-        : `At ${p} it's under the new price but not a bargain: ${newBit}.`;
+        : `At ${pNew} it's under the new price but not a bargain: ${newBit}.`;
   }
   if (a.decision.overBudget) s += " It's over your budget.";
   return s;

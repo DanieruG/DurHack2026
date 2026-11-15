@@ -44,8 +44,11 @@ const EBAY_NAV_END = /^search$/i;
 /** Text kept only if at least this much survives; otherwise the page layout wasn't recognised and the text is left as is. */
 const MIN_KEPT_CHARS = 200;
 
-export function scopeListingText(text: string, platform: Platform): { text: string; removedLines: number } {
+export function scopeListingText(text: string, platform: Platform, ownTitle?: string): { text: string; removedLines: number } {
   const lines = text.split("\n");
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  // The listing's own title starts its own content again (Vinted renders "Member's items" and "Similar items" first).
+  const title = ownTitle ? norm(ownTitle) : "";
   const kept: string[] = [];
   let mode: "own" | "foreign" | "nav" = "own";
   for (const raw of lines) {
@@ -62,7 +65,7 @@ export function scopeListingText(text: string, platform: Platform): { text: stri
       mode = "foreign";
       continue;
     }
-    if (mode === "foreign" && OWN_HEADINGS.some((r) => r.test(line))) mode = "own";
+    if (mode === "foreign" && (OWN_HEADINGS.some((r) => r.test(line)) || (title.length >= 8 && norm(line) === title))) mode = "own";
     if (mode === "own") kept.push(raw);
   }
   const scoped = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();

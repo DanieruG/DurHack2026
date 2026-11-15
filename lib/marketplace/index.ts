@@ -1,6 +1,7 @@
 import { detectPlatform } from "@/lib/platform";
 import type { ExtractedListing, MarketplacePage } from "./common";
 import { extractEbay } from "./ebay";
+import { extractVinted } from "./vinted";
 
 export type { ExtractedListing, MarketplacePage, PageFields, EmbeddedScripts } from "./common";
 
@@ -9,6 +10,8 @@ export function extractListing(page: MarketplacePage): ExtractedListing | null {
   switch (detectPlatform(page.pageUrl)) {
     case "ebay":
       return extractEbay(page);
+    case "vinted":
+      return extractVinted(page);
     default:
       return null;
   }

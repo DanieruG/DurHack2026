@@ -46,6 +46,13 @@ function firstOffPlatformEvidence(pageText: string, sellerReplies: string[]): Ev
   return null;
 }
 
+/** What the buyer pays, for new-price comparisons (Vinted: including protection and postage). */
+function paidFor(price: number, d: Record<string, unknown>): { total: number; words: string } {
+  const total = typeof d.listingTotalGBP === "number" ? d.listingTotalGBP : price;
+  const basis = typeof d.priceBasis === "string" && total !== price ? d.priceBasis : `${gbp(price)}`;
+  return { total, words: basis };
+}
+
 function priceEvidence(price: number, d: Record<string, unknown>, id: string): Evidence | null {
   const sample = d.sample as { n?: number; p10?: number; p90?: number } | undefined;
   if (sample?.n !== undefined && sample.n >= 5 && sample.p10 !== undefined && price < sample.p10) {
@@ -53,16 +60,18 @@ function priceEvidence(price: number, d: Record<string, unknown>, id: string): E
     return signalEvidence(id, `Priced at ${gbp(price)}. ${source[0].toUpperCase()}${source.slice(1)}: ${gbp(sample.p10)} to ${gbp(sample.p90 ?? sample.p10)}.`, undefined, price);
   }
   const newPrice = d.newPrice as { gbp?: number } | undefined;
-  if (newPrice?.gbp !== undefined && price < 0.4 * newPrice.gbp) {
-    return signalEvidence(id, `Priced at ${gbp(price)}. New from UK retailers: about ${gbp(newPrice.gbp)}.`, undefined, price);
+  const paid = paidFor(price, d);
+  if (newPrice?.gbp !== undefined && paid.total < 0.4 * newPrice.gbp) {
+    return signalEvidence(id, `Priced at ${paid.words}. New from UK retailers: about ${gbp(newPrice.gbp)}.`, undefined, paid.total);
   }
   return null;
 }
 
 function newPriceEvidence(price: number, d: Record<string, unknown>): Evidence | null {
   const newPrice = d.newPrice as { gbp?: number } | undefined;
-  if (newPrice?.gbp === undefined || price >= 0.6 * newPrice.gbp) return null;
-  return signalEvidence("ev_signal_new_at_low_price_1", `Priced at ${gbp(price)}. New from UK retailers: about ${gbp(newPrice.gbp)}.`, undefined, price);
+  const paid = paidFor(price, d);
+  if (newPrice?.gbp === undefined || paid.total >= 0.6 * newPrice.gbp) return null;
+  return signalEvidence("ev_signal_new_at_low_price_1", `Priced at ${paid.words}. New from UK retailers: about ${gbp(newPrice.gbp)}.`, undefined, paid.total);
 }
 
 function modelsMatch(a: string, b: string): boolean {
