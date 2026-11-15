@@ -12,6 +12,8 @@ export function ProfileScreen(props: {
   apiBase: string;
   firstRun: boolean;
   onSave: (p: Profile, apiBase: string) => Promise<void> | void;
+  /** Open "How accurate is Sleuth?". */
+  onAccuracy?: () => void;
 }) {
   const p = props.profile;
   const [usual, setUsual] = useState<Omit<SizeRow, "brand">>({ system: p?.defaultSize?.system ?? "UK", size: p?.defaultSize ? String(p.defaultSize.size) : "" });
@@ -149,6 +151,11 @@ export function ProfileScreen(props: {
       <footer className="foot">
         {error && <p className="notice notice-problem">{error}</p>}
         <p className="device-note">Stays on this device.</p>
+        {props.onAccuracy && (
+          <button type="button" className="link-quiet" onClick={props.onAccuracy}>
+            How accurate is Sleuth?
+          </button>
+        )}
         <Button wide onClick={save} disabled={saving}>
           {props.firstRun ? "Save" : "Save changes"}
         </Button>

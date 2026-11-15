@@ -8,6 +8,7 @@ import {
   type CaseDetail,
 } from "@/schemas/api";
 import type { Capture, CaseSummary, Profile } from "@/schemas/domain";
+import { PublicEvalSummarySchema, type PublicEvalSummary } from "@/schemas/eval";
 import { parseEvent, revisionOf, type IncomingEvent } from "../lib/progress";
 
 export class ApiError extends Error {
@@ -62,6 +63,13 @@ export function createApi(base: string) {
       for (const [i, s] of (args.screenshots ?? []).slice(0, MAX_SCREENSHOTS).entries()) form.append("screenshots", s, s instanceof File ? s.name : `evidence-${i + 1}.png`);
       const res = await send(u(`/api/cases/${encodeURIComponent(id)}/reopen`), { method: "POST", body: form });
       return read(res, ReopenAcceptedSchema);
+    },
+
+    /** The latest evaluation figures ("How accurate is Sleuth?"), or null before any eval run. */
+    async getEvalSummary(): Promise<PublicEvalSummary | null> {
+      const res = await send(u("/api/eval/summary"), { method: "GET" });
+      if (res.status === 404) return null;
+      return read(res, PublicEvalSummarySchema);
     },
 
     /** Summaries for up to 50 ids; ids the server can't find are simply absent from the result. */

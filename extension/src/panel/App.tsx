@@ -17,6 +17,7 @@ import { History } from "./screens/History";
 import { Investigating } from "./screens/Investigating";
 import { ProfileScreen } from "./screens/Profile";
 import { WhatChanged } from "./screens/WhatChanged";
+import { Accuracy } from "./screens/Accuracy";
 import { NavLink, Shell } from "./ui";
 
 type View =
@@ -26,7 +27,8 @@ type View =
   | { name: "history" }
   | { name: "investigating" }
   | { name: "file" }
-  | { name: "changed"; diff: CaseDiff };
+  | { name: "changed"; diff: CaseDiff }
+  | { name: "accuracy"; back: "profile" | "file" };
 
 type Captured = { capture: Capture; preview: ListingPreview; screenshot: Blob | null };
 /** The case on screen. Title and price come from the capture (new case) or the server, never from local storage. */
@@ -63,6 +65,7 @@ export function App() {
   const [surveyNote, setSurveyNote] = useState<string | null>(null);
 
   const api = useMemo(() => createApi(apiBase), [apiBase]);
+  const loadEvalSummary = useCallback(() => api.getEvalSummary(), [api]);
 
   // ---------- boot ----------
   useEffect(() => {
@@ -343,6 +346,10 @@ export function App() {
     setError(null);
     setView({ name: "history" });
   };
+  const toAccuracy = (back: "profile" | "file") => {
+    setError(null);
+    setView({ name: "accuracy", back });
+  };
   const mainNav = (
     <>
       <NavLink onClick={toHistory}>History</NavLink>
@@ -358,7 +365,7 @@ export function App() {
       break;
     case "profile":
       nav = !view.firstRun && <NavLink onClick={goNew}>Back</NavLink>;
-      body = <ProfileScreen profile={profile} apiBase={apiBase} firstRun={view.firstRun} onSave={saveAll} />;
+      body = <ProfileScreen profile={profile} apiBase={apiBase} firstRun={view.firstRun} onSave={saveAll} onAccuracy={() => toAccuracy("profile")} />;
       break;
     case "ready": {
       const onFile = ready.kind === "listing" ? caseForUrl(history, summaries, ready.preview.pageUrl) : null;
@@ -428,8 +435,13 @@ export function App() {
           listing={{ title: active.title, priceGBP: active.priceGBP }}
           addEvidence={{ busy, error, onCaptureTab: captureForEvidence, onSubmit: submitEvidence }}
           onInvestigateListing={(url) => void investigateListing(url)}
+          onAccuracy={() => toAccuracy("file")}
         />
       );
+      break;
+    case "accuracy":
+      nav = <NavLink onClick={() => (view.back === "file" && active?.detail ? setView({ name: "file" }) : toProfile())}>Back</NavLink>;
+      body = <Accuracy load={loadEvalSummary} />;
       break;
     case "changed":
       nav = <NavLink onClick={goNew}>New case</NavLink>;

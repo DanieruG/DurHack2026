@@ -30,6 +30,8 @@ export function CaseFile(props: {
   initialAdding?: boolean;
   /** Open a suggested listing from the user's search and investigate it. */
   onInvestigateListing?: (url: string) => void;
+  /** Open "How accurate is Sleuth?". */
+  onAccuracy?: () => void;
 }) {
   const { detail } = props;
   const [open, setOpen] = useState<Set<RowKey>>(new Set(props.initialOpen ?? []));
@@ -163,6 +165,11 @@ export function CaseFile(props: {
       )}
 
       {detail.run && <p className="totals mono dim">{runTotals(detail.run)}</p>}
+      {props.onAccuracy && (
+        <button type="button" className="link-quiet" onClick={props.onAccuracy}>
+          How accurate is Sleuth?
+        </button>
+      )}
     </div>
   );
 }
