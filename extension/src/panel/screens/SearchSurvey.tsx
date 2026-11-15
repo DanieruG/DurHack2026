@@ -2,6 +2,7 @@ import type { SearchPage } from "../../lib/survey";
 import { PLATFORM_NAMES } from "../../lib/format";
 import { explainResults, type ResultCounts, type TopResult } from "../../lib/topResults";
 import { TopResultsList } from "../offers";
+import { useEffect, useState } from "react";
 import { Button, Notice } from "../ui";
 
 /** Results shown per page on the search screen ("Show next 8"). */
@@ -26,6 +27,11 @@ export function SearchSurvey(props: {
   top?: TopResult[];
   /** What was read and what was left out, for the line under the heading (never silent). */
   counts?: ResultCounts | null;
+  /** The "Colour or look" for this search, asked here so it can shape the results before one is picked. */
+  colour?: string;
+  onColour?: (colour: string) => void;
+  /** Thumbnails being read for colour ("Checking photos 12/24"), while it runs. */
+  photoProgress?: { done: number; total: number } | null;
   onInvestigate?: (url: string) => void;
 }) {
   const { page } = props;
@@ -36,6 +42,8 @@ export function SearchSurvey(props: {
         {PLATFORM_NAMES[page.platform]}
         {page.query ? ` · “${page.query}”` : ""}
       </p>
+      {props.onColour && <ColourBox value={props.colour ?? ""} onChange={props.onColour} progress={props.photoProgress ?? null} />}
+
       <p className="note">Sleuth reads the results on this page by itself. When you investigate a listing, it compares it with the others it saw.</p>
 
       {props.summary && (
@@ -74,3 +82,29 @@ export function SearchSurvey(props: {
     </div>
   );
 }
+
+/** "Colour or look", before a listing is picked: results re-rank as you type (after a short pause). */
+function ColourBox(props: { value: string; onChange: (v: string) => void; progress: { done: number; total: number } | null }) {
+  const [draft, setDraft] = useState(props.value);
+  // A different search brings its own saved colour.
+  useEffect(() => setDraft(props.value), [props.value]);
+  useEffect(() => {
+    if (draft === props.value) return;
+    const t = setTimeout(() => props.onChange(draft), COLOUR_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+  return (
+    <section className="block search-colour">
+      <label className="field-label" htmlFor="search-colour">
+        Colour or look
+      </label>
+      <input id="search-colour" className="input" maxLength={100} placeholder="e.g. all white, nothing neon" value={draft} onChange={(e) => setDraft(e.target.value)} aria-describedby="search-colour-hint" />
+      <p className="note dim field-hint" id="search-colour-hint" aria-live="polite">
+        {props.progress ? `Checking photos ${props.progress.done}/${props.progress.total}…` : "Sleuth ranks the results by this, and checks it again when you investigate one."}
+      </p>
+    </section>
+  );
+}
+
+export const COLOUR_DEBOUNCE_MS = 400;

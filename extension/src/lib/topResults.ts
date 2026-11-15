@@ -13,8 +13,16 @@ import { cardSizeFit, type SurveyCard } from "./survey";
 
 export const TOP_RESULTS = 8;
 
+/** What a thumbnail's pixels say about a card's colour (see thumbColour.ts): broad colours with their share of the shoe. */
+export type PhotoReading = { colours: { name: string; share: number }[]; multi: boolean };
+
+/** How the card's colour was established for the buyer's wish: its title, its photo, or not at all. */
+export type ColourBasis = "title" | "photo" | "unconfirmed";
+
 export type TopResult = {
   card: SurveyCard;
+  /** Only when the buyer asked for a colour. */
+  colourBasis?: ColourBasis;
   score: number;
   /** "£12 under typical · UK 9 · white in the title" */
   reason: string;
@@ -59,6 +67,12 @@ export type ResultCounts = {
   aboveTypical: number;
   otherSize: number;
   typicalGBP: number | null;
+  /** The buyer named a colour: how many cards (of those otherwise good) match it, by title or by photo, and how many were in other colours. */
+  colourWanted: string[];
+  colourMatched: number;
+  colourOther: number;
+  /** Thumbnails read for colour (see thumbColour.ts). */
+  photosChecked: number;
 };
 
 type Opts = {
@@ -70,6 +84,8 @@ type Opts = {
   /** The buyer's "Colour or look" for this pair. */
   colourWish?: string;
   limit?: number;
+  /** Thumbnail colour readings by card id, for cards whose title names no colour. */
+  photoColours?: Record<string, PhotoReading>;
 };
 
 const queryOverlap = (queryWords: string[], title: string) => {
@@ -79,7 +95,7 @@ const queryOverlap = (queryWords: string[], title: string) => {
 
 /** Every card scored and sorted, plus the counts behind what was left out. */
 export function analyseResults(cards: SurveyCard[], opts: Opts): { ranked: TopResult[]; counts: ResultCounts } {
-  const counts: ResultCounts = { read: cards.length, ranked: 0, sponsored: 0, auctions: 0, unpriced: 0, otherCurrency: 0, self: 0, aboveTypical: 0, otherSize: 0, typicalGBP: null };
+  const counts: ResultCounts = { read: cards.length, ranked: 0, sponsored: 0, auctions: 0, unpriced: 0, otherCurrency: 0, self: 0, aboveTypical: 0, otherSize: 0, typicalGBP: null, colourWanted: [], colourMatched: 0, colourOther: 0, photosChecked: 0 };
   const eligible: SurveyCard[] = [];
   for (const c of cards) {
     if (c.id === opts.excludeId) counts.self++;
@@ -98,6 +114,8 @@ export function analyseResults(cards: SurveyCard[], opts: Opts): { ranked: TopRe
   counts.typicalGBP = Math.round(typical * 100) / 100;
   const hasSizes = !!(opts.profile?.sizes.length || opts.profile?.defaultSize);
   const { wanted, avoided } = wishColours(opts.colourWish);
+  counts.colourWanted = wanted;
+  counts.photosChecked = Object.keys(opts.photoColours ?? {}).length;
 
   const scored: TopResult[] = [];
   for (const c of eligible) {
@@ -128,18 +146,47 @@ export function analyseResults(cards: SurveyCard[], opts: Opts): { ranked: TopRe
     parts.push(sizeLabel);
 
     if (queryWords.length) score += queryOverlap(queryWords, c.title) * 15;
+    let colourBasis: ColourBasis | undefined;
     if (wanted.length || avoided.length) {
       const inTitle = colourWordsIn(c.title);
-      if (avoided.some((a) => inTitle.includes(a as never))) {
-        score -= 25;
-        parts.push(`${avoided.find((a) => inTitle.includes(a as never))} in the title`);
-      } else if (wanted.some((w) => inTitle.includes(w as never))) {
-        score += 12;
-        parts.push(`${wanted.find((w) => inTitle.includes(w as never))} in the title`);
-      } else if (wanted.length && inTitle.length) score -= 8;
+      const reading = opts.photoColours?.[c.id];
+      if (inTitle.length) {
+        // The title names a colour: that decides it.
+        colourBasis = "title";
+        const hitAvoided = avoided.find((a) => inTitle.includes(a as never));
+        const hitWanted = wanted.find((w) => inTitle.includes(w as never));
+        if (hitAvoided || (wanted.length && !hitWanted)) {
+          counts.colourOther++; // the listing says it is another colour: no use to this buyer
+          continue;
+        }
+        if (hitWanted) {
+          score += 12;
+          counts.colourMatched++;
+          parts.push(`${hitWanted} in the title`);
+        }
+      } else if (reading) {
+        // No colour word in the title: what the photo shows. Soft evidence, so weaker than a title.
+        colourBasis = "photo";
+        const share = (name: string) => reading.colours.find((x) => x.name === name)?.share ?? 0;
+        const hitWanted = wanted.find((w) => share(w) >= 0.3);
+        const hitAvoided = avoided.find((a) => share(a) >= 0.25);
+        const top = reading.colours[0];
+        if (hitWanted && !hitAvoided) {
+          score += 8;
+          counts.colourMatched++;
+          parts.push(`${hitWanted} in the photo`);
+        } else if (hitAvoided) {
+          score -= 15;
+          parts.push(`${hitAvoided} in the photo`);
+        } else if (wanted.length && !reading.multi && top && top.share >= 0.5 && !wanted.includes(top.name as never)) {
+          counts.colourOther++; // the photo clearly shows another colour
+          continue;
+        } else colourBasis = "unconfirmed"; // multi-coloured or unclear: neutral
+      } else colourBasis = "unconfirmed";
+      if (colourBasis === "unconfirmed") parts.push("Colour not confirmed");
     }
     if (c.thumbnailUrl) score += 3;
-    scored.push({ card: c, score: Math.round(score * 10) / 10, reason: parts.join(" · "), sizeLabel, typicalGBP: counts.typicalGBP });
+    scored.push({ card: c, ...(colourBasis ? { colourBasis } : {}), score: Math.round(score * 10) / 10, reason: parts.join(" · "), sizeLabel, typicalGBP: counts.typicalGBP });
   }
   const ranked = scored.sort((a, b) => b.score - a.score || a.card.price! - b.card.price! || a.card.id.localeCompare(b.card.id));
   counts.ranked = ranked.length;
@@ -155,8 +202,20 @@ export const RANKED_MAX = 40;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** "Read 58 listings. 12 look like good value; left out: 20 not in your size, 9 auctions or sponsored, ..." Never silent. */
+/**
+ * "Read 58 listings. 12 look like good value; left out: ..." Never silent. With a colour wish it also says how many match
+ * it, and when none does, says plainly that only this page's listings were looked at.
+ */
 export function explainResults(c: ResultCounts): string {
+  const base = explainBase(c);
+  if (!c.colourWanted.length) return base;
+  const want = c.colourWanted.join(" or ");
+  const photos = c.photosChecked ? ` (${plural(c.photosChecked, "photo")} checked)` : "";
+  if (c.colourMatched) return `${base} ${c.colourMatched} show${c.colourMatched === 1 ? "s" : ""} ${want}${photos}${c.colourOther ? `; ${c.colourOther} in other colours left out` : ""}.`;
+  return `${base} None names or looks ${want}${photos}${c.colourOther ? ` (${c.colourOther} are in other colours)` : ""}. Sleuth only sees the listings on this page: scroll or load more and read it again, or search with the colour added.`;
+}
+
+function explainBase(c: ResultCounts): string {
   if (!c.read) return "No listings read from this page yet.";
   const left: string[] = [];
   if (c.otherSize) left.push(`${c.otherSize} not in your size`);

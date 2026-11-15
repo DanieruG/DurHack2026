@@ -7,7 +7,7 @@ import { brandToken, catalogueTokens, chartForBrand, deriveTokens, extractSize, 
 import { CatalogueModelSchema, SizeChartSchema } from "@/schemas/seed";
 import { MAX_OBSERVED_LISTINGS, ObservedListingSchema, type ObservedListing, type Profile } from "@/schemas/domain";
 import { nextFlightChunk, rscRows } from "./gallery";
-import { topResults, type TopResult } from "./topResults";
+import { topResults, type PhotoReading, type TopResult } from "./topResults";
 
 /**
  * "Survey this search" (Feature A1/A2). On an eBay or Vinted search results page, one click reads the listing cards shown
@@ -530,12 +530,12 @@ export type TopResultsBlock = { results: TopResult[]; platformName: string; foot
  */
 export function topResultsForCase(
   surveys: SurveyRecord[],
-  args: { platform: string; pageUrl: string | null; profile: Profile | null; colourWish?: string; now: number; searchKey?: string | null },
+  args: { platform: string; pageUrl: string | null; profile: Profile | null; colourWish?: string; photoColours?: Record<string, PhotoReading>; now: number; searchKey?: string | null },
 ): TopResultsBlock | null {
   if (args.platform !== "ebay" && args.platform !== "vinted") return null;
   const survey = latestSurvey(surveys, args);
   if (!survey) return null;
-  const results = topResults(survey.cards, { profile: args.profile, query: survey.query, excludeId: args.pageUrl ? listingItemId(args.pageUrl, args.platform) : null, colourWish: args.colourWish });
+  const results = topResults(survey.cards, { profile: args.profile, query: survey.query, excludeId: args.pageUrl ? listingItemId(args.pageUrl, args.platform) : null, colourWish: args.colourWish, photoColours: args.photoColours });
   if (!results.length) return null;
   const date = new Date(survey.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   return {

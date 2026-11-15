@@ -1,6 +1,7 @@
 import { ProfileSchema, type Profile } from "@/schemas/domain";
 import { addEntry, normaliseHistory, removeEntry, type HistoryEntry } from "../lib/history";
-import { mergeSurvey, pruneSurveys, type SearchPage, type SurveyCard, type SurveyRecord } from "../lib/survey";
+import { mergeSurvey, pruneSurveys, SURVEY_TTL_MS, type SearchPage, type SurveyCard, type SurveyRecord } from "../lib/survey";
+import { pruneThumbCache, type ThumbCache } from "../lib/thumbColour";
 
 export const DEFAULT_API_BASE = "http://localhost:3000";
 
@@ -16,6 +17,10 @@ type Shape = {
   nextCaseNumber?: number;
   /** Search surveys (Feature A): on this device only, 24 hours, 300 cards in total. */
   surveys?: SurveyRecord[];
+  /** The "Colour or look" typed on a search results page, per search (kept apart from `surveys`, which the background worker writes). */
+  colourWishes?: Record<string, { w: string; t: number }>;
+  /** Colours read from card thumbnails, per card id (see lib/thumbColour.ts). */
+  thumbColours?: ThumbCache;
 };
 
 async function get<K extends keyof Shape>(key: K): Promise<Shape[K]> {
@@ -87,4 +92,28 @@ export async function saveSurveyCards(page: SearchPage, cards: SurveyCard[], now
   const { surveys, survey, added } = mergeSurvey(await loadSurveys(now), page, cards, now, scanUrl);
   await set("surveys", surveys);
   return { survey, added };
+}
+
+/** The colour or look typed for each search, newest per key; entries older than the survey TTL are dropped. */
+export async function loadColourWishes(now = Date.now()): Promise<Record<string, string>> {
+  const raw = (await get("colourWishes")) ?? {};
+  return Object.fromEntries(Object.entries(raw).filter(([, v]) => v && typeof v.w === "string" && now - v.t <= SURVEY_TTL_MS).map(([k, v]) => [k, v.w]));
+}
+
+export async function saveColourWish(searchKey: string, wish: string, now = Date.now()): Promise<void> {
+  const raw = (await get("colourWishes")) ?? {};
+  const next = Object.fromEntries(Object.entries(raw).filter(([, v]) => v && now - v.t <= SURVEY_TTL_MS));
+  if (wish.trim()) next[searchKey] = { w: wish.trim().slice(0, 100), t: now };
+  else delete next[searchKey];
+  await set("colourWishes", next);
+}
+
+/** Colours read from thumbnails, pruned to cards still in a survey. */
+export async function loadThumbColours(now = Date.now()): Promise<ThumbCache> {
+  const [cache, surveys] = [(await get("thumbColours")) ?? {}, await loadSurveys(now)];
+  return pruneThumbCache(cache, new Set(surveys.flatMap((s) => s.cards.map((c) => c.id))), now, SURVEY_TTL_MS);
+}
+
+export async function saveThumbColours(cache: ThumbCache): Promise<void> {
+  await set("thumbColours", cache);
 }

@@ -1,4 +1,4 @@
-import type { BroadColour } from "./colour";
+import type { BroadColour } from "./colourCore";
 
 /** Colour words (and common trainer colourway names) mapped to the broad colour names the photo helper uses. */
 const WORDS: [RegExp, BroadColour][] = [

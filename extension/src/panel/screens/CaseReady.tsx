@@ -47,6 +47,8 @@ export function CaseReady(props: {
   busy: boolean;
   error: string | null;
   defaultNote?: string;
+  /** The colour or look already asked on the search screen: not asked twice. */
+  defaultColour?: string;
   onInvestigate: (note: string, colour?: string) => void;
   onOpenCase: (c: CaseSummary) => void;
   onEditProfile: () => void;
@@ -55,7 +57,7 @@ export function CaseReady(props: {
   surveyNote?: string | null;
 }) {
   const [note, setNote] = useState(props.defaultNote ?? "");
-  const [colour, setColour] = useState("");
+  const [colour, setColour] = useState(props.defaultColour ?? "");
   const s = props.state;
 
   if (s.kind === "loading" || s.kind === "search") return <div className="screen" />;

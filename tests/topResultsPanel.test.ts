@@ -196,8 +196,56 @@ describe("Show next 8", () => {
     expect(nextBtn(el)).toBeUndefined();
   });
   it("always explains what was read, even when nothing ranks", async () => {
-    const counts = { read: 58, ranked: 0, sponsored: 4, auctions: 5, unpriced: 3, otherCurrency: 0, self: 0, aboveTypical: 20, otherSize: 26, typicalGBP: 44 };
+    const counts = { read: 58, ranked: 0, sponsored: 4, auctions: 5, unpriced: 3, otherCurrency: 0, self: 0, aboveTypical: 20, otherSize: 26, typicalGBP: 44, colourWanted: [], colourMatched: 0, colourOther: 0, photosChecked: 0 };
     const el = await render(h(SearchSurvey, { page, summary: "Surveyed 58 listings", added: null, busy: false, error: null, onSurvey: vi.fn(), top: [], counts }));
     expect(el.querySelector(".results-explain")?.textContent).toBe("Read 58 listings. None stood out as good value; left out: 26 not in your size, 20 above the typical £44, 9 auctions or sponsored, 3 with no single price.");
+  });
+});
+
+describe("colour or look on the search screen", () => {
+  const page = { platform: "vinted" as const, query: "nike pegasus 40", key: "vinted:nike pegasus 40" };
+  const base = { page, summary: "Surveyed 20 listings", added: null, busy: false, error: null, onSurvey: vi.fn(), top: [] as never[] };
+  const type = (el: HTMLElement, value: string) =>
+    act(() => {
+      const input = el.querySelector<HTMLInputElement>("#search-colour")!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+  it("asks before a listing is picked, and re-ranks after a short pause (not on every key)", async () => {
+    vi.useFakeTimers();
+    try {
+      const onColour = vi.fn();
+      const el = await render(h(SearchSurvey, { ...base, colour: "", onColour }));
+      expect(el.querySelector('label[for="search-colour"]')?.textContent).toBe("Colour or look");
+      type(el, "all");
+      type(el, "all white");
+      expect(onColour).not.toHaveBeenCalled();
+      act(() => void vi.advanceTimersByTime(450));
+      expect(onColour).toHaveBeenCalledTimes(1);
+      expect(onColour).toHaveBeenCalledWith("all white");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a saved colour for this search, and says when it is checking photos", async () => {
+    const el = await render(h(SearchSurvey, { ...base, colour: "navy", onColour: vi.fn(), photoProgress: { done: 12, total: 24 } }));
+    expect(el.querySelector<HTMLInputElement>("#search-colour")!.value).toBe("navy");
+    expect(el.textContent).toContain("Checking photos 12/24");
+  });
+
+  it("is not shown by screens that don't take colour (older callers)", async () => {
+    const el = await render(h(SearchSurvey, base));
+    expect(el.querySelector("#search-colour")).toBeNull();
+  });
+
+  it("the colour is already filled in when you go on to investigate, and is sent with it", async () => {
+    const state = { kind: "listing" as const, preview: { title: "Nike Pegasus 40", priceGBP: 42, platform: "vinted" as const, photoCount: 3, pageUrl: "https://www.vinted.co.uk/items/123-nike", thumbnail: null } };
+    const onInvestigate = vi.fn();
+    const el = await render(h(CaseReady, { state: state as never, profile: PROFILE, onFile: null, busy: false, error: null, onInvestigate, onOpenCase: vi.fn(), onEditProfile: vi.fn(), onAllow: vi.fn(), defaultColour: "all white" }));
+    expect(el.querySelector<HTMLInputElement>("#case-colour")!.value).toBe("all white");
+    click([...el.querySelectorAll("button")].find((b) => b.textContent === "Investigate")!);
+    expect(onInvestigate).toHaveBeenCalledWith("", "all white");
   });
 });

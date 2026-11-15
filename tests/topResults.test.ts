@@ -67,12 +67,12 @@ describe("topResults: ranking", () => {
     const cards = [card({ id: "off", price: 30, title: "Nike running trainers" }), card({ id: "on", price: 31, title: "Nike Pegasus 40" }), card({ id: "p", price: 50 }), card({ id: "q", price: 55 }), card({ id: "r", price: 60 })];
     expect(topResults(cards, { profile, query: "nike pegasus 40" })[0].card.id).toBe("on");
   });
-  it("the buyer's colour: a wanted colour in the title helps, an avoided one hurts", () => {
+  it("the buyer's colour: a wanted colour in the title helps; a listing that says it is another colour, or has an avoided one, is left out", () => {
     const cards = [card({ id: "black", price: 30, title: "Nike Pegasus 40 black" }), card({ id: "white", price: 32, title: "Nike Pegasus 40 white" }), card({ id: "p", price: 50 }), card({ id: "q", price: 55 }), card({ id: "r", price: 60 })];
     const r = topResults(cards, { profile, colourWish: "all white, no black" });
     expect(r[0].card.id).toBe("white");
     expect(r[0].reason).toContain("white in the title");
-    expect(ids(r).indexOf("black")).toBeGreaterThan(0);
+    expect(ids(r)).not.toContain("black");
   });
   it("is capped at 8, stable on ties, and empty for nothing eligible", () => {
     const many = Array.from({ length: 30 }, (_, i) => card({ id: `m${String(i).padStart(2, "0")}`, price: 20 + (i % 3) }));
@@ -94,7 +94,7 @@ describe("wishColours", () => {
   });
 });
 
-import { analyseResults, explainResults, RANKED_MAX } from "@/extension/src/lib/topResults";
+import { analyseResults, explainResults, RANKED_MAX, type TopResult } from "@/extension/src/lib/topResults";
 
 describe("analyseResults: what was left out, and why", () => {
   const cards = [
@@ -134,5 +134,71 @@ describe("analyseResults: what was left out, and why", () => {
     const many = Array.from({ length: 30 }, (_, i) => card({ id: `p${String(i).padStart(2, "0")}`, price: 20 + (i % 3) }));
     expect(analyseResults(many, { profile }).ranked.length).toBeGreaterThan(TOP_RESULTS);
     expect(RANKED_MAX).toBe(40);
+  });
+});
+
+
+describe("colour from the title and from the photo", () => {
+  const wish = "all white";
+  const base = [card({ id: "t-white", price: 30, title: "Nike Pegasus 40 white" }), card({ id: "t-black", price: 30, title: "Nike Pegasus 40 black" }), card({ id: "none-a", price: 30, title: "Nike Pegasus 40 UK 9" }), card({ id: "none-b", price: 30, title: "Nike Pegasus 40 trainers" }), card({ id: "none-c", price: 30, title: "Nike Pegasus 40 runners" }), card({ id: "p1", price: 60 }), card({ id: "p2", price: 70 })];
+  const find = (r: TopResult[], id: string) => r.find((x) => x.card.id === id);
+
+  it("with no photo readings, cards that name no colour stay in, labelled as unconfirmed", () => {
+    const { ranked, counts } = analyseResults(base, { profile, colourWish: wish });
+    expect(ids(ranked)).toContain("t-white");
+    expect(ids(ranked)).not.toContain("t-black"); // says black: not what was asked for
+    expect(find(ranked, "none-a")).toMatchObject({ colourBasis: "unconfirmed" });
+    expect(find(ranked, "none-a")!.reason).toContain("Colour not confirmed");
+    expect(counts).toMatchObject({ colourWanted: ["white"], colourMatched: 1, colourOther: 1, photosChecked: 0 });
+  });
+
+  it("a photo showing the wanted colour confirms it (weaker than a title), one showing another colour drops the card", () => {
+    const photoColours = {
+      "none-a": { colours: [{ name: "white", share: 0.7 }, { name: "grey", share: 0.2 }], multi: false },
+      "none-b": { colours: [{ name: "black", share: 0.8 }], multi: false },
+      "none-c": { colours: [{ name: "white", share: 0.35 }, { name: "black", share: 0.35 }], multi: true }, // black and white: it has white
+    };
+    const { ranked, counts } = analyseResults(base, { profile, colourWish: wish, photoColours });
+    expect(find(ranked, "none-a")).toMatchObject({ colourBasis: "photo" });
+    expect(find(ranked, "none-a")!.reason).toContain("white in the photo");
+    expect(ids(ranked)).not.toContain("none-b");
+    expect(find(ranked, "none-c")!.reason).toContain("white in the photo");
+    expect(find(ranked, "t-white")!.score).toBeGreaterThan(find(ranked, "none-a")!.score - 0.0001 - 4); // a title counts more than a photo
+    expect(counts).toMatchObject({ colourMatched: 3, colourOther: 2, photosChecked: 3 });
+  });
+
+  it("a multi-coloured or unclear photo is neutral: no bonus, no drop", () => {
+    const photoColours = { "none-a": { colours: [{ name: "grey", share: 0.3 }, { name: "navy", share: 0.28 }, { name: "red", share: 0.2 }], multi: true } };
+    const { ranked } = analyseResults(base, { profile, colourWish: wish, photoColours });
+    expect(find(ranked, "none-a")).toMatchObject({ colourBasis: "unconfirmed" });
+  });
+
+  it("an avoided colour in a photo only counts against a card", () => {
+    const photoColours = { "none-a": { colours: [{ name: "white", share: 0.5 }, { name: "black", share: 0.3 }], multi: false } };
+    const { ranked } = analyseResults(base, { profile, colourWish: "no black", photoColours });
+    expect(find(ranked, "none-a")!.reason).toContain("black in the photo");
+    expect(find(ranked, "none-b")!.score).toBeGreaterThan(find(ranked, "none-a")!.score);
+  });
+
+  it("a look-only wish ('retro') changes nothing: no colour words, no colour basis", () => {
+    const { ranked, counts } = analyseResults(base, { profile, colourWish: "retro" });
+    expect(ranked.every((r) => r.colourBasis === undefined)).toBe(true);
+    expect(counts.colourWanted).toEqual([]);
+  });
+
+  it("explains a colour that nothing matches, without inventing a search", () => {
+    const blacks = [card({ id: "b1", price: 30, title: "Nike Pegasus 40 black" }), card({ id: "b2", price: 31, title: "Nike Pegasus 40 black" }), card({ id: "b3", price: 32, title: "Nike Pegasus 40 black" }), card({ id: "b4", price: 33, title: "Nike Pegasus 40 black" })];
+    const { ranked, counts } = analyseResults(blacks, { profile, colourWish: "white", photoColours: { x: { colours: [], multi: true } } });
+    expect(ranked).toEqual([]);
+    const text = explainResults(counts);
+    expect(counts.colourOther).toBe(2); // the two at or under the typical price, both black
+    expect(text).toContain("None names or looks white (1 photo checked) (2 are in other colours).");
+    expect(text).toContain("Sleuth only sees the listings on this page");
+    expect(text).toContain("search with the colour added");
+  });
+
+  it("says how many match when some do", () => {
+    const { counts } = analyseResults(base, { profile, colourWish: wish });
+    expect(explainResults(counts)).toMatch(/1 shows white; 1 in other colours left out\.$/);
   });
 });

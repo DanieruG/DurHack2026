@@ -17,7 +17,9 @@
     "https://www.ebay.co.uk/*",
     "https://www.ebay.com/*",
     "https://www.facebook.com/*",
-    "https://www.depop.com/*"
+    "https://www.depop.com/*",
+    "https://i.ebayimg.com/*",
+    "https://*.vinted.net/*"
   ],
   "optional_host_permissions": ["https://*/*"]
 }

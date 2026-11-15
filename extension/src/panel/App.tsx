@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { CaseDetail, IdentityChoice } from "@/schemas/api";
 import type { Capture, CaseDiff, CaseSummary, Profile } from "@/schemas/domain";
 import { ApiError, createApi } from "../chrome/api";
-import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, loadSurveys, rememberCase, saveHistory, saveProfile, saveSettings, saveSurveyCards } from "../chrome/storage";
+import { DEFAULT_API_BASE, forgetCase, loadColourWishes, loadHistory, loadProfile, loadSettings, loadSurveys, loadThumbColours, saveColourWish, saveThumbColours, rememberCase, saveHistory, saveProfile, saveSettings, saveSurveyCards } from "../chrome/storage";
 import { caseForUrl, historyRows, keepFound, type HistoryEntry } from "../lib/history";
 import { activeTabUrl, captureActiveTab, onActiveListingChange, openListingTab, requestSiteAccess, surveyActiveTab } from "../chrome/tab";
 import { cardsFromCapture, scanUrlOf, searchPageOf, summariseSurvey, summaryLine, surveyForCase, topResultsForCase, type SearchPage, type SurveyRecord } from "../lib/survey";
-import { analyseResults, RANKED_MAX } from "../lib/topResults";
+import { analyseResults, RANKED_MAX, wishColours, type PhotoReading } from "../lib/topResults";
+import { browserThumbDeps, readThumbnails, thumbCandidates, toReading, type ThumbCache } from "../lib/thumbColour";
 import { listingItemId } from "@/lib/listingScope";
 import { detectPlatform } from "@/lib/platform";
 import { SearchSurvey } from "./screens/SearchSurvey";
@@ -50,6 +51,13 @@ export function App() {
   const [summaries, setSummaries] = useState<Record<string, CaseSummary>>({});
   /** Search surveys kept on this device (written by the background worker as well as here): the top results come from them. */
   const [surveys, setSurveys] = useState<SurveyRecord[]>([]);
+  /** The colour or look typed on each search results page, and what the thumbnails said about each card's colour. */
+  const [colourWishes, setColourWishes] = useState<Record<string, string>>({});
+  const thumbCache = useRef<ThumbCache>({});
+  const [photoColours, setPhotoColours] = useState<Record<string, PhotoReading>>({});
+  const photoColoursRef = useRef(photoColours);
+  photoColoursRef.current = photoColours;
+  const [photoProgress, setPhotoProgress] = useState<{ done: number; total: number } | null>(null);
   const [historyState, setHistoryState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [ready, setReady] = useState<ReadyState>({ kind: "loading" });
   const [captured, setCaptured] = useState<Captured | null>(null);
@@ -67,7 +75,7 @@ export function App() {
   /** The search survey screen's state. */
   const [survey, setSurvey] = useState<{ summary: string | null; added: number | null; busy: boolean; error: string | null }>({ summary: null, added: null, busy: false, error: null });
   /** A suggested listing opened from a case file: investigate it as soon as its page is read. */
-  const pendingInvestigate = useRef<{ url: string; loaded: boolean; searchKey?: string | null } | null>(null);
+  const pendingInvestigate = useRef<{ url: string; loaded: boolean; searchKey?: string | null; colour?: string } | null>(null);
   /** The search results page the panel last saw: a listing investigated next is compared with that search. */
   const lastSearchKey = useRef<string | null>(null);
   /** "Compared with your survey of “nike pegasus 40” (38 listings)" on the Investigate screen. */
@@ -82,11 +90,12 @@ export function App() {
             pageUrl: active.detail?.pageUrl ?? active.pageUrl ?? null,
             profile,
             colourWish: active.detail?.needs.colourWish ?? active.colourWish,
+            photoColours,
             now: Date.now(),
             searchKey: active.searchKey,
           })
         : null,
-    [surveys, active, profile],
+    [surveys, active, profile, photoColours],
   );
 
   /** The ranked results for the search page on screen (all of them, up to RANKED_MAX; the screen pages through them). */
@@ -95,9 +104,45 @@ export function App() {
     if (!searchPage) return null;
     const record = surveys.find((x) => x.key === searchPage.key);
     if (!record) return null;
-    const a = analyseResults(record.cards, { profile, query: searchPage.query });
+    const a = analyseResults(record.cards, { profile, query: searchPage.query, colourWish: colourWishes[searchPage.key], photoColours });
     return { ...a, ranked: a.ranked.slice(0, RANKED_MAX) };
-  }, [searchPage, surveys, profile]);
+  }, [searchPage, surveys, profile, colourWishes, photoColours]);
+
+  // When a colour is named: look at the photos of the best candidates whose title names no colour (a few at a time, within a
+  // short budget), re-ranking as each is read. Nothing unread is ever hidden because of it.
+  const wishHere = searchPage ? (colourWishes[searchPage.key] ?? "") : "";
+  useEffect(() => {
+    if (!searchPage) return;
+    const record = surveys.find((x) => x.key === searchPage.key);
+    const w = wishColours(wishHere);
+    if (!record || (!w.wanted.length && !w.avoided.length)) {
+      setPhotoProgress(null);
+      return;
+    }
+    const base = analyseResults(record.cards, { profile, query: searchPage.query, colourWish: wishHere, photoColours: photoColoursRef.current });
+    const cands = thumbCandidates(base.ranked, true, thumbCache.current);
+    if (!cands.length) {
+      setPhotoProgress(null);
+      return;
+    }
+    const ctl = new AbortController();
+    let done = 0;
+    setPhotoProgress({ done, total: cands.length });
+    void readThumbnails(cands, thumbCache.current, browserThumbDeps, {
+      signal: ctl.signal,
+      onReading: (id, reading) => {
+        done++;
+        setPhotoColours((p) => ({ ...p, [id]: reading }));
+        setPhotoProgress({ done, total: cands.length });
+      },
+    }).then(() => {
+      if (ctl.signal.aborted) return;
+      setPhotoProgress(null);
+      void saveThumbColours(thumbCache.current).catch(() => undefined);
+    });
+    return () => ctl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchPage?.key, wishHere, surveys]);
 
   const api = useMemo(() => createApi(apiBase), [apiBase]);
   const loadEvalSummary = useCallback(() => api.getEvalSummary(), [api]);
@@ -127,6 +172,21 @@ export function App() {
       live = false;
       chrome.storage.onChanged.removeListener(onChanged);
     };
+  }, []);
+
+  // ---------- colour or look per search, and colours read from thumbnails ----------
+  useEffect(() => {
+    void (async () => {
+      const [wishes, cache] = await Promise.all([loadColourWishes(), loadThumbColours()]);
+      setColourWishes(wishes);
+      thumbCache.current = cache;
+      setPhotoColours(Object.fromEntries(Object.entries(cache).map(([id, e]) => [id, toReading(e)])));
+    })().catch(() => undefined);
+  }, []);
+
+  const changeColour = useCallback((searchKey: string, value: string) => {
+    setColourWishes((w) => ({ ...w, [searchKey]: value.trim() }));
+    void saveColourWish(searchKey, value).catch(() => undefined);
   }, []);
 
   // ---------- history: summaries come from the server; cases it can't find are dropped silently ----------
@@ -208,7 +268,7 @@ export function App() {
     pendingInvestigate.current = null;
     if (ready.kind !== "listing") return; // can't capture it automatically: the normal screen (e.g. Allow) stays up
     const id = listingItemId(want.url, detectPlatform(want.url));
-    if (id && id === listingItemId(ready.preview.pageUrl, ready.preview.platform)) void investigate("", undefined, want.searchKey);
+    if (id && id === listingItemId(ready.preview.pageUrl, ready.preview.platform)) void investigate("", want.colour, want.searchKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, view.name, busy]);
 
@@ -302,7 +362,8 @@ export function App() {
 
   /** Investigate a suggested listing: open it, and investigate as soon as it's read (else the normal Investigate button). */
   const investigateListing = async (url: string, searchKey?: string | null) => {
-    const pending = { url, loaded: false, searchKey: searchKey ?? lastSearchKey.current };
+    const key = searchKey ?? lastSearchKey.current;
+    const pending = { url, loaded: false, searchKey: key, colour: key ? colourWishes[key] : undefined };
     pendingInvestigate.current = pending;
     setError(null);
     unsub.current?.();
@@ -459,12 +520,16 @@ export function App() {
           onSurvey={() => void surveyNow(ready.page)}
           top={searchAnalysis?.ranked}
           counts={searchAnalysis?.counts}
+          colour={wishHere}
+          onColour={(v) => changeColour(ready.page.key, v)}
+          photoProgress={photoProgress}
           onInvestigate={(url) => void investigateListing(url, ready.page.key)}
         />
       ) : profile && (
         <CaseReady
           surveyNote={surveyNote}
           key={ready.kind === "listing" ? ready.preview.pageUrl : ready.kind}
+          defaultColour={colourWishes[lastSearchKey.current ?? ""] ?? ""}
           state={ready}
           profile={profile}
           onFile={onFile}
