@@ -78,6 +78,12 @@ describe("offer colour matching", () => {
     expect(titleColourMatch("Nike Revolution 6 Next Nature Black/White", bw)).toEqual({ match: "same", evidence: "Title says Black/White" });
     expect(titleColourMatch("Nike Revolution 6 Next Nature White/Black", bw).match).toBe("same"); // same pair of colours
     expect(titleColourMatch("Nike Revolution 6 Next Nature Grey", bw)).toEqual({ match: "different", evidence: "Title says Grey" });
+    expect(titleColourMatch("Nike Revolution 6 Next Nature Black", bw).match).toBe("same"); // a subset of the listing's colours
+    // Any colour the listing doesn't have is a different colourway (seen on live P-6000 offers).
+    const gw = listing(["grey", "white"]);
+    expect(titleColourMatch("Nike P-6000 Silver Burgundy Plum Chalk (Women's)", gw)).toEqual({ match: "different", evidence: "Title says Grey/Red/Purple" });
+    expect(titleColourMatch("Nike P-6000 'White Metallic Silver Black'", gw).match).toBe("different");
+    expect(titleColourMatch("Mens Nike P-6000 Trainers Metallic Silver", gw).match).toBe("same");
     expect(titleColourMatch("Nike Revolution 6 Next Nature", bw)).toEqual({ match: "unknown" });
   });
 

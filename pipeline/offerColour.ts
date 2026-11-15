@@ -13,13 +13,15 @@ export const COLOURS_VARY = "Colours vary: price includes other colourways";
 export const MAX_THUMBNAILS = 12;
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const sameSet = (a: BroadColour[], b: BroadColour[]) => a.length === b.length && a.every((x) => b.includes(x));
 
-/** Compare colours: same when the main colours agree (or the sets do), different when they don't. */
+/**
+ * Compare title colours: same only when every colour the offer names is one of the listing's (so "Grey" or "White/Grey"
+ * match a grey and white pair); any other colour named ("Silver Burgundy Plum", "White/Grey/Black") is a different
+ * colourway.
+ */
 export function compareColours(offer: BroadColour[], listing: BroadColour[]): ColourMatch {
   if (!offer.length || !listing.length) return "unknown";
-  if (offer[0] === listing[0] || sameSet(offer, listing)) return "same";
-  return "different";
+  return offer.every((c) => listing.includes(c)) ? "same" : "different";
 }
 
 /** Steps 1 and 2: style code, then colour words in the offer title. */
@@ -36,9 +38,10 @@ export function titleColourMatch(title: string, listing: ListingColour | undefin
 export function thumbnailColourMatch(a: ColourAnalysis, listing: ListingColour): { match: ColourMatch; evidence: string } {
   const evidence = `Thumbnail looks ${describeColours(a) || "unclear"}`;
   if (a.multi || !a.colours.length || !listing.names.length) return { match: "unknown", evidence };
+  // Weak evidence, so only the clearest cases: the thumbnail's main colour is the listing's main colour (same), or not
+  // one of the listing's colours at all (different). Shading makes white read as grey, so anything else is unclear.
   const top = a.colours[0].name;
-  const top2 = a.colours.filter((c) => c.share >= 0.15).slice(0, 2).map((c) => c.name);
-  if (top === listing.names[0] || sameSet(top2, listing.names)) return { match: "same", evidence };
+  if (top === listing.names[0]) return { match: "same", evidence };
   if (!listing.names.includes(top)) return { match: "different", evidence };
   return { match: "unknown", evidence };
 }
