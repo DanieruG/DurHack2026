@@ -19,8 +19,8 @@ const auto = createAutoSurvey({
       return null;
     }
   },
-  save: async (page, cards) => {
-    await saveSurveyCards(page, cards);
+  save: async (page, cards, scanUrl) => {
+    await saveSurveyCards(page, cards, Date.now(), scanUrl);
   },
   urlOf: async (tabId) => (await chrome.tabs.get(tabId).catch(() => null))?.url ?? null,
   schedule: (fn, ms) => setTimeout(fn, ms),

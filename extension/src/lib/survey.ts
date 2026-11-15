@@ -33,6 +33,8 @@ export type SurveyRecord = {
   createdAt: string;
   updatedAt: string;
   cards: SurveyCard[];
+  /** The results page the cards were last read from (see scanUrlOf): reading the same page again replaces them. */
+  scanUrl?: string;
 };
 
 // ---------- search pages ----------
@@ -69,7 +71,20 @@ export function searchPageOf(url: string | null | undefined): SearchPage | null 
   }
   if (!platform) return null;
   const query = normaliseQuery(raw);
-  return { platform, query, key: `${platform}:${query}` };
+  // A category page with no search words is its own survey, not one shared by every category.
+  const scope = query ? "" : `:${u.searchParams.get("_sacat") ?? u.pathname.replace(/\/+$/, "")}`;
+  return { platform, query, key: `${platform}:${query}${scope}` };
+}
+
+/** A results page's identity for "read it again": host, path and every parameter except tracking, sorted. */
+export function scanUrlOf(url: string): string {
+  try {
+    const u = new URL(url);
+    const params = [...u.searchParams.entries()].filter(([k]) => !/^(_trk|_trkparms|_trksid|rt|ref|referrer|utm_|mkcid|mkrid|campid|toolid|customid|siteid)/i.test(k)).sort(([a], [b]) => a.localeCompare(b));
+    return `${u.hostname}${u.pathname}?${params.map(([k, v]) => `${k}=${v}`).join("&")}`;
+  } catch {
+    return url;
+  }
 }
 
 // ---------- in-page collector ----------
@@ -130,17 +145,81 @@ export function collectSearchResults(): RawSearchCapture {
   const cards: RawSearchCard[] = [];
   const seen = new Set<Element>();
 
+  // Blocks that are not this search's results: "Recently viewed", related searches, sponsored or recommended carousels.
+  const FOREIGN_HEADING = /^(your )?(recently viewed|related searches|related sponsored|sponsored|similar items|items you may like|you may also like|people also viewed|recommended for you|today's picks|more to explore|inspired by)/i;
+  const FOREIGN_CONTAINER = /carousel|recent|merch|related-search|recommend|similar|also-viewed|also-bought|inspired|btf|pf-bottom/i;
+  const headingBefore = (el: Element) => {
+    // The nearest heading before this element, looking at earlier siblings and then up the tree.
+    for (let n: Element | null = el; n && n !== document.body; n = n.parentElement) {
+      for (let p = n.previousElementSibling; p; p = p.previousElementSibling) {
+        const h = p.matches("h1, h2, h3, h4, [role='heading']") ? p : p.querySelector(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > [role='heading'], :scope > * > h2, :scope > * > h3");
+        if (h) return clean(h.textContent);
+      }
+    }
+    return "";
+  };
+  const inForeignBlock = (root: Element, stop: Element | null) => {
+    for (let a = root.parentElement; a && a !== document.body && a !== stop; a = a.parentElement) {
+      if (FOREIGN_CONTAINER.test(`${a.className?.toString?.() ?? ""} ${a.id} ${a.getAttribute("data-viewport") ?? ""}`)) return true;
+    }
+    return FOREIGN_HEADING.test(headingBefore(root));
+  };
+  // The search words, to drop cards that have nothing to do with them (eBay's "matching fewer words" river, strays).
+  const queryWords = (() => {
+    try {
+      const u = new URL(location.href);
+      return (u.searchParams.get("_nkw") ?? u.searchParams.get("search_text") ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .split(" ")
+        .filter((w) => w.length > 1);
+    } catch {
+      return [] as string[];
+    }
+  })();
+  const onTopic = (title: string) => {
+    if (queryWords.length < 2) return true;
+    const t = title.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+    return queryWords.some((w) => t.includes(w));
+  };
+
   if (isEbay) {
+    // Candidate cards over the whole page, then narrowed to the results list itself.
+    const roots: Element[] = [];
     document.querySelectorAll<HTMLElement>("li.s-item, li.s-card, div.s-card, [data-listingid]").forEach((node) => {
       const root = node.closest("li") ?? node;
       if (seen.has(root)) return;
       seen.add(root);
+      if (root.querySelector('a[href*="/itm/"]')) roots.push(root);
+    });
+    seen.clear();
+    const list = document.querySelector("ul.srp-results, #srp-river-results ul, .srp-river-main ul");
+    let chosen: Element[];
+    if (list) chosen = roots.filter((r) => list.contains(r));
+    else {
+      // No known results list: keep the largest group of cards that share a list parent (the real results), if it is most of them.
+      const groups = new Map<Element, Element[]>();
+      for (const r of roots) {
+        const g = r.closest("ul, ol") ?? r.parentElement ?? document.body;
+        groups.set(g, [...(groups.get(g) ?? []), r]);
+      }
+      const best = [...groups.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+      chosen = best.length * 2 >= roots.length ? best : roots;
+    }
+    const marker = document.querySelector("[class*='REWRITE_START']") ?? [...document.querySelectorAll("li, div, h2, h3")].find((e) => e.children.length < 3 && /^results matching fewer words/i.test(clean(e.textContent)));
+    const kept: Element[] = [];
+    for (const r of chosen) {
+      if (marker && (marker.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING)) continue; // after "results matching fewer words"
+      if (inForeignBlock(r, list)) continue;
+      kept.push(r);
+    }
+    kept.forEach((root) => {
       const link = root.querySelector<HTMLAnchorElement>('a[href*="/itm/"]');
       if (!link) return;
       const title = clean(root.querySelector(".s-item__title, .s-card__title, [role='heading']")?.textContent)
         .replace(/^new listing\s*/i, "")
         .replace(/\s*opens in a new window or tab$/i, "");
-      if (!title || /^shop on ebay$/i.test(title)) return;
+      if (!title || /^shop on ebay$/i.test(title) || !onTopic(title)) return;
       const text = clean(root.textContent);
       const auction = /\b\d+\s+bids?\b/i.test(text) || /\bplace bid\b/i.test(text) || /\btime left\b/i.test(text);
       const subtitle = clean(root.querySelector(".SECONDARY_INFO, .s-card__subtitle, .s-item__subtitle")?.textContent);
@@ -160,7 +239,9 @@ export function collectSearchResults(): RawSearchCapture {
       });
     });
   } else {
-    document
+    // Only the results grid: not the "recently viewed" or home-feed blocks Vinted can show elsewhere on the page.
+    const grid = document.querySelector('.feed-grid, [data-testid="feed-grid"]');
+    (grid ?? document)
       .querySelectorAll<HTMLElement>('[data-testid^="product-item-id-"], .new-item-box__container, .feed-grid__item')
       .forEach((node) => {
         const root = node.closest(".feed-grid__item") ?? node;
@@ -170,7 +251,7 @@ export function collectSearchResults(): RawSearchCapture {
         if (!link) return;
         const summary = clean(link.getAttribute("title") || root.querySelector("[title*='£']")?.getAttribute("title")) || null;
         const title = clean(root.querySelector('[data-testid$="--description-title"]')?.textContent) || (summary ?? "").split(/,\s*(?:brand|condition|size):/i)[0];
-        if (!title) return;
+        if (!title || !onTopic(title)) return;
         const badge = clean(root.querySelector('[data-testid*="bump" i], [data-testid*="promot" i], [class*="bump" i]')?.textContent);
         cards.push({
           href: link.href,
@@ -353,8 +434,9 @@ export function cardsFromCapture(raw: RawSearchCapture, platform: SurveyPlatform
     const e = fromData.get(d.id);
     out.set(d.id, e ? { ...d, ...stripUndefined(e), sponsored: e.sponsored || d.sponsored, thumbnailUrl: e.thumbnailUrl ?? d.thumbnailUrl } : d);
   }
-  // Cards only in the page data are cards the page holds but hasn't drawn yet; they're still on this results page.
-  for (const e of data) if (!out.has(e.id)) out.set(e.id, e);
+  // The page data is used to fill in the cards drawn on the page. It is only a source of cards itself when none were drawn:
+  // after Vinted navigates within the page it can still hold the previous page's feed, which isn't this search.
+  if (!dom.length) for (const e of data) if (!out.has(e.id)) out.set(e.id, e);
   return [...out.values()];
 }
 
@@ -364,11 +446,14 @@ function stripUndefined<T extends object>(o: T): Partial<T> {
 
 // ---------- the local cache ----------
 
-const expired = (s: SurveyRecord, now: number) => now - Date.parse(s.createdAt) > SURVEY_TTL_MS;
+const stale = (c: SurveyCard, now: number) => now - Date.parse(c.seenAt) > SURVEY_TTL_MS;
 
-/** Drop surveys older than 24 hours, then keep at most 300 cards in total, dropping the oldest cards first. */
+/**
+ * Drop cards not seen for 24 hours (each card ages on its own, so a search you keep reading stays fresh while what has
+ * left the page ages out), then keep at most 300 cards in total, dropping the oldest cards first.
+ */
 export function pruneSurveys(surveys: SurveyRecord[], now: number): SurveyRecord[] {
-  const live = surveys.filter((s) => !expired(s, now));
+  const live = surveys.map((s) => ({ ...s, cards: s.cards.filter((c) => !stale(c, now)) })).filter((s) => s.cards.length > 0);
   const all = live.flatMap((s) => s.cards.map((c) => ({ key: s.key, c })));
   if (all.length > MAX_SURVEY_CARDS) {
     const keep = new Set(
@@ -382,26 +467,39 @@ export function pruneSurveys(surveys: SurveyRecord[], now: number): SurveyRecord
   return live.filter((s) => s.cards.length > 0);
 }
 
-/** Merge a new survey of a page into the same search's survey, deduped by listing id (the newer card wins). */
+/**
+ * Fold a read of a results page into the same search's survey. Reading the SAME page again (same `scanUrl`) replaces the
+ * survey's cards with what is on the page now, so nothing stale or off-page lingers. A different page of the same
+ * search (next page, another sort or filter) is merged in, deduped by listing id (the newer card wins).
+ */
 export function mergeSurvey(
   surveys: SurveyRecord[],
   page: SearchPage,
   cards: SurveyCard[],
   now: number,
+  scanUrl?: string,
 ): { surveys: SurveyRecord[]; survey: SurveyRecord | null; added: number } {
   const at = new Date(now).toISOString();
   const live = pruneSurveys(surveys.map((s) => ({ ...s, cards: [...s.cards] })), now);
   const existing = live.find((s) => s.key === page.key);
   const base: SurveyRecord = existing ?? { key: page.key, platform: page.platform, query: page.query, createdAt: at, updatedAt: at, cards: [] };
-  const byId = new Map(base.cards.map((c) => [c.id, c]));
+  const replace = !!scanUrl && base.scanUrl === scanUrl;
+  const before = new Set(base.cards.map((c) => c.id));
+  const byId = new Map((replace ? [] : base.cards).map((c) => [c.id, c]));
   let added = 0;
   for (const c of cards) {
-    if (!byId.has(c.id)) added++;
+    if (!before.has(c.id)) added++;
     byId.set(c.id, c);
   }
-  const merged: SurveyRecord = { ...base, updatedAt: at, cards: [...byId.values()] };
+  const merged: SurveyRecord = { ...base, updatedAt: at, cards: [...byId.values()], ...(scanUrl ? { scanUrl } : {}) };
   const next = pruneSurveys([merged, ...live.filter((s) => s.key !== page.key)], now);
   return { surveys: next, survey: next.find((s) => s.key === page.key) ?? null, added };
+}
+
+/** The survey for the search the listing came from when it is known and still there, else the most recent on the platform. */
+function latestSurvey(surveys: SurveyRecord[], args: { platform: string; now: number; searchKey?: string | null }): SurveyRecord | undefined {
+  const live = pruneSurveys(surveys.map((s) => ({ ...s, cards: [...s.cards] })), args.now).filter((s) => s.platform === args.platform);
+  return (args.searchKey ? live.find((s) => s.key === args.searchKey) : undefined) ?? live.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
 }
 
 /**
@@ -410,12 +508,10 @@ export function mergeSurvey(
  */
 export function surveyForCase(
   surveys: SurveyRecord[],
-  args: { platform: string; pageUrl: string; now: number },
+  args: { platform: string; pageUrl: string; now: number; /** The search the listing came from, when known. */ searchKey?: string | null },
 ): { observedListings: SurveyCard[]; searchQuery?: string; survey: SurveyRecord } | null {
   if (args.platform !== "ebay" && args.platform !== "vinted") return null;
-  const survey = pruneSurveys(surveys.map((s) => ({ ...s, cards: [...s.cards] })), args.now)
-    .filter((s) => s.platform === args.platform)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  const survey = latestSurvey(surveys, args);
   if (!survey) return null;
   const current = listingItemId(args.pageUrl, args.platform);
   const observedListings = survey.cards.filter((c) => c.id !== current).slice(0, MAX_OBSERVED_LISTINGS);
@@ -434,12 +530,10 @@ export type TopResultsBlock = { results: TopResult[]; platformName: string; foot
  */
 export function topResultsForCase(
   surveys: SurveyRecord[],
-  args: { platform: string; pageUrl: string | null; profile: Profile | null; colourWish?: string; now: number },
+  args: { platform: string; pageUrl: string | null; profile: Profile | null; colourWish?: string; now: number; searchKey?: string | null },
 ): TopResultsBlock | null {
   if (args.platform !== "ebay" && args.platform !== "vinted") return null;
-  const survey = pruneSurveys(surveys.map((s) => ({ ...s, cards: [...s.cards] })), args.now)
-    .filter((s) => s.platform === args.platform)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  const survey = latestSurvey(surveys, args);
   if (!survey) return null;
   const results = topResults(survey.cards, { profile: args.profile, query: survey.query, excludeId: args.pageUrl ? listingItemId(args.pageUrl, args.platform) : null, colourWish: args.colourWish });
   if (!results.length) return null;

@@ -1,4 +1,4 @@
-import { cardsFromCapture, searchPageOf, type RawSearchCapture, type SearchPage, type SurveyCard } from "./survey";
+import { cardsFromCapture, scanUrlOf, searchPageOf, type RawSearchCapture, type SearchPage, type SurveyCard } from "./survey";
 
 /**
  * Read an eBay or Vinted search results page automatically when a search is submitted, and keep its cards on this device
@@ -13,7 +13,8 @@ export const RESCAN_DELAYS_MS = [1500, 4500];
 export type AutoSurveyDeps = {
   /** Read the cards in a tab, or null when it can't be read (no access, navigated away, closed). */
   read: (tabId: number) => Promise<RawSearchCapture | null>;
-  save: (page: SearchPage, cards: SurveyCard[]) => Promise<void>;
+  /** `scanUrl`: reading the same results page again replaces the survey's cards (see mergeSurvey). */
+  save: (page: SearchPage, cards: SurveyCard[], scanUrl: string) => Promise<void>;
   /** The tab's current URL (it may have moved on since the scan was scheduled). */
   urlOf: (tabId: number) => Promise<string | null>;
   schedule: (fn: () => void, ms: number) => unknown;
@@ -39,7 +40,7 @@ export function createAutoSurvey(deps: AutoSurveyDeps) {
       const current = searchPageOf(raw.pageUrl) ?? page;
       const cards = cardsFromCapture(raw, current.platform, (deps.now?.() ?? new Date()).toISOString());
       if (!cards.length) return 0;
-      await deps.save(current, cards);
+      await deps.save(current, cards, scanUrlOf(raw.pageUrl));
       return cards.length;
     } catch {
       return 0; // a page we can't read is simply not surveyed

@@ -83,8 +83,8 @@ export async function loadSurveys(now = Date.now()): Promise<SurveyRecord[]> {
 }
 
 /** Merge freshly surveyed cards into the same search's survey and save. */
-export async function saveSurveyCards(page: SearchPage, cards: SurveyCard[], now = Date.now()): Promise<{ survey: SurveyRecord | null; added: number }> {
-  const { surveys, survey, added } = mergeSurvey(await loadSurveys(now), page, cards, now);
+export async function saveSurveyCards(page: SearchPage, cards: SurveyCard[], now = Date.now(), scanUrl?: string): Promise<{ survey: SurveyRecord | null; added: number }> {
+  const { surveys, survey, added } = mergeSurvey(await loadSurveys(now), page, cards, now, scanUrl);
   await set("surveys", surveys);
   return { survey, added };
 }

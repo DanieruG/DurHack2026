@@ -11,6 +11,7 @@ import {
   parsePrice,
   parseVintedSummary,
   pruneSurveys,
+  scanUrlOf,
   queryModel,
   searchPageOf,
   summariseSurvey,
@@ -37,7 +38,10 @@ describe("search pages", () => {
   it("recognises eBay and Vinted search results and normalises the query", () => {
     expect(searchPageOf("https://www.ebay.co.uk/sch/i.html?_nkw=Nike+Pegasus+40&_sacat=0")).toEqual({ platform: "ebay", query: "nike pegasus 40", key: "ebay:nike pegasus 40" });
     expect(searchPageOf("https://www.vinted.co.uk/catalog?search_text=Pegasus%2040!&order=newest_first")).toEqual({ platform: "vinted", query: "pegasus 40", key: "vinted:pegasus 40" });
-    expect(searchPageOf("https://www.vinted.co.uk/catalog/1231-mens-trainers")?.key).toBe("vinted:");
+    // A category page with no search words is its own survey, not one shared by every category.
+    expect(searchPageOf("https://www.vinted.co.uk/catalog/1231-mens-trainers")?.key).toBe("vinted::/catalog/1231-mens-trainers");
+    expect(searchPageOf("https://www.vinted.co.uk/catalog/5-womens-boots")?.key).not.toBe(searchPageOf("https://www.vinted.co.uk/catalog/1231-mens-trainers")?.key);
+    expect(searchPageOf("https://www.ebay.co.uk/sch/i.html?_sacat=15709&_nkw=")?.key).toBe("ebay::15709");
     expect(searchPageOf("https://www.ebay.co.uk/itm/1234567890")).toBeNull();
     expect(searchPageOf("https://www.vinted.co.uk/items/123-nike")).toBeNull();
     expect(searchPageOf("https://www.depop.com/search/?q=nike")).toBeNull();
@@ -191,10 +195,24 @@ describe("local survey cache", () => {
     expect(second.survey!.createdAt).toBe(first.survey!.createdAt);
   });
 
-  it("expires surveys after 24 hours", () => {
-    const old: SurveyRecord = { key: "vinted:old", platform: "vinted", query: "old", createdAt: iso(SURVEY_TTL_MS + 1), updatedAt: iso(1000), cards: [mk("9", iso(1000))] };
-    const fresh: SurveyRecord = { ...old, key: "vinted:new", createdAt: iso(SURVEY_TTL_MS - 1000) };
-    expect(pruneSurveys([old, fresh], NOW).map((s) => s.key)).toEqual(["vinted:new"]);
+  it("ages each card out after 24 hours, so a search you keep reading stays fresh and what left the page goes", () => {
+    const old: SurveyRecord = { key: "vinted:old", platform: "vinted", query: "old", createdAt: iso(SURVEY_TTL_MS * 3), updatedAt: iso(SURVEY_TTL_MS + 5), cards: [mk("9", iso(SURVEY_TTL_MS + 1))] };
+    const fresh: SurveyRecord = { ...old, key: "vinted:new", cards: [mk("1", iso(SURVEY_TTL_MS - 1000)), mk("2", iso(SURVEY_TTL_MS + 1000))] };
+    const out = pruneSurveys([old, fresh], NOW);
+    expect(out.map((s) => s.key)).toEqual(["vinted:new"]);
+    expect(out[0].cards.map((c) => c.id)).toEqual(["1"]); // the old card goes, the survey (created long ago) stays
+  });
+
+  it("reading the same results page again REPLACES the cards; another page of the search is merged", () => {
+    const url = "https://www.vinted.co.uk/catalog?search_text=nike+pegasus+40";
+    const first = mergeSurvey([], page, [mk("1", iso(60_000)), mk("2", iso(60_000)), mk("recent", iso(60_000))], NOW - 60_000, scanUrlOf(url));
+    const again = mergeSurvey(first.surveys, page, [mk("1", iso(0)), mk("3", iso(0))], NOW, scanUrlOf(`${url}&referrer=x`)); // tracking params don't make a new page
+    expect(again.survey!.cards.map((c) => c.id)).toEqual(["1", "3"]); // "2" and "recent" are gone
+    expect(again.added).toBe(1);
+    const nextPage = mergeSurvey(again.surveys, page, [mk("4", iso(0))], NOW, scanUrlOf(`${url}&page=2`));
+    expect(nextPage.survey!.cards.map((c) => c.id)).toEqual(["1", "3", "4"]);
+    expect(scanUrlOf(`${url}&order=price_low_to_high`)).not.toBe(scanUrlOf(url));
+    expect(scanUrlOf("https://www.ebay.co.uk/sch/i.html?_nkw=x&_trksid=p1&_sacat=0")).toBe(scanUrlOf("https://www.ebay.co.uk/sch/i.html?_sacat=0&_nkw=x"));
   });
 
   it("keeps at most 300 cards in total, dropping the oldest first", () => {
@@ -214,7 +232,10 @@ describe("local survey cache", () => {
     expect(s?.searchQuery).toBe("nike pegasus 40");
     expect(s?.observedListings.map((c) => c.id)).toEqual(["2"]);
     expect(surveyForCase([older, newer], { platform: "depop", pageUrl: "https://www.depop.com/products/x", now: NOW })).toBeNull();
-    expect(surveyForCase([{ ...newer, createdAt: iso(SURVEY_TTL_MS + 5) }], { platform: "vinted", pageUrl: "https://www.vinted.co.uk/items/9-x", now: NOW })).toBeNull();
+    expect(surveyForCase([{ ...newer, cards: [mk("2", iso(SURVEY_TTL_MS + 5))] }], { platform: "vinted", pageUrl: "https://www.vinted.co.uk/items/9-x", now: NOW })).toBeNull();
+    // The search the listing came from wins over a more recent one.
+    expect(surveyForCase([older, newer], { platform: "vinted", pageUrl: "https://www.vinted.co.uk/items/9-x", now: NOW, searchKey: "vinted:x" })?.searchQuery).toBe("x");
+    expect(surveyForCase([older, newer], { platform: "vinted", pageUrl: "https://www.vinted.co.uk/items/9-x", now: NOW, searchKey: "vinted:gone" })?.searchQuery).toBe("nike pegasus 40");
   });
 });
 
