@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CheckName, CheckResult, Lead, NextMove, VerdictLabel } from "@/schemas/domain";
+import type { CheckName, CheckResult, Lead, NextMove, Platform, VerdictLabel, WarningSignal } from "@/schemas/domain";
 import { generateStructured } from "@/gemini/structured";
 import type { GeminiClient } from "@/gemini/client";
 import { validateNextMoveText } from "./verdict/validate";
@@ -135,6 +135,61 @@ const BEFORE_YOU_PAY = [
 
 export const BUY_NEW_MOVE_ID = "nm_buy_new";
 
+const SIGNAL_PROTECTION_MOVE_ID = "nm_signal_protection";
+const AUTHENTICITY_MOVE_ID = "nm_authenticity_check";
+
+function platformName(platform: Platform | undefined): string {
+  switch (platform) {
+    case "vinted": return "Vinted";
+    case "ebay": return "eBay";
+    case "facebook": return "Facebook Marketplace";
+    case "depop": return "Depop";
+    default: return "the platform";
+  }
+}
+
+function signalMoves(args: { checks: CheckResult[]; signals: WarningSignal[]; platform?: Platform }): { beforeYouPay: NextMove[]; questions: NextMove[] } {
+  const beforeYouPay: NextMove[] = [];
+  const questions: NextMove[] = [];
+  if (args.signals.length) {
+    beforeYouPay.push({
+      id: SIGNAL_PROTECTION_MOVE_ID,
+      kind: "before_you_pay",
+      text: `Pay through ${platformName(args.platform)} so buyer protection applies.`,
+      relatesTo: [],
+    });
+  }
+  const price = args.checks.find((c) => c.check === "price");
+  const priceDetails = price?.details as Details;
+  const listingPrice = priceDetails?.listingPriceGBP;
+  if (typeof listingPrice === "number" && listingPrice >= 150) {
+    beforeYouPay.push({
+      id: AUTHENTICITY_MOVE_ID,
+      kind: "before_you_pay",
+      text: `Check whether ${platformName(args.platform)} offers an authenticity check for this item before you pay.`,
+      relatesTo: ["condition", "identify"],
+    });
+  }
+  if (args.signals.some((s) => s.id === "expected_photos_missing")) {
+    const condition = args.checks.find((c) => c.check === "condition");
+    const d = condition?.details as Details;
+    const photos = Array.isArray(d?.photos) ? d.photos : [];
+    const notVisible = Array.isArray(d?.notVisible) ? d.notVisible.filter((x): x is string => typeof x === "string") : [];
+    const sizeVisible = photos.some((p) => typeof p === "object" && p !== null && (p as Record<string, unknown>).showsSizeLabel === true) || !notVisible.some((x) => /\b(?:size|tongue)\s+label\b/i.test(x));
+    const insoleVisible = photos.some((p) => typeof p === "object" && p !== null && (p as Record<string, unknown>).showsInsole === true) || !notVisible.some((x) => /\binsole\b/i.test(x));
+    const missing = [!sizeVisible ? "the size label inside the tongue" : null, !insoleVisible ? "the insole" : null].filter((x): x is string => !!x);
+    if (missing.length) {
+      questions.push({
+        id: "nm_signal_photos",
+        kind: "ask_seller",
+        text: `Could you share a clear photo of ${missing.join(" and ")}?`,
+        relatesTo: ["condition", "identify"],
+      });
+    }
+  }
+  return { beforeYouPay, questions };
+}
+
 /**
  * "Consider buying new": only when the price check found the listing costs as much as new (that needs 3+ retailers).
  * Fixed wording (prices must be exact); the panel shows the retailer offer cards under it.
@@ -164,12 +219,16 @@ Never use: scam, fake, fraud, liar, rip-off, guaranteed, counterfeit, replica, r
 
 export async function generateNextMoves(
   gemini: GeminiClient | null,
-  args: { checks: CheckResult[]; leads: Lead[]; label: VerdictLabel; answered?: CheckName[] },
+  args: { checks: CheckResult[]; leads: Lead[]; label: VerdictLabel; answered?: CheckName[]; signals?: WarningSignal[]; platform?: Platform },
 ): Promise<NextMove[]> {
   const gaps = computeGaps({ ...args, answered: args.answered ?? [] });
-  const byp = args.label === "hidden_gem" || args.label === "worth_a_look" ? BEFORE_YOU_PAY : [];
+  const signals = args.signals ?? [];
+  const specials = signalMoves({ checks: args.checks, signals, platform: args.platform });
+  const byp = args.label === "hidden_gem" || args.label === "worth_a_look"
+    ? (signals.length ? BEFORE_YOU_PAY.filter((b) => b.id !== "byp_protection") : BEFORE_YOU_PAY)
+    : [];
   const buyNew = buyNewMove(args.checks);
-  if (!gaps.length && !byp.length) return buyNew ? [buyNew] : [];
+  if (!gaps.length && !byp.length && !specials.beforeYouPay.length && !specials.questions.length) return buyNew ? [buyNew] : [];
 
   let phrased: z.infer<typeof PhrasingWireSchema> = { questions: [], beforeYouPay: [] };
   if (gemini) {
@@ -194,12 +253,13 @@ export async function generateNextMoves(
     }
   }
 
-  const moves: NextMove[] = [];
+  const moves: NextMove[] = [...specials.beforeYouPay];
   gaps.forEach((g, i) => {
     const candidate = g.exact ? undefined : phrased.questions.find((q) => q.gapId === g.id)?.text.trim();
     const text = candidate && validateNextMoveText(candidate, "ask_seller").length === 0 ? candidate : g.fallback;
     moves.push({ id: `nm_ask_${i + 1}`, kind: "ask_seller", text, relatesTo: [g.check] });
   });
+  moves.push(...specials.questions);
   byp.forEach((b, i) => {
     const candidate = phrased.beforeYouPay.find((x) => x.id === b.id)?.text.trim();
     const text = candidate && validateNextMoveText(candidate, "before_you_pay").length === 0 ? candidate : b.fallback;
