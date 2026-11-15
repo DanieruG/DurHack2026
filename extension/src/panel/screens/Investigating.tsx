@@ -1,8 +1,11 @@
+import { useRef } from "react";
 import { CHECK_NAMES, elapsed } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { offersSlot, segments, type Investigation } from "../../lib/progress";
 import { OffersSlot } from "../offers";
 import { Button, Notice, Tags } from "../ui";
+import type { IdentityChoice } from "@/schemas/api";
+import { IdentityCard } from "./IdentityCard";
 
 export function Investigating(props: {
   caseId: string;
@@ -10,12 +13,21 @@ export function Investigating(props: {
   inv: Investigation;
   lost?: boolean;
   onRetry?: () => void;
+  /** Answer the "Is this the right item?" card. */
+  onConfirm?: (choice: IdentityChoice) => void;
+  /** The answer already sent: the card locks and the investigation continues below it. */
+  answered?: IdentityChoice | null;
+  confirmError?: string | null;
 }) {
   const { inv } = props;
   const segs = segments(inv);
   const doneCount = segs.filter((s) => s.done).length;
   const status = inv.revision > 1 ? "Reopened" : "Investigating";
   const offers = offersSlot(inv);
+  // Once answered, the card stays (locked) for the rest of the run so nothing below it moves.
+  const asked = useRef(inv.identityCheck);
+  if (inv.identityCheck) asked.current = inv.identityCheck;
+  const question = inv.identityCheck ?? (props.answered ? asked.current : null);
 
   return (
     <div className="screen">
@@ -33,6 +45,8 @@ export function Investigating(props: {
           ))}
         </div>
       )}
+
+      {question && props.onConfirm && <IdentityCard question={question} onConfirm={props.onConfirm} answered={props.answered} error={props.confirmError} />}
 
       <ol className="log" aria-live="polite">
         {inv.log.map((l) => (

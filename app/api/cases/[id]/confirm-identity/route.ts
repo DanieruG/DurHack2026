@@ -1,7 +1,7 @@
 import { errorJson, handle, json, options, requireCaseId } from "@/lib/http";
 import { startInBackground } from "@/pipeline";
 import { ConfirmConflictError, startConfirm } from "@/pipeline/confirm";
-import { IdentityChoiceSchema } from "@/pipeline/identityCheck";
+import { IdentityChoiceSchema } from "@/schemas/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

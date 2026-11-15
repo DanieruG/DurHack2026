@@ -117,6 +117,21 @@ export const IdentityOptionSchema = z.object({
 });
 export type IdentityOption = z.infer<typeof IdentityOptionSchema>;
 
+/** The buyer's answer to "Is this the right item?" (POST /api/cases/:id/confirm-identity). */
+export const IdentityChoiceSchema = z.discriminatedUnion("choice", [
+  z.object({ choice: z.literal("best_guess") }),
+  z.object({ choice: z.literal("alternative"), index: z.number().int().min(0).max(1) }),
+  z.object({
+    choice: z.literal("custom"),
+    brand: z.string().trim().min(1).max(60),
+    model: z.string().trim().min(1).max(80),
+    version: z.string().trim().max(60).optional(),
+    colourway: z.string().trim().max(60).optional(),
+  }),
+  z.object({ choice: z.literal("skip") }),
+]);
+export type IdentityChoice = z.infer<typeof IdentityChoiceSchema>;
+
 export const SseEventSchemas = {
   investigation_started: z.object({ caseId: z.string(), revision: z.number().int() }),
   stage_started: z.object({ stage: StageNameSchema, geminiFeatures: z.array(GeminiFeatureSchema).optional() }),

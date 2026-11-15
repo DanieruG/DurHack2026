@@ -1,7 +1,10 @@
 import { useState, type ReactNode } from "react";
 import type { CaseDetail } from "@/schemas/api";
 import type { CheckName, CheckResult, IdentifyCandidate } from "@/schemas/domain";
-import { candidateName } from "@/lib/identifyLabel";
+import { candidateName, identifyLabel } from "@/lib/identifyLabel";
+import type { IdentityChoice } from "@/schemas/api";
+import { normaliseForDisplay, questionFromIdentify } from "../../lib/identity";
+import { IdentityCard } from "./IdentityCard";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { conditionView, evidenceLines, leadsView, observedView, priceView, sourceRefs, type ConditionView, type ObservedView, type SourceRef } from "../../lib/evidence";
@@ -33,10 +36,14 @@ export function CaseFile(props: {
   onInvestigateListing?: (url: string) => void;
   /** Open "How accurate is Sleuth?". */
   onAccuracy?: () => void;
+  /** "Not right?": the buyer corrected the model; reruns the case as a new revision. */
+  onCorrect?: (choice: IdentityChoice) => void;
+  correctError?: string | null;
 }) {
   const { detail } = props;
   const [open, setOpen] = useState<Set<RowKey>>(new Set(props.initialOpen ?? []));
   const [adding, setAdding] = useState(props.initialAdding ?? false);
+  const [correcting, setCorrecting] = useState(false);
   const toggle = (k: RowKey) =>
     setOpen((s) => {
       const n = new Set(s);
@@ -64,6 +71,20 @@ export function CaseFile(props: {
         {detail.revision > 1 && <span className="mono dim">Rev {detail.revision}</span>}
       </div>
       <p className="kicker">{[title, price !== null ? gbp(price) : null, PLATFORM_NAMES[detail.platform]].filter(Boolean).join(" · ")}</p>
+
+      {detail.identify && (detail.identify.brand || detail.identify.bestGuess?.brand) && props.onCorrect && (
+        <p className="identity-line">
+          <span className="note">{identifyLabel(normaliseForDisplay(detail.identify))}</span>
+          {!correcting && (
+            <button type="button" className="btn btn-text btn-small" onClick={() => setCorrecting(true)}>
+              Not right?
+            </button>
+          )}
+        </p>
+      )}
+      {correcting && detail.identify && props.onCorrect && (
+        <IdentityCard question={questionFromIdentify(normaliseForDisplay(detail.identify))} correcting onConfirm={props.onCorrect} onCancel={() => setCorrecting(false)} error={props.correctError} />
+      )}
 
       {detail.verdict ? (
         <Verdict label={detail.verdict.label} headline={detail.verdict.headline} badge={detail.verdict.badge} />

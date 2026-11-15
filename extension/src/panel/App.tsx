@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { CaseDetail } from "@/schemas/api";
+import type { CaseDetail, IdentityChoice } from "@/schemas/api";
 import type { Capture, CaseDiff, CaseSummary, Profile } from "@/schemas/domain";
 import { ApiError, createApi } from "../chrome/api";
 import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, loadSurveys, rememberCase, saveHistory, saveProfile, saveSettings, saveSurveyCards } from "../chrome/storage";
@@ -54,6 +54,9 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lost, setLost] = useState(false);
+  /** The answer sent to "Is this the right item?": the card locks and the investigation continues below it. */
+  const [answered, setAnswered] = useState<IdentityChoice | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const unsub = useRef<(() => void) | null>(null);
   const finished = useRef<string | null>(null);
   const evidenceCapture = useRef<Capture | null>(null);
@@ -197,6 +200,8 @@ export function App() {
     if (!profile || !captured) return;
     setBusy(true);
     setError(null);
+    setAnswered(null);
+    setConfirmError(null);
     try {
       // Re-read at the moment of asking: lazy-loaded photos may have appeared, and the screenshot is a fallback image.
       const fresh = await captureActiveTab({ withScreenshot: true });
@@ -265,7 +270,10 @@ export function App() {
       const detail = await api.getCase(caseId);
       const s = summaries[caseId];
       setActive({ caseId, title: detail.listingFacts?.title ?? s?.title ?? "Untitled listing", priceGBP: detail.listingFacts?.priceGBP ?? s?.priceGBP ?? null, detail });
-      if (detail.status === "investigating") {
+      setAnswered(null);
+      setConfirmError(null);
+      // "Waiting for you": the stream re-asks the question from the stored case.
+      if (detail.status === "investigating" || detail.status === "awaiting_confirmation") {
         follow(caseId, detail.revision);
         setView({ name: "investigating" });
       } else {
@@ -281,6 +289,22 @@ export function App() {
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Answer the card (or correct a finished case) and follow the rest of the investigation on a fresh stream. */
+  const confirmIdentity = async (choice: IdentityChoice, from: "card" | "file") => {
+    if (!active) return;
+    setConfirmError(null);
+    if (from === "card") setAnswered(choice);
+    try {
+      const { revision } = await api.confirmIdentity(active.caseId, choice);
+      if (from === "file") setAnswered(null);
+      follow(active.caseId, revision);
+      setView({ name: "investigating" });
+    } catch (err) {
+      setAnswered(null);
+      setConfirmError(err instanceof ApiError && err.status === 409 ? "This case is no longer waiting for an answer." : message(err));
     }
   };
 
@@ -332,6 +356,8 @@ export function App() {
     unsub.current?.();
     unsub.current = null;
     setError(null);
+    setAnswered(null);
+    setConfirmError(null);
     setView({ name: "ready" });
   };
 
@@ -417,6 +443,9 @@ export function App() {
           inv={inv}
           lost={lost}
           onRetry={() => follow(active.caseId, inv.revision)}
+          onConfirm={(c) => void confirmIdentity(c, "card")}
+          answered={answered}
+          confirmError={confirmError}
         />
       );
       break;
@@ -436,6 +465,8 @@ export function App() {
           addEvidence={{ busy, error, onCaptureTab: captureForEvidence, onSubmit: submitEvidence }}
           onInvestigateListing={(url) => void investigateListing(url)}
           onAccuracy={() => toAccuracy("file")}
+          onCorrect={(c) => void confirmIdentity(c, "file")}
+          correctError={confirmError}
         />
       );
       break;

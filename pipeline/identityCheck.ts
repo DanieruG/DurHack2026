@@ -1,6 +1,5 @@
-import { z } from "zod";
 import type { CheckName, Evidence, IdentifyCandidate, IdentifyResult, ListingFacts } from "@/schemas/domain";
-import type { IdentityOption, SseEventData } from "@/schemas/api";
+import type { IdentityChoice, IdentityOption, SseEventData } from "@/schemas/api";
 import type { CatalogueModel } from "@/schemas/seed";
 import { bestGuessOf, candidateName, fullModelName, identifyLabel } from "@/lib/identifyLabel";
 import { titleMatchesModel } from "@/lib/newPrices";
@@ -57,20 +56,6 @@ export function identityNeeded(identify: IdentifyResult): SseEventData<"identity
 }
 
 // ---------- the buyer's answer ----------
-
-export const IdentityChoiceSchema = z.discriminatedUnion("choice", [
-  z.object({ choice: z.literal("best_guess") }),
-  z.object({ choice: z.literal("alternative"), index: z.number().int().min(0).max(1) }),
-  z.object({
-    choice: z.literal("custom"),
-    brand: z.string().trim().min(1).max(60),
-    model: z.string().trim().min(1).max(80),
-    version: z.string().trim().max(60).optional(),
-    colourway: z.string().trim().max(60).optional(),
-  }),
-  z.object({ choice: z.literal("skip") }),
-]);
-export type IdentityChoice = z.infer<typeof IdentityChoiceSchema>;
 
 export class InvalidChoiceError extends Error {
   constructor(message: string) {

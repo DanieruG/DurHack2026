@@ -31,7 +31,7 @@ export function History(props: {
                     <span className="h-title">{s.title || "Untitled listing"}</span>
                     <span className="h-meta">{meta}</span>
                     <span className="h-stamps">
-                      <span className={`stamp t-${verdict?.treatment ?? "pending"}`}>{verdict ? verdict.title : s.status === "investigating" ? "In progress" : "No verdict"}</span>
+                      <span className={`stamp t-${verdict?.treatment ?? (s.status === "awaiting_confirmation" ? "waiting" : "pending")}`}>{verdict ? verdict.title : s.status === "awaiting_confirmation" ? "Waiting for you" : s.status === "investigating" ? "In progress" : "No verdict"}</span>
                       {s.revision > 1 && <span className="stamp-note mono">Reopened · Rev {s.revision}</span>}
                     </span>
                   </span>

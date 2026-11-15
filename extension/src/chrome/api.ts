@@ -6,6 +6,7 @@ import {
   ReopenAcceptedSchema,
   SseEventSchemas,
   type CaseDetail,
+  type IdentityChoice,
 } from "@/schemas/api";
 import type { Capture, CaseSummary, Profile } from "@/schemas/domain";
 import { PublicEvalSummarySchema, type PublicEvalSummary } from "@/schemas/eval";
@@ -62,6 +63,12 @@ export function createApi(base: string) {
       if (args.sellerReply?.trim()) form.set("sellerReply", args.sellerReply.trim());
       for (const [i, s] of (args.screenshots ?? []).slice(0, MAX_SCREENSHOTS).entries()) form.append("screenshots", s, s instanceof File ? s.name : `evidence-${i + 1}.png`);
       const res = await send(u(`/api/cases/${encodeURIComponent(id)}/reopen`), { method: "POST", body: form });
+      return read(res, ReopenAcceptedSchema);
+    },
+
+    /** Answer "Is this the right item?" (resumes a waiting case), or correct a finished case ("Not right?": a new revision). */
+    async confirmIdentity(id: string, choice: IdentityChoice) {
+      const res = await send(u(`/api/cases/${encodeURIComponent(id)}/confirm-identity`), { method: "POST", body: JSON.stringify(choice), headers: { "content-type": "application/json" } });
       return read(res, ReopenAcceptedSchema);
     },
 
