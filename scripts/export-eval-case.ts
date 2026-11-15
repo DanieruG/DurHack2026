@@ -11,6 +11,8 @@
  *                  profile: the eval uses its own profile, see eval/LABELLING.md)
  *   photo-NN.*     the listing's own photos as stored with the case, in photo-index order (sent as screenshots); other
  *                  listings' thumbnails that older captures picked up are left out, and repeats of one photo kept once
+ *   photos.json    which case the photos came from and their sha256 (photos are gitignored; npm run eval:photos
+ *                  restores them). Photos it lists as removed (not the shoes) are never exported again.
  *   label.json     every field left empty, for a person to fill in. Labels are never filled in from the pipeline.
  * An existing label.json is never overwritten.
  */
@@ -23,6 +25,7 @@ import type { StoredSurvey } from "../lib/observed";
 import { ListingDataSchema, type ListingData, type ObservedListing, type Platform } from "../schemas/domain";
 import { redactListingData } from "../pipeline/listingData";
 import { EMPTY_LABEL } from "../eval/labels";
+import { manifestFromFolder, readManifest, sha256, writeManifest } from "../eval/photos";
 
 const { getDb } = await import("../lib/db");
 const db = getDb();
@@ -107,16 +110,20 @@ for (const c of cases) {
     return true;
   });
 
+  // Photos removed on purpose (not the shoes) stay out; photos.json records them.
+  const removed = new Set((readManifest(dir)?.removed ?? []).map((r) => r.sha256));
+  const kept = photos.filter((p) => !removed.has(sha256(p.data!)));
   for (const f of fs.readdirSync(dir).filter((f) => /^photo-\d+\./.test(f))) fs.rmSync(path.join(dir, f));
-  photos.forEach((p, n) => fs.writeFileSync(path.join(dir, `photo-${String(n + 1).padStart(2, "0")}.${EXT[p.mimeType!]}`), p.data!));
+  kept.forEach((p, n) => fs.writeFileSync(path.join(dir, `photo-${String(n + 1).padStart(2, "0")}.${EXT[p.mimeType!]}`), p.data!));
 
   const capture = {
     capture: { pageUrl: c.pageUrl ?? undefined, pageText, ...(listing ? { listing } : {}), imageUrls: [], ...(survey ?? {}) },
     source: { exportedFrom: "live testing", capturedOn: c.createdAt.toISOString().slice(0, 10), status: c.status },
   };
   fs.writeFileSync(path.join(dir, "capture.json"), `${JSON.stringify(capture, null, 2)}\n`);
+  writeManifest(dir, manifestFromFolder(dir, c.id));
   const labelPath = path.join(dir, "label.json");
   if (!fs.existsSync(labelPath)) fs.writeFileSync(labelPath, `${JSON.stringify(EMPTY_LABEL, null, 2)}\n`);
-  console.log(`${name}: ${photos.length} photos, ${pageText.length} chars of page text${listing ? ", structured fields" : ", no structured fields"}${survey ? `, ${survey.observedListings.length} survey cards` : ""} (case ${c.id}, ${c.status})`);
+  console.log(`${name}: ${kept.length} photos, ${pageText.length} chars of page text${listing ? ", structured fields" : ", no structured fields"}${survey ? `, ${survey.observedListings.length} survey cards` : ""} (case ${c.id}, ${c.status})`);
 }
 process.exit(0);

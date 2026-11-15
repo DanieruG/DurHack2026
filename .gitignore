@@ -10,3 +10,5 @@ coverage/
 .neon
 extension/dist/
 data/private/
+# Eval photos are sellers' photos: kept locally, restored with npm run eval:photos (see eval/LABELLING.md)
+eval/listings/*/photo-*

@@ -1,0 +1,40 @@
+{
+  "source": {
+    "caseId": "cmwh65fvs0000t4c0k5e7glmq",
+    "database": "main"
+  },
+  "photos": [
+    {
+      "file": "photo-01.webp",
+      "sha256": "0635fee311a1f11059b2e4c605ef1cb6829cb1b1c087176de1633f95a535a8ba"
+    },
+    {
+      "file": "photo-02.webp",
+      "sha256": "cc0f6fd85918aacab5ec139a0690fb85008332623e4c14d900bbc6ac25888981"
+    },
+    {
+      "file": "photo-03.webp",
+      "sha256": "0088569a8c70ca65bb937ecb1c90e9b81a1449e31c84599b379000772f6da134"
+    },
+    {
+      "file": "photo-04.webp",
+      "sha256": "5024090eca1bf1861ebfa0d42b39c93f4fd34d69e7bb7b19826e6be4e25c9de8"
+    },
+    {
+      "file": "photo-05.webp",
+      "sha256": "b3f2f34d85dadf28b41377bbff660378f887aa7bca68ea6b05d66a0bbb7e8222"
+    }
+  ],
+  "removed": [
+    {
+      "sha256": "0b58a00b9b13a9481875f29ed7edd71175b2bcef031f5c7a5116bad0882ad116",
+      "was": "photo-07.webp",
+      "reason": "the shop's logo, not the shoes (it also names the seller)"
+    },
+    {
+      "sha256": "0a3455f0a29b1ac585fcf3a83bc27f09ec2819511e6e9577be173c06e0944a85",
+      "was": "photo-06.webp",
+      "reason": "the shop's returns banner, not the shoes"
+    }
+  ]
+}

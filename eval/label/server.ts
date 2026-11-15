@@ -7,6 +7,8 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { caseView, FORM_OPTIONS, listCases, readPhoto, saveLabel } from "./api";
+import { listingDirs } from "../labels";
+import { missingPhotos } from "../photos";
 
 const MAX_BODY = 1_000_000;
 
@@ -64,5 +66,7 @@ export function createLabelServer(root: string) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.LABEL_PORT ?? 4870);
   const root = path.join(process.cwd(), "eval", "listings");
+  const absent = listingDirs(root).filter((id) => missingPhotos(path.join(root, id)).length);
+  if (absent.length) console.warn(`Photos missing for ${absent.join(", ")}: run npm run eval:photos to restore them.`);
   createLabelServer(root).listen(port, "127.0.0.1", () => console.log(`Labelling ${root}\n  http://127.0.0.1:${port}  (Ctrl+C to stop)`));
 }

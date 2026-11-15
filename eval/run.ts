@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDeps } from "../pipeline/deps";
 import { readLabels } from "./labels";
+import { missingPhotos } from "./photos";
 import { runCase } from "./collect";
 import { summarise } from "./metrics";
 import { reportMarkdown } from "./report";
@@ -25,6 +26,9 @@ async function main() {
   useTestDatabase(); // never the main database
   const base = await getDeps();
   const labels = readLabels(DIR);
+  // Photos are gitignored: running without them would score condition on text alone.
+  const absent = labels.map((c) => ({ id: c.id, files: missingPhotos(path.join(DIR, c.id)) })).filter((c) => c.files.length);
+  if (absent.length) throw new Error(`Eval photos missing (${absent.map((c) => `${c.id}: ${c.files.join(", ")}`).join("; ")}). Run npm run eval:photos first.`);
   if (!labels.length) console.warn("No cases in eval/listings (folders starting with _ are skipped).");
 
   const runs = [];

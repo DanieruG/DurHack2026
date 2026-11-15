@@ -1,8 +1,27 @@
 # Labelling an eval case
 
 Each folder in `eval/listings/` is one real listing: `capture.json` (the page text, redacted, and the search survey's
-card facts), the listing's photos `photo-01`, `photo-02`, … in the order Sleuth sees them, and `label.json`, which you
-fill in.
+card facts), the listing's photos `photo-01`, `photo-02`, … in the order Sleuth sees them, `photos.json` (where the
+photos came from), and `label.json`, which you fill in.
+
+## Where the photos live
+
+The photos are sellers' photos, so they're **not in git** (`.gitignore`: `eval/listings/*/photo-*`). They live only on
+your machine, in each case's folder (`eval/listings/<case>/photo-NN.webp`). What git does keep is each case's
+`photos.json`: the stored case the photos came from (in the main database) and every photo's sha256.
+
+To restore them (a fresh clone, or after deleting them):
+
+    npm run eval:photos      # reads the main database (DATABASE_URL), never writes; checks every sha256
+
+`npm run eval` refuses to run while any photo is missing, so a case can't quietly run on text alone, and
+`npm run label` warns about it. Photos stay restorable only while their case is in the main database; if a case is
+deleted, back up its folder first (copying `eval/listings/` somewhere private is enough).
+
+To drop a photo that isn't the shoes: `npx tsx scripts/eval-photos.ts --remove <case> photo-NN.webp "<reason>"`. It
+deletes the file, renumbers the photos after it (moving their defect labels), and records the photo's hash in
+`photos.json` under `removed`, so neither a restore nor a re-export brings it back. After adding photos by hand, run
+`npx tsx scripts/eval-photos.ts --manifest`.
 
 **Use the labelling tool:** `npm run label`, then open http://127.0.0.1:4870. It lists every case with what's still
 missing; for each case it shows the photos one at a time (drag a box around each defect, pick its type and severity),
@@ -72,8 +91,8 @@ in them.
 Things to know while labelling (not labels):
 
 - `ebay-178485489023`, `ebay-198622268078`, `ebay-206627552126`: stock product photos, so there's no wear to mark.
-- `ebay-206627552126`: photos 6 and 7 are the shop's returns banner and logo, not the shoes.
-- `vinted-10503713940`: photo 6 is a dog, not the shoes (it's in the listing's own gallery).
+- `ebay-206627552126`: the shop's returns banner and logo (photos 6 and 7 in the listing) were removed; see `photos.json`.
+- `vinted-10503713940`: a photo of a dog (photo 6 in the listing's own gallery) was removed; see `photos.json`.
 - `ebay-860128293708`: this investigation stopped with an error during live testing; it's included to see whether it still does.
 - `ebay-206390698933`: captured before the page-text scoping, so its text runs long; the extra lines are site navigation.
 
@@ -88,12 +107,12 @@ Defect boxes: marked on 0 of the 10 photos needed.
 | ebay-178485489023 | 7 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-198622268078 | 8 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-206390698933 | 4 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| ebay-206627552126 | 7 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| ebay-206627552126 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-206683004216 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-287724614047 | 8 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-366787843200 | 7 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-820336095090 | 6 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | ebay-860128293708 | 8 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
-| vinted-10503713940 | 6 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
+| vinted-10503713940 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 | vinted-10751853310 | 5 | identifiable, brand, model, version, styleCode, colourway, size, conditionGrade | 0 |
 <!-- missing-labels:end -->

@@ -1,0 +1,35 @@
+{
+  "source": {
+    "caseId": "cmwgwlviz000ttpc0pgdvewav",
+    "database": "main"
+  },
+  "photos": [
+    {
+      "file": "photo-01.webp",
+      "sha256": "c1a7b16046c989e4bad725851cb248ac62551d79b9e0e66d1141ea536d412cae"
+    },
+    {
+      "file": "photo-02.webp",
+      "sha256": "c94532f5f27099361d42cab80ae1cf32ee2d0e50349ff17194a9c372efd1ae41"
+    },
+    {
+      "file": "photo-03.webp",
+      "sha256": "4fb7d048478085369ced5fc6a6cbbd9c009d9aba3899cfb16cd4c0b1d7f2c43d"
+    },
+    {
+      "file": "photo-04.webp",
+      "sha256": "166508f7fd01c4048a3ba2cba576ee40050b2b56db269a1073d0fd1fd7ffc5af"
+    },
+    {
+      "file": "photo-05.webp",
+      "sha256": "9905d0152a87f35fb860edfdddf36bae45ac3db507b121acf4fc17b7aaa35180"
+    }
+  ],
+  "removed": [
+    {
+      "sha256": "68395d0c41d61d3628e0f047fc356d977473e05d29340cd7ff0f4d38123bc5a1",
+      "was": "photo-06.webp",
+      "reason": "a dog, not the shoes (in the listing's own gallery)"
+    }
+  ]
+}

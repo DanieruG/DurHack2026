@@ -60,7 +60,10 @@ Happy-dom prints iframe stack traces during tests: noise, not failures.
 ## Eval
 
 - Case folder: `capture.json` (redacted capture, may include `capture.listing` structured fields), `photo-NN.*`
-  (gitignored, see `eval/LABELLING.md`), `label.json` (hand labels, validated by `LabelSchema` in `eval/labels.ts`).
+  (gitignored; restore with `npm run eval:photos` from the main DB), `photos.json` (source case id, sha256 per photo,
+  photos removed on purpose), `label.json` (hand labels, validated by `LabelSchema` in `eval/labels.ts`).
+- Never commit photos. `npm run eval` throws if any are missing. Remove a non-shoe photo with
+  `scripts/eval-photos.ts --remove` (renumbers and shifts label defect keys).
 - Labels are never filled from Sleuth's output, and the labelling tool must never show it (no summary/report/DB reads;
   `offerColours` is hidden because it names Sleuth's offers). Boxes are `[ymin, xmin, ymax, xmax]` on 0–1000 (Gemini's format);
   matches need IoU ≥ 0.3 (`OVERLAP_THRESHOLD`).

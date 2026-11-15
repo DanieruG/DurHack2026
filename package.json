@@ -19,6 +19,7 @@
     "eval:slide": "tsx eval/slide.ts",
     "eval:labels": "tsx eval/check-labels.ts",
     "label": "tsx eval/label/server.ts",
+    "eval:photos": "tsx scripts/eval-photos.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate",

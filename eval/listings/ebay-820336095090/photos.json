@@ -1,0 +1,33 @@
+{
+  "source": {
+    "caseId": "cmwheh45m0000atc0mroblntg",
+    "database": "main"
+  },
+  "photos": [
+    {
+      "file": "photo-01.jpg",
+      "sha256": "cf72e02f67e06fbc5d7178dcf42d3ee0cec0a8478a0fc18fb11d9986d52fa6c5"
+    },
+    {
+      "file": "photo-02.jpg",
+      "sha256": "e92f851c9220b1e59f6439b39f5fc8aa99f1b817d6528f977bb940e88b83f9db"
+    },
+    {
+      "file": "photo-03.jpg",
+      "sha256": "767eb56dd2f33828a3e326a22965b55c4c7c6e4c9ef995ba2ea44783427c5340"
+    },
+    {
+      "file": "photo-04.jpg",
+      "sha256": "bdac7bbdc1fe35da7d26a55d36666947c7033025aa19c526d3c1b350f0dc834c"
+    },
+    {
+      "file": "photo-05.jpg",
+      "sha256": "783b8c2fd99291605dfca684488bb5878fdc0cba93dcb154d505afd71dd24215"
+    },
+    {
+      "file": "photo-06.jpg",
+      "sha256": "3ea63bbeae9a7126e61903ed9db3807281ff154ed4313e296176437a5b930e4c"
+    }
+  ],
+  "removed": []
+}

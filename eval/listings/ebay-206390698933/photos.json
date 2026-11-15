@@ -1,0 +1,25 @@
+{
+  "source": {
+    "caseId": "cmwgtxrkt0000swc0hdkt7h9c",
+    "database": "main"
+  },
+  "photos": [
+    {
+      "file": "photo-01.jpg",
+      "sha256": "bc7dbceee77192d94df76d36104163b85f3012fb5dfaa79030e0573850ef437b"
+    },
+    {
+      "file": "photo-02.webp",
+      "sha256": "eccd48815e9a1e984493fe7ca6e3f73a60cdced788cd6a06cee4355a30189d3d"
+    },
+    {
+      "file": "photo-03.webp",
+      "sha256": "763dfb24019bb469245d70eee264463cf90bbdba719a0e7e09317040ce088a94"
+    },
+    {
+      "file": "photo-04.webp",
+      "sha256": "b7ec21119960b8fde8d9b5bb27760eba8bf4d1946b888b599c7200fe26157af4"
+    }
+  ],
+  "removed": []
+}
