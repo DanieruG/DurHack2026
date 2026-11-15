@@ -107,10 +107,12 @@ function checkLine(c: CheckResult): Pick<LogLine, "text" | "state"> {
   const d = (c.details ?? {}) as Record<string, unknown>;
   switch (c.check) {
     case "identify":
-      if (d.tier === "family") return { text: `${(d.modelName as string) ?? "Model"}, version unclear`, state: "problem" };
-      return ok
-        ? { text: `Identified ${(d.modelName as string) ?? "the model"}`, state: "done" }
-        : { text: d.tier === "brand" && d.brand ? `${d.brand as string}, model not confirmed` : "Model not confirmed", state: "problem" };
+      // The server words it by confidence level ("Likely ...", "Best guess: ...").
+      if (d.tier === "model" || d.tier === "catalogue" || (d.tier === undefined && ok)) {
+        if (typeof d.label !== "string") return { text: ok ? `Identified ${(d.modelName as string) ?? "the model"}` : "Model not confirmed", state: ok ? "done" : "problem" };
+        return { text: d.level === "confirmed" ? `Identified ${d.label}` : d.label, state: ok ? "done" : "problem" };
+      }
+      return { text: d.tier === "brand" && d.brand ? `${d.brand as string}, model not confirmed` : "Model not confirmed", state: "problem" };
     case "fit": {
       if (c.status === "unknown") return { text: "Size not stated", state: "problem" };
       const match = d.match as string | undefined;

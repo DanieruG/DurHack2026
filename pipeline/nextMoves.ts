@@ -3,7 +3,6 @@ import type { CheckName, CheckResult, Lead, NextMove, Platform, VerdictLabel, Wa
 import { generateStructured } from "@/gemini/structured";
 import type { GeminiClient } from "@/gemini/client";
 import { validateNextMoveText } from "./verdict/validate";
-import { versionQuestion } from "./versionCheck";
 import { gbp } from "./util";
 import { SIZE_SYSTEM_QUESTION } from "./checks/fit";
 
@@ -20,11 +19,6 @@ function gapFor(c: CheckResult): Gap | null {
   const d = c.details as Details;
   switch (c.check) {
     case "identify": {
-      const v = d?.versionUnclear as { family: string; options: [string, string | null] } | undefined;
-      if (v) {
-        const q = versionQuestion((d?.brand as string | null) ?? null, v);
-        return { id: "gap_version", check: "identify", priority: PRIORITY.identify, ask: q, fallback: q, exact: true };
-      }
       return {
         id: "gap_identify",
         check: "identify",

@@ -99,7 +99,7 @@ async function proposeLeads(ctx: RunCtx, checks: CheckResult[]): Promise<LeadWir
       {
         text:
           `Max leads: ${ctx.deps.config.maxLeads}. Photos available: ${ctx.images.length}.\n` +
-          `Identified: ${subjectOf(ctx.identify, ctx.deps.config.identifyConfidenceMin, ctx.ref.catalogue).displayName ?? "nothing"} (catalogue id: ${ctx.identify?.catalogueModelId ?? "none"}). Seller condition claims: ${JSON.stringify(ctx.facts.conditionClaims)}.\n` +
+          `Identified: ${subjectOf(ctx.identify, ctx.ref.catalogue).displayName ?? "nothing"} (catalogue id: ${ctx.identify?.catalogueModelId ?? "none"}). Seller condition claims: ${JSON.stringify(ctx.facts.conditionClaims)}.\n` +
           `Check results:\n${JSON.stringify(compactSummary(checks))}`,
       },
     ],
@@ -197,10 +197,9 @@ async function executeLead(
     case "recheck_identification": {
       const photo = wire.photoIndex != null && wire.photoIndex < ctx.images.length ? wire.photoIndex : ctx.images.length ? 0 : undefined;
       if (photo === undefined) return { checks, updated: [], status: "skipped", outcome: "No photo to recheck." };
-      const min = ctx.deps.config.identifyConfidenceMin;
-      const before = subjectOf(ctx.identify, min, ctx.ref.catalogue);
+      const before = subjectOf(ctx.identify, ctx.ref.catalogue);
       const { result, check } = await runIdentify(ctx, { onlyPhotoIndex: photo, tier: "strong" }); // the only Pro call
-      const after = subjectOf(result, min, ctx.ref.catalogue);
+      const after = subjectOf(result, ctx.ref.catalogue);
       const changed = after.displayName !== before.displayName || after.catalogue?.id !== before.catalogue?.id;
       // Adopt the recheck only when it names a model confidently and differs from what we had.
       if (after.modelName && changed) {

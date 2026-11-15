@@ -20,6 +20,7 @@ import type { CaseRow } from "@/lib/store";
 import type { Deps } from "./deps";
 import type { SseEvent } from "./events";
 import { indexEvidence } from "./util";
+import { normaliseIdentify } from "./identifyLevel";
 
 export function imageUrl(origin: string, caseId: string, index: number): string {
   return `${origin}/api/cases/${caseId}/images/${index}`;
@@ -72,7 +73,7 @@ export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promis
     pageUrl: c.pageUrl,
     listingFacts: c.listingFacts,
     needs: c.needs,
-    identify: c.identify,
+    identify: normaliseIdentify(c.identify),
     checks,
     leads,
     leadsReport: report ?? { considered: leads.length > 0 },

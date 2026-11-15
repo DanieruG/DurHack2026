@@ -17,14 +17,13 @@ const EnvSchema = z.object({
   GEMINI_MODEL_FAST: z.string().optional(),
   GEMINI_MODEL_STRONG: z.string().optional(),
   GEMINI_COMBINED_TOOLS: bool,
-  IDENTIFY_CONFIDENCE_MIN: z.coerce.number().min(0).max(1).default(0.75),
   MAX_LEADS: z.coerce.number().int().min(0).max(5).default(2),
   STAGE_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
   SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   PRO_RECHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   MAX_IMAGES: z.coerce.number().int().positive().max(20).default(8),
   MAX_IMAGE_BYTES: z.coerce.number().int().positive().default(8_000_000),
-  PIPELINE_VERSION: z.string().default("2"),
+  PIPELINE_VERSION: z.string().default("3"),
   CACHE_MODE: z.enum(["off", "record", "replay"]).default("off"),
   ALLOWED_EXTENSION_ORIGINS: csv,
   ALLOWED_WEB_ORIGINS: csv,
@@ -38,7 +37,6 @@ export type Config = {
   /** Model names come from env only; never hard-coded. */
   models: { fast?: string; strong?: string };
   combinedTools: boolean;
-  identifyConfidenceMin: number;
   maxLeads: number;
   stageTimeoutMs: number;
   /** Cap on the comfort check's SerpApi web search; past it, saved review snippets are used. */
@@ -63,7 +61,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     shoppingApiKey: blank(e.SHOPPING_API_KEY),
     models: { fast: blank(e.GEMINI_MODEL_FAST), strong: blank(e.GEMINI_MODEL_STRONG) },
     combinedTools: e.GEMINI_COMBINED_TOOLS,
-    identifyConfidenceMin: e.IDENTIFY_CONFIDENCE_MIN,
     maxLeads: e.MAX_LEADS,
     stageTimeoutMs: e.STAGE_TIMEOUT_MS,
     searchTimeoutMs: e.SEARCH_TIMEOUT_MS,
@@ -80,7 +77,6 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     models: { fast: "test-fast", strong: "test-strong" },
     combinedTools: false,
-    identifyConfidenceMin: 0.75,
     maxLeads: 2,
     stageTimeoutMs: 2000,
     searchTimeoutMs: 1000,

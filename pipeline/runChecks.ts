@@ -13,7 +13,7 @@ import type { NewPrices } from "@/lib/newPrices";
 import { checkComfort } from "./checks/comfort";
 import { checkCondition } from "./checks/condition";
 import { plainError, runStage, today, unknownCheck, type StageStats } from "./util";
-import { familyComparison, FAMILY_CONFIDENCE_CAP, matchSurvey, modelUnknownComparison, noAlternatives, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
+import { matchSurvey, modelUnknownComparison, noAlternatives, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
 import { catalogueTokens, deriveTokens, type ModelTokens } from "@/lib/titleMatch";
 import { matchOfferColours } from "./offerColour";
 
@@ -86,7 +86,7 @@ export function buildCtx(base: Omit<RunCtx, "executors" | "today" | "newPrices" 
 
 /** What identify established, by tier (brand / model name / catalogue match). */
 export function subjectFor(ctx: RunCtx): Subject {
-  return subjectOf(ctx.identify, ctx.deps.config.identifyConfidenceMin, ctx.ref.catalogue);
+  return subjectOf(ctx.identify, ctx.ref.catalogue);
 }
 
 /** Identify on its own (Flash; the recheck lead passes tier "strong"). New investigations use the merged call instead. */
@@ -106,15 +106,15 @@ export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number; 
     );
     return { result, check: toIdentifyCheck(ctx, result) };
   } catch (err) {
-    const result: IdentifyResult = { brand: null, brandConfidence: 0, modelName: null, catalogueModelId: null, inCatalogue: false, confidence: 0, reasons: "Identification failed", evidence: [] };
-    return { result, check: unknownCheck("identify", plainError("identify", err), { details: { tier: "none", catalogueModelId: null, inCatalogue: false, gatePassed: false } }) };
+    const result: IdentifyResult = { brand: null, brandConfidence: 0, modelName: null, catalogueModelId: null, inCatalogue: false, confidence: 0, reasons: "Identification failed", evidence: [], alternatives: [], confidenceLevel: "best_guess" };
+    return { result, check: unknownCheck("identify", plainError("identify", err), { details: { tier: "none", catalogueModelId: null, inCatalogue: false } }) };
   }
 }
 
 export type CheckOpts = { priceCondition?: ConditionGrade; forceSourceB?: boolean };
 
 export function toIdentifyCheck(ctx: RunCtx, result: IdentifyResult): CheckResult {
-  return identifyCheck(result, { min: ctx.deps.config.identifyConfidenceMin, catalogue: ctx.ref.catalogue, hadImages: ctx.images.length > 0 });
+  return identifyCheck(result, { catalogue: ctx.ref.catalogue, hadImages: ctx.images.length > 0 });
 }
 
 /** Run one downstream check as a stage. Errors and timeouts become `unknown` with a plain explanation. */
@@ -129,20 +129,6 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
         ? { details: { ...(ctx.survey ? { observedComparison: modelUnknownComparison(ctx.survey) } : {}), observedAlternatives: emitNoAlternatives(ctx) } }
         : {};
     return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`, observed);
-  }
-  if (name === "price" && subject.tier === "family") {
-    const v = ctx.identify?.versionUnclear;
-    const base = `The exact version is unclear (${v?.options[0] ?? "?"} or ${v?.options[1] ?? "another version"}), so I can't compare the price.`;
-    // Family-level context from the user's search only: never used for the verdict, confidence capped.
-    const obs = observedFor(ctx, subject);
-    const comparison = obs ? familyComparison(obs.survey, obs.matched) : null;
-    return {
-      ...unknownCheck("price", comparison?.context ? `${base} ${comparison.context.line} in your search.` : base, {
-        // The version is unclear, so no listing can be called the same pair: no alternatives.
-        details: { versionUnclear: true, ...(comparison ? { observedComparison: comparison } : {}), observedAlternatives: emitNoAlternatives(ctx) },
-      }),
-      ...(comparison?.context ? { confidence: FAMILY_CONFIDENCE_CAP } : {}),
-    };
   }
   const { deps } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;

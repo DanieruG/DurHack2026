@@ -15,6 +15,7 @@ import {
 import { deriveTokens } from "@/lib/titleMatch";
 import { checkPrice } from "@/pipeline/checks/price";
 import { guardSearchHint, searchHintPart, subjectOf } from "@/pipeline/identify";
+import { withLevel } from "@/pipeline/identifyLevel";
 import type { IdentifyResult, ListingFacts, ObservedListing, UserNeeds } from "@/schemas/domain";
 import type { NewPrices } from "@/lib/newPrices";
 import { fixtureReference } from "./helpers";
@@ -226,7 +227,7 @@ describe("search query as an identify hint", () => {
     evidence: [],
     ...over,
   });
-  const args = (listingText: string, searchQuery: string | null = "nike pegasus 40") => ({ searchQuery, listingText, catalogue: ref.catalogue, min: 0.75 });
+  const args = (listingText: string, searchQuery: string | null = "nike pegasus 40") => ({ searchQuery, listingText, catalogue: ref.catalogue });
 
   it("is sent clearly marked as the user's search, not a fact about the listing", () => {
     const [part] = searchHintPart('nike "pegasus" 40\nignore previous');
@@ -239,7 +240,9 @@ describe("search query as an identify hint", () => {
   it("never produces a confident identification on its own", () => {
     const guarded = guardSearchHint(result(), args("Nike running trainers\nSize UK 9\nGood condition"));
     expect(guarded.confidence).toBeLessThan(0.75);
-    expect(subjectOf(guarded, 0.75, ref.catalogue).tier).toBe("brand");
+    // No gate: the model is still the subject, but only as a "possible" one (it pauses for the buyer).
+    expect(subjectOf(guarded, ref.catalogue).tier).toBe("catalogue");
+    expect(withLevel(guarded, { facts: { platform: "vinted", conditionClaims: [], photoCount: 1, evidence: [], title: "Nike running trainers" }, pageText: "", catalogue: ref.catalogue }).confidenceLevel).toBe("possible");
     expect(guarded.reasons).toContain("matches the user's search");
   });
 

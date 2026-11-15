@@ -136,7 +136,7 @@ describe("eBay: page data first, Gemini for the gaps", () => {
       await done;
       const c = (await deps.store.getCase(caseId))!;
       const prompt = deps.calls.find((x) => x.stage === "extract")!.contents.flatMap((x) => x.parts).map((p) => ("text" in p ? p.text : "")).join("\n");
-      return { c, prompt, gate: deps.config.identifyConfidenceMin };
+      return { c, prompt };
     };
 
     const plain = await run(undefined, "Revolution 6 Next Nature", 0.85);
@@ -150,10 +150,10 @@ describe("eBay: page data first, Gemini for the gaps", () => {
     // "Multicoloured" in the item specifics is too generic: the colour comes from the title.
     expect(hinted.c.listingFacts?.listingColour).toMatchObject({ names: ["black", "white"], source: "title" });
 
-    // Even if Gemini followed the search, a model named only by the search stays below the identify gate.
+    // Even if Gemini followed the search, a model named only by the search stays below "likely" (0.75).
     const followed = await run("nike revolution 8", "Revolution 8", 0.9);
     expect(followed.c.identify?.modelName).toBe("Revolution 8");
-    expect(followed.c.identify!.confidence).toBeLessThan(followed.gate);
+    expect(followed.c.identify!.confidence).toBeLessThan(0.75);
   });
 });
 

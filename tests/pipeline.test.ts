@@ -94,10 +94,14 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(moves[0]).toMatchObject({ kind: "ask_seller", relatesTo: ["identify"] });
   });
 
-  it("a low-confidence catalogue guess with no confident brand is still R1", async () => {
+  it("a low-confidence guess is still named (level possible), not withheld: not R1", async () => {
     const deps = makeDeps({ handlers: { identify: () => json({ catalogueModelId: "nike-pegasus-40", confidence: 0.6, reasons: "maybe", evidence: [] }) } });
-    const { events } = await investigate(deps);
-    expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).toBe("not_enough_evidence");
+    const { caseId, events } = await investigate(deps);
+    const checks = checksFrom(events);
+    expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "catalogue", level: "possible", modelName: "Nike Pegasus 40" } });
+    expect((await deps.store.getCase(caseId))!.identify).toMatchObject({ confidenceLevel: "possible", bestGuess: { brand: "Nike", model: "Pegasus 40" } });
+    expect(checks.price.status).not.toBe("unknown"); // runs on the best guess (Phase 2 makes it conditional)
+    expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
   });
 
   it("brand only: fit runs on the brand's size chart; price and comfort are unknown; not R1", async () => {

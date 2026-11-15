@@ -100,7 +100,7 @@ export async function finalise(
 ): Promise<FinaliseResult> {
   const { deps, emit, caseId, revision } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;
-  const identifyPassed = brandKnown(ctx.identify, deps.config.identifyConfidenceMin, ctx.ref.catalogue);
+  const identifyPassed = brandKnown(ctx.identify, ctx.ref.catalogue);
   const sellerReplies = (await deps.store.getInputs(caseId, { kinds: ["seller_reply"], withData: false })).map((r) => r.text ?? "").filter(Boolean);
   const warningSignals = detectWarningSignals({ checks: args.checks, facts: ctx.facts, identify: ctx.identify, pageText: ctx.pageText, sellerReplies, platform: ctx.facts.platform });
 

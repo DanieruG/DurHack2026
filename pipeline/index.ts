@@ -11,6 +11,7 @@ import { runStage, type StageStats } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
 import { finalise, instrumented, loadImages, loadPageText, saveSurvey } from "./core";
 import { guardSearchHint } from "./identify";
+import { withLevel } from "./identifyLevel";
 import { prepareSurvey, sanitiseQuery, type Survey } from "@/lib/observed";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
 import { factsFromPageOnly, mergeListingFacts, redactListingData } from "./listingData";
@@ -110,9 +111,13 @@ export async function runInvestigation(
     const facts: ListingFacts = listingColour ? { ...merged, listingColour } : merged;
 
     const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null, survey: opts.survey ?? null, searchQuery: opts.searchQuery ?? null });
-    // The search hint never decides on its own: a model only the search names (no text, no photo) stays below the gate.
+    // The search hint never decides on its own: a model only the search names (no text, no photo) stays below "likely".
     const hintGuard = (r: IdentifyResult) =>
-      guardSearchHint(r, { searchQuery: opts.searchQuery, listingText: [facts.title, facts.modelText, pageText].filter(Boolean).join("\n"), catalogue: ref.catalogue, min: config.identifyConfidenceMin });
+      withLevel(guardSearchHint(r, { searchQuery: opts.searchQuery, listingText: [facts.title, facts.modelText, pageText].filter(Boolean).join("\n"), catalogue: ref.catalogue }), {
+        facts,
+        pageText,
+        catalogue: ref.catalogue,
+      });
     let identifyCheck: CheckResult;
     if (examined) {
       ctx.identify = hintGuard(examined.identify);
@@ -124,19 +129,24 @@ export async function runInvestigation(
       // The merged call failed: identify on its own so the case still has a chance.
       const r = await runIdentify(ctx);
       ctx.identify = hintGuard(r.result);
-      identifyCheck = ctx.identify === r.result ? r.check : toIdentifyCheck(ctx, ctx.identify);
+      identifyCheck = toIdentifyCheck(ctx, ctx.identify);
     }
-    const identify = ctx.identify!;
     emit("check_done", identifyCheck);
 
-    // A model read only from the photos is checked by Gemini Pro, in parallel with the other checks (max 15s).
-    const versionCheck = modelFromPhotosOnly(identify, ctx.facts, ctx.pageText, ref.catalogue) && ctx.images.length ? runVersionCheck(ctx) : null;
-    // Each check runs on whatever identify established (brand / model / catalogue); condition runs on photos alone.
-    const downstream = await runDownstream(ctx);
-    let all = [identifyCheck, ...downstream];
-    if (versionCheck) all = await applyVersionCheck(ctx, await versionCheck, all);
+    // A model read only from the photos is checked by Gemini Pro. Fit and condition (which don't need the exact model) run
+    // meanwhile; price and comfort wait for Pro's answer, because it can change the model they search for.
+    let all: CheckResult[];
+    if (modelFromPhotosOnly(ctx.identify, ctx.facts, ctx.pageText, ref.catalogue) && ctx.images.length) {
+      const versionCheck = runVersionCheck(ctx);
+      const early = await runDownstream(ctx, ["fit", "condition"]);
+      const rechecked = applyVersionCheck(ctx, await versionCheck);
+      all = [rechecked, ...(await runDownstream(ctx, ["price", "comfort"], early))];
+    } else {
+      all = [identifyCheck, ...(await runDownstream(ctx))];
+    }
+    const identify = ctx.identify!;
     // Without a brand the verdict is R1 whatever the leads find, so don't spend calls on them.
-    const { checks, leads, report } = brandKnown(identify, config.identifyConfidenceMin, ref.catalogue) ? await followLeads(ctx, all) : skipLeads(ctx, all, NO_BRAND_SKIP);
+    const { checks, leads, report } = brandKnown(identify, ref.catalogue) ? await followLeads(ctx, all) : skipLeads(ctx, all, NO_BRAND_SKIP);
     await saveSurvey(ctx);
     await finalise(ctx, { checks, leads, leadsReport: report, row: c, inputHashImages: images });
   });

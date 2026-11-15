@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createCase } from "@/pipeline";
-import { compareIdentifications, modelFamily, modelFromPhotosOnly, versionQuestion } from "@/pipeline/versionCheck";
+import { compareIdentifications, modelFromPhotosOnly } from "@/pipeline/versionCheck";
 import type { CheckResult, IdentifyResult, NextMove } from "@/schemas/domain";
 import { checksFrom, fixtureReference, happyHandlers, json, makeDeps, PROFILE, type Handler } from "./helpers";
 
@@ -15,14 +15,6 @@ describe("version check: helpers", () => {
     expect(modelFromPhotosOnly(id({}), facts, "Nike Air Zoom Pegasus 40, UK 9", cat)).toBe(false); // catalogue alias
     expect(modelFromPhotosOnly(id({}), facts, "Nike Pegasus, worn 40 times", cat)).toBe(true); // version must follow the name
     expect(modelFromPhotosOnly(id({ modelName: null, catalogueModelId: null }), facts, "", cat)).toBe(false);
-  });
-  it("family and versions", () => {
-    expect(modelFamily("Pegasus 40", "Pegasus 41")).toEqual({ family: "Pegasus", options: ["40", "41"] });
-    expect(modelFamily("Air Force 1 '07", "Air Force 1 Low")).toEqual({ family: "Air Force 1", options: ["'07", "Low"] });
-    expect(modelFamily("Pegasus 40", null)).toEqual({ family: "Pegasus", options: ["40", null] });
-    expect(modelFamily("Gel-Kayano 30", "Gel-Nimbus 25")).toEqual({ family: "", options: ["Gel-Kayano 30", "Gel-Nimbus 25"] });
-    expect(versionQuestion("Nike", { family: "Pegasus", options: ["40", "41"] })).toBe("Is this the Nike Pegasus 40 or 41?");
-    expect(versionQuestion("Nike", { family: "Pegasus", options: ["40", null] })).toBe("Is this the Nike Pegasus 40 or another version?");
   });
   it("compares subjects", () => {
     const s = (modelName: string | null, catId: string | null = null) => ({ tier: "model" as const, brand: "Nike", modelName, displayName: null, catalogue: catId ? cat.find((m) => m.id === catId)! : null });
@@ -50,39 +42,43 @@ describe("version check: pipeline", () => {
     return { deps, events, checks: checksFrom(events), c };
   };
 
-  it("Pro disagrees: family with version unclear, price unknown, comfort on the family, an exact seller question, both answers as evidence", async () => {
+  it("Pro disagrees: possible; the more confident answer (Pro on a tie) is the best guess, the other an alternative; both answers as evidence", async () => {
     const { deps, events, checks, c } = await run(() => json({ ...flash, modelName: "Pegasus 41", catalogueModelId: "nike-pegasus-41", reasons: "Sole pattern is the 41" }));
     expect(deps.calls.filter((x) => x.tier === "strong").map((x) => x.stage)).toEqual(["identify"]); // one Pro call, no recheck lead
     expect(events.some((e) => e.event === "stage_started" && (e.data as { stage: string }).stage === "version_check")).toBe(true);
-    expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "family", modelName: "Nike Pegasus", versionUnclear: { family: "Pegasus", options: ["40", "41"] }, proRecheck: { outcome: "disagree" } } });
-    expect(checks.identify.summary).toMatch(/Nike Pegasus, version unclear \(40 or 41\)/);
+    expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "catalogue", level: "possible", modelName: "Nike Pegasus 41", proRecheck: { outcome: "disagree" } } });
+    expect(checks.identify.summary).toMatch(/Possibly Nike Pegasus 41 or Nike Pegasus 40/);
     expect(checks.identify.evidence.filter((e) => e.kind === "data_point").map((e) => [e.label, e.value])).toEqual([
       ["Gemini Flash, from the photos", "Nike Pegasus 40"],
       ["Gemini Pro recheck", "Nike Pegasus 41"],
     ]);
-    expect(checks.price).toMatchObject({ status: "unknown" });
-    expect(checks.price.summary).toMatch(/version is unclear \(40 or 41\)/);
+    expect(c.identify).toMatchObject({ confidenceLevel: "possible", catalogueModelId: "nike-pegasus-41", bestGuess: { model: "Pegasus 41" }, alternatives: [{ model: "Pegasus 40" }] });
+    // Nothing is withheld: fit and condition ran, and price and comfort ran on the best guess.
     expect(checks.fit.status).toBe("pass");
     expect(checks.condition.status).not.toBe("unknown");
-    expect(deps.webSearchRequests).toContain("Nike Pegasus review comfort");
-    expect((c.nextMoves as NextMove[]).find((m) => m.kind === "ask_seller")?.text).toBe("Is this the Nike Pegasus 40 or 41?");
-    expect(c.identify?.catalogueModelId).toBeNull();
+    expect(deps.webSearchRequests).toContain("Nike Pegasus 41 review comfort");
+    expect((c.nextMoves as NextMove[]).find((m) => m.kind === "ask_seller")).toMatchObject({ relatesTo: ["identify"] });
+  });
+
+  it("Flash is more confident than Pro: Flash stays the best guess", async () => {
+    const { c } = await run(() => json({ ...flash, modelName: "Pegasus 41", catalogueModelId: "nike-pegasus-41", confidence: 0.6 }));
+    expect(c.identify).toMatchObject({ confidenceLevel: "possible", bestGuess: { model: "Pegasus 40" }, alternatives: [{ model: "Pegasus 41" }] });
   });
 
   it("Pro agrees: the case continues on the model, with both answers recorded", async () => {
     const { checks } = await run(() => json(flash));
-    expect(checks.identify).toMatchObject({ status: "pass", details: { tier: "catalogue", proRecheck: { outcome: "agree" } } });
+    expect(checks.identify).toMatchObject({ status: "pass", details: { tier: "catalogue", level: "likely", proRecheck: { outcome: "agree" } } });
     expect(checks.identify.evidence.find((e) => e.label === "Gemini Pro recheck (agrees)")?.value).toBe("Nike Pegasus 40");
     expect(checks.price.status).not.toBe("unknown");
   });
 
-  it("Pro times out (or declines): version unclear (40 or another version)", async () => {
+  it("Pro times out or declines: Flash's answer stands, level possible", async () => {
     const slow = await run(() => new Promise(() => undefined), { proRecheckTimeoutMs: 100, stageTimeoutMs: 3000 });
-    expect(slow.checks.identify.details).toMatchObject({ tier: "family", versionUnclear: { options: ["40", null] }, proRecheck: { outcome: "timeout" } });
+    expect(slow.checks.identify.details).toMatchObject({ tier: "catalogue", level: "possible", proRecheck: { outcome: "timeout" } });
     expect(slow.checks.identify.evidence.find((e) => e.label === "Gemini Pro recheck")?.value).toMatch(/no answer within/);
     const declined = await run(() => json({ ...flash, modelName: null, catalogueModelId: null, confidence: 0 }));
     expect((declined.checks.identify.details as { proRecheck: { outcome: string } }).proRecheck.outcome).toBe("declined");
-    expect((declined.checks.price as CheckResult).status).toBe("unknown");
+    expect(declined.c.identify).toMatchObject({ confidenceLevel: "possible", bestGuess: { model: "Pegasus 40" }, alternatives: [] });
   });
 
   it("does not run when the listing names the model", async () => {

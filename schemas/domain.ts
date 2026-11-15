@@ -293,10 +293,42 @@ export const ListingFactsSchema = z.object({
 export type ListingFacts = z.infer<typeof ListingFactsSchema>;
 
 /**
+ * How sure identification is. `user_confirmed` is set only by the confirm-identity endpoint.
+ * confirmed: style code read clearly, or the listing's own data states the exact model and version, consistent with the photos.
+ * likely: confidence 0.75 or more, nothing conflicting. possible: 0.5 to 0.75, or Flash and Pro disagree. best_guess: below 0.5.
+ */
+export const ConfidenceLevelSchema = z.enum(["confirmed", "likely", "possible", "best_guess", "user_confirmed"]);
+export type ConfidenceLevel = z.infer<typeof ConfidenceLevelSchema>;
+
+/** One identification: the best guess or an alternative. `model` is the name without the brand. */
+export const IdentifyCandidateSchema = z.object({
+  brand: z.string().nullable(),
+  model: z.string().nullable(),
+  version: z.string().nullable().default(null),
+  colourway: z.string().nullable().default(null),
+  confidence: z.number().min(0).max(1),
+  evidence: z.array(EvidenceSchema).default([]),
+});
+export type IdentifyCandidate = z.infer<typeof IdentifyCandidateSchema>;
+
+/**
  * Tiered identification. Brand and model name are reported even when the model isn't in the catalogue;
  * catalogueModelId is set only for an exact catalogue match. Defaults keep cases stored before the tiers valid.
+ * `bestGuess`, `alternatives` and `confidenceLevel` are derived from the old fields for cases stored before they existed
+ * (see normaliseIdentify in pipeline/identifyLevel.ts).
  */
 export const IdentifyResultSchema = z.object({
+  /** The identification the checks run on (brand-only, with brandOnlyReason, when Gemini suggested no model at all). */
+  bestGuess: IdentifyCandidateSchema.optional(),
+  /** Up to 2 other candidates, most likely first. */
+  alternatives: z.array(IdentifyCandidateSchema).max(2).optional(),
+  confidenceLevel: ConfidenceLevelSchema.optional(),
+  /** Why only the brand is known (Gemini couldn't suggest any model). */
+  brandOnlyReason: z.string().optional(),
+  /** Google Lens visual matches used as extra evidence (never facts); also stored as `source` evidence with links. */
+  lensMatches: z.array(z.object({ title: z.string(), source: z.string().nullable().default(null), url: z.string().optional() })).optional(),
+  /** Set when the user confirmed or corrected the identification. */
+  userChoice: z.object({ choice: z.enum(["best_guess", "alternative", "custom", "skip"]), at: z.string() }).optional(),
   /** Recognised brand (catalogue casing when the brand is in the catalogue), or null. */
   brand: z.string().nullable().default(null),
   /** Probability that `brand` is right. */

@@ -21,7 +21,7 @@ export type CaseRun = {
   id: string;
   label: Label;
   /** What identify established after the gate: none, brand, family (version unclear), model, catalogue. */
-  tier: "none" | "brand" | "family" | "model" | "catalogue";
+  tier: "none" | "brand" | "model" | "catalogue";
   brand: string | null;
   modelName: string | null;
   /** Gemini Pro version check (model read only from photos), when it ran. */
@@ -95,12 +95,12 @@ export async function runCase(base: Deps, dir: string, id: string, label: Label)
     const c = (await deps.store.getCase(caseId))!;
     const checks = (await deps.store.getChecks(caseId, c.revision)) as CheckResult[];
     const get = (n: string) => checks.find((x) => x.check === n);
-    const subject = subjectOf(c.identify as IdentifyResult | null, base.config.identifyConfidenceMin, ref.catalogue);
+    const subject = subjectOf(c.identify as IdentifyResult | null, ref.catalogue);
     const facts = c.listingFacts as ListingFacts | null;
     Object.assign(run, {
       tier: subject.tier,
       brand: subject.brand,
-      modelName: subject.tier === "family" ? null : subject.modelName,
+      modelName: subject.modelName,
       proRecheck: (get("identify")?.details as { proRecheck?: CaseRun["proRecheck"] } | undefined)?.proRecheck,
       styleCode: facts?.styleCode ?? null,
       colours: facts?.listingColour?.names ?? null,

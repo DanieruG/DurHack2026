@@ -8,6 +8,8 @@ import { imagePart, type GeminiClient, type Part, type Tier } from "@/gemini/cli
 import type { CaseImage } from "./intake";
 import { clamp01, evidenceIds, textContains } from "./util";
 import { titleMatchesModel } from "@/lib/newPrices";
+import { candidateName, fullModelName, identifyLabel } from "@/lib/identifyLabel";
+import { LIKELY_MIN, normaliseIdentify, withLevel } from "./identifyLevel";
 
 export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listing, sceptically, in tiers: brand, then model, then catalogue match.
 - Use ONLY this listing's own title, item details, description and photos. Ignore everything about other listings on the page:
@@ -19,6 +21,10 @@ export const IDENTIFY_SYSTEM = `You identify the trainers in a second-hand listi
   or text; if you can't, return null.
 - catalogueModelId: ONLY when the pair is exactly one of the candidate catalogue ids given; otherwise null. A wrong id is far worse than none.
 - confidence: your probability (0-1) that modelName (and catalogueModelId, if set) is exactly right; 0 when modelName is null.
+- version: the version or edition if the listing or photos show it (e.g. "Essential", "OG", "GTX"), else null. colourway: the colourway name if shown, else null.
+- alternatives: up to 2 other models this pair could be, most likely first, each with its own confidence and a short reason. Always suggest
+  at least one model when the brand is known, even a poor guess: say so in confidence. Leave modelName null only when you can't suggest any model at all,
+  and then give noModelReason.
 - photoModel: the model name the PHOTOS ALONE show, ignoring the title, description and candidate text; return null when the photos do not settle it, with confidence 0-1.
 - evidence: what you relied on: kind "quote" with exact text from this listing, or kind "photo_region" with photoIndex and box2d
   [ymin, xmin, ymax, xmax] normalised 0-1000 (e.g. tongue label, logo, sole pattern).`;
@@ -41,18 +47,18 @@ export function searchHintPart(searchQuery: string | null | undefined): Part[] {
   ];
 }
 
-/** Cap for a model named only by the search hint: below the identify gate, so it can never become a confident identification. */
+/** Cap for a model named only by the search hint: below "likely", so it can never become a confident identification. */
 export const HINT_ONLY_MARGIN = 0.05;
 
 /**
  * The search hint must never produce a confident identification on its own, and must not raise confidence when the
  * photos are unclear: if the model appears in the user's search but not in the listing's own text, and no photo region
- * supports it, its confidence is capped below the gate (the brand tier still stands). A model read from a photo is
+ * supports it, its confidence is capped below "likely" (the brand still stands). A model read from a photo is
  * rechecked by Gemini Pro without the hint (versionCheck.ts), so the photos decide there.
  */
 export function guardSearchHint(
   result: IdentifyResult,
-  args: { searchQuery: string | null | undefined; listingText: string; catalogue: CatalogueModel[]; min: number },
+  args: { searchQuery: string | null | undefined; listingText: string; catalogue: CatalogueModel[] },
 ): IdentifyResult {
   if (!args.searchQuery || !result.modelName) return result;
   const cat = result.catalogueModelId ? args.catalogue.find((m) => m.id === result.catalogueModelId) : undefined;
@@ -61,7 +67,7 @@ export function guardSearchHint(
   const inSearch = names.some((n) => titleMatchesModel(args.searchQuery!, "", n));
   if (inListing || !inSearch) return result;
   if (result.evidence.some((e) => e.kind === "photo_region")) return result;
-  const cap = Math.max(0, args.min - HINT_ONLY_MARGIN);
+  const cap = Math.max(0, LIKELY_MIN - HINT_ONLY_MARGIN);
   if (result.confidence <= cap) return result;
   return {
     ...result,
@@ -76,6 +82,21 @@ export function identifyWireSchema(ids: string[]) {
     brand: z.string().nullish(),
     brandConfidence: z.number().min(0).max(1).nullish(),
     modelName: z.string().nullish(),
+    version: z.string().nullish(),
+    colourway: z.string().nullish(),
+    noModelReason: z.string().nullish(),
+    alternatives: z
+      .array(
+        z.object({
+          modelName: z.string().min(1),
+          version: z.string().nullish(),
+          colourway: z.string().nullish(),
+          confidence: z.number().min(0).max(1),
+          reason: z.string().nullish(),
+        }),
+      )
+      .max(2)
+      .default([]),
     catalogueModelId: (ids.length ? z.enum(ids as [string, ...string[]]) : z.string()).nullable(),
     confidence: z.number().min(0).max(1),
     reasons: z.string(),
@@ -94,14 +115,13 @@ export function identifyWireSchema(ids: string[]) {
   });
 }
 
-/** "family": brand and model family known, exact version unclear (Flash and the Pro recheck disagreed; see versionCheck.ts). */
-export type IdentifyTier = "catalogue" | "model" | "family" | "brand" | "none";
+export type IdentifyTier = "catalogue" | "model" | "brand" | "none";
 
-/** What the downstream checks can rely on, after applying IDENTIFY_CONFIDENCE_MIN to each tier. */
+/** What the downstream checks run on: the best guess, whatever its confidence level. */
 export type Subject = {
   tier: IdentifyTier;
   brand: string | null;
-  /** Model name without the brand. */
+  /** Model name without the brand (with the version, when there is one). */
   modelName: string | null;
   /** "adidas Dropset 3", "adidas", or null. */
   displayName: string | null;
@@ -110,31 +130,29 @@ export type Subject = {
 
 const NO_SUBJECT: Subject = { tier: "none", brand: null, modelName: null, displayName: null, catalogue: null };
 
-export function subjectOf(result: IdentifyResult | null | undefined, min: number, catalogue: CatalogueModel[]): Subject {
+/**
+ * There is no confidence gate: a named model is always the subject (its confidence level decides whether to pause for the
+ * buyer, not whether to use it). Brand only when Gemini suggested no model; none when not even the brand is known.
+ */
+export function subjectOf(result: IdentifyResult | null | undefined, catalogue: CatalogueModel[]): Subject {
   if (!result) return NO_SUBJECT;
   const cat = result.catalogueModelId ? (catalogue.find((m) => m.id === result.catalogueModelId) ?? null) : null;
-  const modelOk = result.confidence >= min && (!!cat || !!result.modelName);
   const brand = cat?.brand ?? result.brand ?? null;
-  // A confidently named model implies its brand (and covers cases stored before brand was recorded).
-  const brandOk = !!brand && (modelOk || (result.brandConfidence ?? 0) >= min);
-  if (!brandOk) return NO_SUBJECT;
-  if (!modelOk) return { tier: "brand", brand, modelName: null, displayName: brand, catalogue: null };
-  if (result.versionUnclear?.family) {
-    const family = result.versionUnclear.family;
-    return { tier: "family", brand, modelName: family, displayName: `${brand} ${family}`, catalogue: null };
+  const modelName = cat?.name ?? fullModelName(result.modelName, result.bestGuess?.version);
+  if (!brand) return NO_SUBJECT;
+  if (!modelName) {
+    // Brand only: a weak brand guess isn't enough to say anything (verdict R1).
+    return (result.brandConfidence ?? 0) >= POSSIBLE_BRAND_MIN ? { tier: "brand", brand, modelName: null, displayName: brand, catalogue: null } : NO_SUBJECT;
   }
-  const modelName = cat?.name ?? result.modelName!;
   return { tier: cat ? "catalogue" : "model", brand, modelName, displayName: `${brand} ${modelName}`, catalogue: cat };
 }
 
-/** Verdict rule R1 fires only when not even the brand is known. */
-export function brandKnown(result: IdentifyResult | null | undefined, min: number, catalogue: CatalogueModel[]): boolean {
-  return subjectOf(result, min, catalogue).tier !== "none";
-}
+/** Brand-only needs at least this much confidence in the brand. */
+const POSSIBLE_BRAND_MIN = 0.5;
 
-/** Exact catalogue match at or above the confidence threshold (the sampled price comparison needs this). */
-export function passesGate(result: IdentifyResult | null | undefined, min: number): boolean {
-  return !!result && result.catalogueModelId !== null && result.confidence >= min;
+/** Verdict rule R1 fires only when not even the brand is known. */
+export function brandKnown(result: IdentifyResult | null | undefined, catalogue: CatalogueModel[]): boolean {
+  return subjectOf(result, catalogue).tier !== "none";
 }
 
 const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
@@ -195,15 +213,40 @@ export function toIdentifyResult(
   const model = picked ?? matchCatalogue(brand, modelName, args.catalogue);
   const confidence = model || modelName ? clamp01(data.confidence) : 0;
   const photoModelName = data.photoModel?.modelName.replace(/\s+/g, " ").trim() || null;
+  const finalBrand = model?.brand ?? brand;
+  const finalModel = model?.name ?? modelName;
+  const version = data.version?.replace(/\s+/g, " ").trim().slice(0, 60) || null;
+  const colourway = data.colourway?.replace(/\s+/g, " ").trim().slice(0, 60) || null;
+  const alternatives = data.alternatives
+    .map((a) => {
+      const altModel = cleanModelName(finalBrand, a.modelName);
+      const altCat = matchCatalogue(finalBrand, altModel, args.catalogue);
+      return {
+        brand: finalBrand,
+        model: altCat?.name ?? altModel,
+        version: a.version?.replace(/\s+/g, " ").trim().slice(0, 60) || null,
+        colourway: a.colourway?.replace(/\s+/g, " ").trim().slice(0, 60) || null,
+        confidence: clamp01(a.confidence),
+        evidence: a.reason ? [{ id: `${nextId()}`, kind: "data_point" as const, label: a.reason.slice(0, 200) }] : [],
+      };
+    })
+    // The same model as the best guess isn't an alternative.
+    .filter((a) => a.model && !(norm(a.model) === norm(finalModel ?? "") && norm(a.version ?? "") === norm(version ?? "")))
+    .sort((x, y) => y.confidence - x.confidence)
+    .slice(0, 2);
   return {
-    brand: model?.brand ?? brand,
+    brand: finalBrand,
     brandConfidence: model ? Math.max(clamp01(data.brandConfidence ?? 0), confidence) : brand ? clamp01(data.brandConfidence ?? 0) : 0,
-    modelName: model?.name ?? modelName,
+    modelName: finalModel,
     catalogueModelId: model?.id ?? null,
     inCatalogue: !!model,
     confidence,
     reasons: data.reasons,
     evidence,
+    bestGuess: { brand: finalBrand, model: finalModel, version, colourway, confidence, evidence },
+    alternatives,
+    lensMatches: [],
+    ...(!finalModel && finalBrand ? { brandOnlyReason: data.noModelReason?.trim() || "Gemini couldn't suggest any model from this listing." } : {}),
     photoModel: data.photoModel && photoModelName ? { modelName: photoModelName, confidence: clamp01(data.photoModel.confidence) } : null,
   };
 }
@@ -244,65 +287,58 @@ export async function identifyProduct(
     system: IDENTIFY_SYSTEM,
     parts,
   });
-  return toIdentifyResult(data, { shortlist, catalogue: args.catalogue, pageText: args.pageText, photoCount: args.images.length });
+  const result = toIdentifyResult(data, { shortlist, catalogue: args.catalogue, pageText: args.pageText, photoCount: args.images.length });
+  return withLevel(result, { facts: args.facts, pageText: args.pageText, catalogue: args.catalogue });
 }
 
-export function identifyCheck(
-  result: IdentifyResult,
-  args: { min: number; catalogue: CatalogueModel[]; hadImages: boolean },
-): CheckResult {
-  const s = subjectOf(result, args.min, args.catalogue);
+export function identifyCheck(result: IdentifyResult, args: { catalogue: CatalogueModel[]; hadImages: boolean }): CheckResult {
+  const r = normaliseIdentify(result)!;
+  const s = subjectOf(r, args.catalogue);
+  const level = r.confidenceLevel!;
   const features: GeminiFeature[] = args.hadImages ? ["vision", "structured_output"] : ["structured_output"];
-  const guess = result.modelName && result.brand ? `${result.brand} ${result.modelName}` : null;
+  const label = identifyLabel(r);
+  const alts = (r.alternatives ?? []).map(candidateName).filter(Boolean);
+  const alsoBe = alts.length ? ` It could also be ${alts.join(" or ")}.` : "";
   let status: CheckResult["status"];
   let summary: string;
   let confidence: number;
-  switch (s.tier) {
-    case "catalogue":
-      status = "pass";
-      summary = `Identified as the ${s.displayName}.`;
-      confidence = result.confidence;
-      break;
-    case "model":
-      status = "pass";
-      summary = `Identified as the ${s.displayName}. This model isn't in our catalogue, so there's no sampled price to compare with.`;
-      confidence = result.confidence;
-      break;
-    case "family": {
-      const v = result.versionUnclear!;
-      status = "warn";
-      summary = `It's a ${s.displayName}, version unclear (${v.options[0]} or ${v.options[1] ?? "another version"}). The photos alone don't settle it, so the price can't be compared yet.`;
-      confidence = Math.min(result.confidence, 0.5);
-      break;
-    }
-    case "brand":
-      status = "warn";
-      summary = guess
-        ? `It's a ${s.brand} pair. It might be the ${guess}, but I'm not confident enough to rely on that.`
-        : `It's a ${s.brand} pair, but this listing doesn't show the exact model.`;
-      confidence = result.brandConfidence ?? 0;
-      break;
-    default:
-      status = "unknown";
-      summary = "I couldn't identify the brand from this listing's title, description or photos.";
-      confidence = Math.max(result.brandConfidence ?? 0, result.confidence);
+  if (s.tier === "none") {
+    status = "unknown";
+    summary = "I couldn't identify the brand from this listing's title, description or photos.";
+    confidence = Math.max(r.brandConfidence ?? 0, r.confidence);
+  } else if (s.tier === "brand") {
+    status = "warn";
+    summary = `It's a ${s.brand} pair, but I couldn't suggest a model from this listing${r.brandOnlyReason ? ` (${r.brandOnlyReason.replace(/\.$/, "")})` : ""}.`;
+    confidence = r.brandConfidence ?? 0;
+  } else {
+    status = level === "possible" || level === "best_guess" ? "warn" : "pass";
+    const noSampled = s.tier === "model" ? " This model isn't in our catalogue, so there's no sampled price to compare with." : "";
+    summary =
+      level === "confirmed" ? `Identified as the ${s.displayName}.${noSampled}`
+      : level === "user_confirmed" ? `You confirmed this as the ${s.displayName}.${noSampled}`
+      : level === "likely" ? `Likely the ${s.displayName}.${alsoBe}${noSampled}`
+      : level === "possible" ? `${label}.${alsoBe} I'm not sure enough to be certain.`
+      : `${label}.${alsoBe} It's a guess: the listing doesn't show the model clearly.`;
+    confidence = r.confidence;
   }
   return {
     check: "identify",
     status,
     summary,
-    evidence: result.evidence,
+    evidence: r.evidence,
     confidence,
     geminiFeatures: features,
     details: {
       tier: s.tier,
+      level,
+      label,
       brand: s.brand,
       modelName: s.displayName,
       catalogueModelId: s.catalogue?.id ?? null,
       inCatalogue: !!s.catalogue,
-      reasons: result.reasons,
-      gatePassed: s.tier === "catalogue",
-      ...(result.versionUnclear ? { versionUnclear: result.versionUnclear } : {}),
+      reasons: r.reasons,
+      alternatives: r.alternatives ?? [],
+      ...(r.brandOnlyReason ? { brandOnlyReason: r.brandOnlyReason } : {}),
     },
   };
 }

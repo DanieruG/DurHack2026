@@ -129,7 +129,7 @@ describe("observed listings through the pipeline", () => {
     expect((checks.price.details as { observedAlternatives: ObservedAlternatives }).observedAlternatives).toMatchObject({ surveyUsed: true, alternatives: [] });
   });
 
-  it("version unclear: family-level context only, price confidence capped at 0.4", async () => {
+  it("Pro disagrees: possible, Pro's answer is the best guess and Flash's the alternative", async () => {
     const PAGE = "Nike running trainers\nSize: UK 9\n£38.00\nCondition: Very good";
     const flash = { brand: "Nike", brandConfidence: 0.95, modelName: "Pegasus 40", catalogueModelId: "nike-pegasus-40", confidence: 0.9, reasons: "Tongue label", evidence: [] };
     const base = happyHandlers();
@@ -138,19 +138,12 @@ describe("observed listings through the pipeline", () => {
       identify: (req) => (req.tier === "strong" ? json({ ...flash, modelName: "Pegasus 41", catalogueModelId: "nike-pegasus-41" }) : json(flash)),
     };
     const deps = makeDeps({ handlers, webSearch: {} });
-    const { checks } = await investigate(deps, { pageText: PAGE, imageUrls: ["https://img.example.com/1.jpg", "https://img.example.com/2.jpg"], observedListings: surveyCards() });
-    expect(checks.identify.details).toMatchObject({ tier: "family" });
-    expect(checks.price.status).toBe("unknown");
-    expect(checks.price.confidence).toBeLessThanOrEqual(0.4);
-    const c = (checks.price.details as { observedComparison: ObservedComparison }).observedComparison;
-    expect(c.context).toMatchObject({ familyLevel: true, n: 7 });
-    expect(c.stats).toBeNull();
-    expect(c.suggestions).toEqual([]);
-    expect((checks.price.details as { observedAlternatives: ObservedAlternatives }).observedAlternatives).toMatchObject({ surveyUsed: true, alternatives: [] });
-    expect(checks.price.summary).toMatch(/version is unclear.*7 similar listings seen/);
+    const { caseId, checks } = await investigate(deps, { pageText: PAGE, imageUrls: ["https://img.example.com/1.jpg", "https://img.example.com/2.jpg"], observedListings: surveyCards() });
+    expect(checks.identify.details).toMatchObject({ tier: "catalogue", level: "possible", modelName: "Nike Pegasus 41" });
+    expect((await deps.store.getCase(caseId))!.identify).toMatchObject({ confidenceLevel: "possible", alternatives: [{ model: "Pegasus 40" }] });
   });
 
-  it("sends the search as a marked hint, and a model only the search names stays below the gate", async () => {
+  it("sends the search as a marked hint, and a model only the search names stays below likely", async () => {
     const PAGE = "Nike running trainers\nSize: UK 9\n£38.00\nCondition: Very good";
     const base = happyHandlers();
     const handlers: Record<string, Handler> = {
@@ -162,7 +155,7 @@ describe("observed listings through the pipeline", () => {
     const { caseId, checks } = await investigate(deps, { pageText: PAGE, searchQuery: "nike pegasus 40" });
     const extract = deps.calls.find((c) => c.stage === "extract")!;
     expect(promptText(extract)).toContain(`HINT, the user's own search (NOT a fact about this listing): the user found this listing by searching "nike pegasus 40"`);
-    expect(checks.identify.details).toMatchObject({ tier: "brand" });
+    expect(checks.identify.details).toMatchObject({ level: "possible" });
     expect((await deps.store.getCase(caseId))!.identify!.confidence).toBeLessThan(0.75);
 
     // Without the search, the prompt has no hint.

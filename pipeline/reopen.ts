@@ -13,6 +13,7 @@ import { generateStructured } from "@/gemini/structured";
 import { imagePart, type GeminiClient, type Part } from "@/gemini/client";
 import type { Deps } from "./deps";
 import { subjectOf } from "./identify";
+import { normaliseIdentify } from "./identifyLevel";
 import { scopeListingImages } from "@/lib/listingScope";
 import { intakeImages, type CaseImage, type ReopenRequest } from "./intake";
 import { buildCtx, DOWNSTREAM, runDownstream, runIdentify, type DownstreamCheck } from "./runChecks";
@@ -224,17 +225,16 @@ export async function reopenCase(deps: Deps, caseId: string, args: { imageUrls: 
     const affected = affectedChecks({ newImages: newImages.length > 0, imageShowsLabel: labelled.length > 0, labelHasSize: !!labelSize, reply });
     const answered = new Set<CheckName>([...c.answered, ...(reply?.answers ?? []), ...affected]);
 
-    const ctx = buildCtx({ deps, caseId, revision, emit, ref, images, pageText, facts, needs: c.needs, identify: c.identify, survey: await loadSurvey(deps, caseId) });
+    const ctx = buildCtx({ deps, caseId, revision, emit, ref, images, pageText, facts, needs: c.needs, identify: normaliseIdentify(c.identify), survey: await loadSurvey(deps, caseId) });
     const rerun = new Set<CheckName>();
     let checks = before;
 
     let identifyChanged = false;
     if (affected.has("identify")) {
-      const min = config.identifyConfidenceMin;
-      const prev = subjectOf(c.identify, min, ref.catalogue);
+      const prev = subjectOf(c.identify, ref.catalogue);
       const { result, check } = await runIdentify(ctx);
       rerun.add("identify");
-      const next = subjectOf(result, min, ref.catalogue);
+      const next = subjectOf(result, ref.catalogue);
       identifyChanged = next.tier !== prev.tier || next.displayName !== prev.displayName || next.catalogue?.id !== prev.catalogue?.id;
       ctx.identify = result;
       emit("check_done", check);

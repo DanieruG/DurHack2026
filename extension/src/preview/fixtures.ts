@@ -155,7 +155,7 @@ const identify: CheckResult = {
   evidence: [],
   confidence: 0.9,
   geminiFeatures: ["vision", "structured_output"],
-  details: { modelName: "Nike Pegasus 40", gatePassed: true },
+  details: { tier: "catalogue", level: "confirmed", label: "Nike Pegasus 40", modelName: "Nike Pegasus 40", alternatives: [] },
 };
 
 export const CASE_FILE: CaseDetail = {
