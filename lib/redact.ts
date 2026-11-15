@@ -18,6 +18,7 @@ const DROP_LINE = [
   /^\s*(hi|hello|welcome( back)?),?\s+[^\s!]{1,30}!?\s*$/i, // the viewer's own name in the site header: "Hi Daniel!"
   /^\s*hi\s+[^\s!]{1,30}!/i, // ...also when the header runs on: "Hi Daniel!Hello. Sign in"
   /^\s*(frequent uploads|speedy shipping|active lister|regularly lists \d+ or more items\.?|ships (quickly|fast))\s*$/i, // seller badges (Vinted)
+  /^\s*sends items promptly\b/i, // Vinted seller badge
   /\bfeedback (left by buyer|replied to by seller)\b/i,
   /^\s*reply from:/i,
   /^\s*located in:/i, // the seller's town
@@ -43,7 +44,16 @@ const DROP_LINE = [
 ];
 
 // Header lines whose *next* line is usually the seller's name/handle.
-const HEADER_LINE = /^\s*(seller|sold by|listed by|posted by|meet the seller|about the seller|seller information|member)\s*:?\s*$/i;
+const HEADER_LINE = /^\s*(seller|sold by|listed by|posted by|meet the seller|about the seller|seller information|member|find similar items from)\s*:?\s*$/i;
+// eBay's feedback block (other buyers' comments, the seller's other item numbers): from its heading, or the first
+// dated "Verified purchase" entry, to the page footer.
+const FEEDBACK_START = /^\s*(about this seller|seller feedback|all ratings)\s*$/i;
+const FEEDBACK_WHEN = /^\s*(past (month|\d+ months|year)|more than a year ago)\s*$/i;
+const FEEDBACK_ENTRY = /^\s*(verified purchase|ebay automated feedback)\s*$/i;
+const FEEDBACK_END = /^\s*(back to search results|return to top|more to explore:?)\s*$/i;
+// A business seller's card has a shop name with spaces ("sample_identity_02"), its feedback count, then "Message".
+const CARD_NAME = /^\s*(?!£)[A-Za-z0-9][^\n]{1,58}\s*$/;
+const CARD_AFTER = /^\s*(message|private|business)\s*$/i;
 // "Seller: jane_doe" / "Sold by janedoe" on a single line.
 const INLINE_SELLER = /^\s*(seller|sold by|listed by|posted by)\s*[:\-]?\s+\S+/i;
 
@@ -59,6 +69,8 @@ const PHONE = /(?:\+\d{1,3}[\s.-]?(?:\(0\)[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\
 const AVATAR = /^\s*[A-Za-z0-9]\s*$/;
 const USERNAME = /^\s*[A-Za-z0-9][\w.\-]{2,39}\s*$/;
 const FEEDBACK_COUNT = /^\s*\(\d[\d,]*\)\s*$/;
+// Vinted's seller card: the username, then its review count as a bare number.
+const BARE_COUNT = /^\s*\d{1,6}\s*$/;
 const SELLER_TYPE = /^\s*(private|business)\s*$/i;
 const COUNT_WORDS = /^(reviews?|ratings?|feedback|sold|items?|photos?|watchers?|bids?|offers?|questions?|answers?|likes?|views?|sizes?)$/i;
 
@@ -74,7 +86,14 @@ export function sellerUsernames(lines: string[]): string[] {
     // Handles look like "pako8242", "jane_doe", "sneakerqueen"; not "Reviews" / "Watchers" above a count.
     if (!USERNAME.test(t) || COUNT_WORDS.test(t) || !(/[\d_.\-]/.test(t) || t === t.toLowerCase())) continue;
     const j = next(i);
-    if (j !== -1 && FEEDBACK_COUNT.test(lines[j])) names.add(lines[i].trim());
+    if (j !== -1 && (FEEDBACK_COUNT.test(lines[j]) || BARE_COUNT.test(lines[j]))) names.add(lines[i].trim());
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!CARD_NAME.test(t) || COUNT_WORDS.test(t)) continue;
+    const j = next(i);
+    const k = j === -1 ? -1 : next(j);
+    if (j !== -1 && k !== -1 && FEEDBACK_COUNT.test(lines[j]) && CARD_AFTER.test(lines[k])) names.add(t);
   }
   return [...names];
 }
@@ -91,16 +110,26 @@ export function redact(input: string | undefined | null): RedactResult {
   const out: string[] = [];
   let removed = 0;
   let skipNext = 0;
+  let inFeedback = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trimEnd();
+    const after = lines.slice(i + 1, i + 3).some((l) => FEEDBACK_ENTRY.test(l));
+    if (!inFeedback && (FEEDBACK_START.test(line) || (FEEDBACK_WHEN.test(line) && after) || FEEDBACK_ENTRY.test(line))) inFeedback = true;
+    if (inFeedback) {
+      if (FEEDBACK_END.test(line)) inFeedback = false;
+      else {
+        removed++;
+        continue;
+      }
+    }
     // Seller card: drop the avatar initial before a username, the username, its feedback count and seller type.
     const nextLine = lines.slice(i + 1).find((l) => l.trim()) ?? "";
     const prevLine = lines.slice(0, i).reverse().find((l) => l.trim()) ?? "";
     if (
       (AVATAR.test(line) && isUsername(nextLine)) ||
       isUsername(line) ||
-      (FEEDBACK_COUNT.test(line) && isUsername(prevLine)) ||
+      ((FEEDBACK_COUNT.test(line) || BARE_COUNT.test(line)) && isUsername(prevLine)) ||
       (SELLER_TYPE.test(line) && FEEDBACK_COUNT.test(prevLine))
     ) {
       removed++;
