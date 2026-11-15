@@ -21,6 +21,7 @@ import type { Deps } from "./deps";
 import type { SseEvent } from "./events";
 import { indexEvidence } from "./util";
 import { normaliseIdentify } from "./identifyLevel";
+import { identityNeeded } from "./identityCheck";
 
 export function imageUrl(origin: string, caseId: string, index: number): string {
   return `${origin}/api/cases/${caseId}/images/${index}`;
@@ -124,6 +125,12 @@ export async function synthesizeEvents(deps: Deps, c: CaseRow): Promise<SseEvent
   if (offers) push("new_offers", offers);
   if (checks.some((c) => c.check === "price")) push("observed_alternatives", observedAlternativesOf(checks));
   for (const ch of checks) push("check_done", ch);
+  // Paused for the buyer: re-ask, and don't say the investigation is done.
+  if (c.status === "awaiting_confirmation") {
+    const identify = normaliseIdentify(c.identify);
+    if (identify) push("identity_check_needed", identityNeeded(identify));
+    return out;
+  }
   for (const l of leads) push("lead_done", l);
   const skipped = c.history.find((h) => h.revision === revision)?.leads?.skipped;
   if (skipped) push("leads_skipped", { reason: skipped });

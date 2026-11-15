@@ -3,13 +3,14 @@ import type { Deps } from "./deps";
 import { emptyFacts } from "./extract";
 import { examineListing } from "./examine";
 import { buildNeeds } from "./needs";
-import { brandKnown } from "./identify";
+import { brandKnown, subjectOf } from "./identify";
+import { identityNeeded, shouldPause } from "./identityCheck";
 import { inputHashFor, intakeImages, prepareText, type CaseRequest } from "./intake";
 import { followLeads, NO_BRAND_SKIP, skipLeads } from "./leads";
-import { buildCtx, runDownstream, runIdentify, toIdentifyCheck } from "./runChecks";
+import { buildCtx, runDownstream, runIdentify, toIdentifyCheck, type RunCtx } from "./runChecks";
 import { runStage, type StageStats } from "./util";
 import { scopeListingImages } from "@/lib/listingScope";
-import { finalise, instrumented, loadImages, loadPageText, saveSurvey } from "./core";
+import { finalise, instrumented, loadImages, loadPageText, savePausedSurvey, saveSurvey } from "./core";
 import { guardSearchHint } from "./identify";
 import { withLevel } from "./identifyLevel";
 import { runLens, shouldRunLens } from "./lens";
@@ -34,7 +35,7 @@ export function displayUrl(pageUrl: string | undefined): string | null {
 }
 
 /** POST /api/cases: store the case and its inputs, then start the investigation in the background. */
-export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId: string; done: Promise<void> }> {
+export async function createCase(deps: Deps, req: CaseRequest, opts: { pause?: boolean } = {}): Promise<{ caseId: string; done: Promise<void> }> {
   const { platform, pageText } = prepareText(req.capture);
   // The extension's structured fields, redacted once: stored with the case and used by the run.
   const listing = redactListingData(req.capture.listing);
@@ -65,6 +66,7 @@ export async function createCase(deps: Deps, req: CaseRequest): Promise<{ caseId
     listing,
     survey,
     searchQuery: sanitiseQuery(req.capture.searchQuery),
+    pause: opts.pause,
   });
   return { caseId: row.id, done };
 }
@@ -77,7 +79,14 @@ function profileFromNeeds(needs: UserNeeds) {
 export async function runInvestigation(
   deps: Deps,
   caseId: string,
-  opts: { imageUrls: string[]; survey?: Survey | null; searchQuery?: string | null; listing?: ListingData },
+  opts: {
+    imageUrls: string[];
+    survey?: Survey | null;
+    searchQuery?: string | null;
+    listing?: ListingData;
+    /** Pause for the buyer when identification is only possible or a best guess (default). The eval turns it off and carries on with the best guess. */
+    pause?: boolean;
+  },
 ): Promise<void> {
   const c = await deps.store.getCase(caseId);
   if (!c) throw new Error(`Case ${caseId} not found`);
@@ -145,22 +154,42 @@ export async function runInvestigation(
     }
 
     // A model read only from the photos is checked by Gemini Pro. Fit and condition (which don't need the exact model) run
-    // meanwhile; price and comfort wait for Pro's answer, because it can change the model they search for.
-    let all: CheckResult[];
+    // meanwhile; the model-dependent checks wait for Pro's answer, because it can change the model they search for.
+    let early: CheckResult[] | null = null;
     if (modelFromPhotosOnly(ctx.identify, ctx.facts, ctx.pageText, ref.catalogue) && ctx.images.length) {
       const versionCheck = runVersionCheck(ctx);
-      const early = await runDownstream(ctx, ["fit", "condition"]);
-      const rechecked = applyVersionCheck(ctx, await versionCheck);
-      all = [rechecked, ...(await runDownstream(ctx, ["price", "comfort"], early))];
-    } else {
-      all = [identifyCheck, ...(await runDownstream(ctx))];
+      early = await runDownstream(ctx, ["fit", "condition"]);
+      identifyCheck = applyVersionCheck(ctx, await versionCheck);
     }
+
+    // Only a possible or best guess pauses: ask the buyer before any model-dependent search.
+    if (opts.pause !== false && shouldPause(ctx.identify, ref.catalogue)) {
+      ctx.paused = true;
+      early ??= await runDownstream(ctx, ["fit", "condition"]);
+      await pauseForIdentity(ctx, [identifyCheck, ...early]);
+      return { paused: true as const };
+    }
+    const all: CheckResult[] = [identifyCheck, ...(early ? await runDownstream(ctx, ["price", "comfort"], early) : await runDownstream(ctx))];
     const identify = ctx.identify!;
     // Without a brand the verdict is R1 whatever the leads find, so don't spend calls on them.
     const { checks, leads, report } = brandKnown(identify, ref.catalogue) ? await followLeads(ctx, all) : skipLeads(ctx, all, NO_BRAND_SKIP);
     await saveSurvey(ctx);
     await finalise(ctx, { checks, leads, leadsReport: report, row: c, inputHashImages: images });
   });
+}
+
+/**
+ * Persist everything needed to resume (so the pause survives a restart), then tell the panel. The case stays
+ * "awaiting_confirmation" with no timeout until POST /api/cases/:id/confirm-identity.
+ */
+async function pauseForIdentity(ctx: RunCtx, checks: CheckResult[]): Promise<void> {
+  const { deps, caseId, revision } = ctx;
+  const identify = ctx.identify!;
+  const candidates = [identify.bestGuess, ...(identify.alternatives ?? [])].flatMap((c) => (c?.model && c.brand ? [subjectOf({ ...identify, brand: c.brand, modelName: c.model, catalogueModelId: null, bestGuess: c }, ctx.ref.catalogue)] : []));
+  await deps.store.saveChecks(caseId, revision, checks);
+  await savePausedSurvey(ctx, candidates);
+  await deps.store.updateCase(caseId, { status: "awaiting_confirmation", listingFacts: ctx.facts, needs: ctx.needs, identify });
+  ctx.emit("identity_check_needed", identityNeeded(identify));
 }
 
 /** Fire-and-forget wrapper used by the route handlers. */

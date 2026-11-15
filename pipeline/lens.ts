@@ -48,6 +48,7 @@ function mergeMatches(perPhoto: LensMatch[][]): LensMatch[] {
 
 /** Search Lens and re-identify. Never throws: on any failure the first identification stands. */
 export async function runLens(ctx: RunCtx, identify: IdentifyResult): Promise<IdentifyResult> {
+  if (ctx.paused) return identify; // nothing searches while the buyer is being asked
   const urls = lensPhotoUrls(ctx.images, identify);
   if (!urls.length) return identify;
   const { deps } = ctx;

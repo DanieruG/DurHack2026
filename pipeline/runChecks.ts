@@ -58,7 +58,13 @@ export type RunCtx = {
   survey?: Survey | null;
   /** The user's marketplace search: an identify hint only. */
   searchQuery?: string | null;
+  /** Waiting for the buyer to confirm the model: no search (Shopping, web or Lens) may run. */
+  paused?: boolean;
+  /** The buyer skipped confirming: model-dependent checks are unknown and nothing searches. */
+  modelSkipped?: boolean;
 };
+
+const PAUSED_MESSAGE = "A search was attempted while the investigation is waiting for the buyer to confirm the model";
 
 const priceKey = (modelName: string, brand: string) => `${brand} ${modelName}`.toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -70,6 +76,7 @@ export function buildCtx(base: Omit<RunCtx, "executors" | "today" | "newPrices" 
     const o = colourOpts();
     const k = `${priceKey(modelName, brand)}|${o.styleCode ?? ""}|${o.colour ?? ""}`;
     let p = memo.get(k);
+    if (ctx.paused) return Promise.reject(new Error(PAUSED_MESSAGE));
     if (!p) {
       p = base.deps.newPrices.getNewPrices(modelName, brand, { ...(o.styleCode ? { styleCode: o.styleCode } : {}), ...(o.colour ? { colour: o.colour } : {}) });
       p.catch(() => memo.delete(k)); // a failed lookup may be retried by a later lead
@@ -140,6 +147,11 @@ export function toIdentifyCheck(ctx: RunCtx, result: IdentifyResult): CheckResul
 export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOpts = {}): Promise<CheckResult> {
   const subject = subjectFor(ctx);
   // Tiers: brand -> fit; model name -> comfort + new-price search; catalogue match -> sampled prices too; photos -> condition always.
+  if (ctx.modelSkipped && (name === "price" || name === "comfort")) {
+    const what = name === "price" ? "compare the price" : "check reviews for comfort";
+    const observed = name === "price" ? { details: { skipped: true, ...(ctx.survey ? { observedComparison: modelUnknownComparison(ctx.survey) } : {}), observedAlternatives: emitNoAlternatives(ctx) } } : { details: { skipped: true } };
+    return unknownCheck(name, `You skipped confirming the model, so I didn't search to ${what}.`, observed);
+  }
   if (name === "fit" && !subject.brand) return unknownCheck("fit", "I couldn't tell the brand, so I can't check the fit.");
   if ((name === "price" || name === "comfort") && !subject.modelName) {
     const what = name === "price" ? "compare the price" : "check reviews for comfort";
@@ -184,7 +196,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
         case "comfort":
           return checkComfort({
             gemini: deps.gemini,
-            webSearch: deps.webSearch,
+            webSearch: ctx.paused ? { search: async () => Promise.reject(new Error(PAUSED_MESSAGE)) } : deps.webSearch,
             model: { brand: subject.brand!, name: subject.modelName! },
             needs: ctx.needs,
             today: ctx.today,

@@ -1,4 +1,4 @@
-import { SseEventSchemas, type SseEventData, type SseEventName } from "@/schemas/api";
+import { SseEventSchemas, type IdentityOption, type SseEventData, type SseEventName } from "@/schemas/api";
 import { NewOffersSchema, type CaseDiff, type CheckName, type CheckResult, type Lead, type NewOffers, type NextMove, type ObservedAlternatives, type Verdict, type WarningSignal } from "@/schemas/domain";
 import { openableOffers } from "./offers";
 import { checkTags, stepTags } from "./tags";
@@ -14,7 +14,13 @@ export type LogLine = {
   tags?: string[];
 };
 
+/** The identity_check_needed event: what the "Is this the right item?" card shows. */
+export type IdentityCheck = SseEventData<"identity_check_needed">;
+export type { IdentityOption };
+
 export type Investigation = {
+  /** Set while the investigation waits for the buyer to confirm the model. */
+  identityCheck: IdentityCheck | null;
   revision: number;
   startedAt: number;
   log: LogLine[];
@@ -46,6 +52,7 @@ export const ALL_CHECKS: CheckName[] = ["identify", "fit", "price", "comfort", "
 
 export function newInvestigation(revision: number, at: number): Investigation {
   return {
+    identityCheck: null,
     revision,
     startedAt: at,
     log: [],
@@ -197,8 +204,14 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       const tags = s.checks[data.stage as CheckName] ? line.tags : stepTags(data);
       return { ...s, log: upsert(s.log, { ...line, state: line.state === "active" ? "done" : line.state, tags }) };
     }
+    case "identity_check_needed":
+      return { ...s, identityCheck: e.data as IdentityCheck, log: upsert(s.log, { key: "identity:needed", text: "Needs your confirmation of the model", state: "problem", kind: "warning", at: e.at }) };
     case "check_done": {
       const c = e.data as CheckResult;
+      // The buyer's answer (confirmed, corrected or skipped) is recorded on the identify check: the question is closed.
+      if (c.check === "identify" && (c.details as { userChoice?: string } | undefined)?.userChoice) {
+        s = { ...s, identityCheck: null, log: s.log.filter((l) => l.key !== "identity:needed") };
+      }
       if (c.check === "price") {
         // The finished price check is the word on its offers (none at all if, say, the version turned out unclear).
         const offers = NewOffersSchema.safeParse((c.details as { newOffers?: unknown } | undefined)?.newOffers);

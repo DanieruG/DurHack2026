@@ -11,7 +11,8 @@ import { decideAndWordVerdict } from "./verdict/wording";
 import { decideVerdict } from "./verdict/rules";
 import { detectWarningSignals } from "./signals";
 import { runStage } from "./util";
-import { fromStoredSurvey, matchSurvey, toStoredSurvey, type StoredSurvey, type Survey } from "@/lib/observed";
+import { fromStoredSurvey, matchSurvey, toStoredSurvey, type MatchedListing, type StoredSurvey, type Survey } from "@/lib/observed";
+import type { Subject } from "./identify";
 import { chartFor, subjectFor, tokensFor } from "./runChecks";
 
 export async function loadImages(deps: Deps, caseId: string): Promise<CaseImage[]> {
@@ -28,19 +29,32 @@ export async function instrumented(
   deps: Deps,
   caseId: string,
   revision: number,
-  body: (emit: Emit) => Promise<void>,
+  body: (emit: Emit) => Promise<void | { paused: true }>,
+  /** Totals from an earlier segment of this revision (before the pause), added to this one's. */
+  opts: { carry?: RunTotals } = {},
 ): Promise<void> {
   const started = Date.now();
   const emit = deps.hub.emitter(caseId);
   const { log, run } = withCallLog(caseId, () => body(emit));
+  let paused = false;
   try {
-    await run;
+    paused = !!(await run);
   } catch (err) {
     console.error(`[sleuth] investigation ${caseId} failed`, err);
     await deps.store.updateCase(caseId, { status: "error" }).catch(() => undefined);
     emit("error", { message: "The investigation hit an unexpected problem and stopped. Please try again." });
   }
-  const totals = { durationMs: Date.now() - started, geminiCalls: log.length, cachedCalls: log.filter((l) => l.cached).length };
+  const carry = opts.carry;
+  const totals = {
+    durationMs: Date.now() - started + (carry?.durationMs ?? 0),
+    geminiCalls: log.length + (carry?.geminiCalls ?? 0),
+    cachedCalls: log.filter((l) => l.cached).length + (carry?.cachedCalls ?? 0),
+  };
+  if (paused) {
+    // Waiting for the buyer: the investigation isn't done. Keep what has been spent so far for when it resumes.
+    await deps.store.addInputs(caseId, [{ revision, kind: "pause_state", text: JSON.stringify(totals) }]).catch(() => undefined);
+    return;
+  }
   await saveRunTotals(deps, caseId, revision, totals).catch(() => undefined);
   emit("investigation_done", { caseId, revision, ...totals });
   logTotals(caseId, log, Date.now() - started);
@@ -67,6 +81,24 @@ export async function saveSurvey(ctx: RunCtx): Promise<void> {
   const subject = subjectFor(ctx);
   const matched = matchSurvey(ctx.survey, tokensFor(subject), chartFor(subject, ctx.ref.sizeCharts));
   const stored: StoredSurvey = toStoredSurvey(ctx.survey, matched);
+  await ctx.deps.store.addInputs(ctx.caseId, [{ revision: ctx.revision, kind: "observed_listings", text: JSON.stringify(stored) }]);
+}
+
+/**
+ * While paused the model isn't settled, so store the cards matching ANY candidate (best guess and alternatives), each with its
+ * best match level: whichever the buyer picks, the comparison can be made after a restart. Unmatched cards are never stored.
+ */
+export async function savePausedSurvey(ctx: RunCtx, candidates: Subject[]): Promise<void> {
+  if (!ctx.survey) return;
+  const rank: Record<string, number> = { exact: 3, version_unknown: 2, different_version: 1, none: 0 };
+  const best = new Map<string, MatchedListing>();
+  for (const s of candidates) {
+    for (const m of matchSurvey(ctx.survey, tokensFor(s), chartFor(s, ctx.ref.sizeCharts))) {
+      const prev = best.get(m.id);
+      if (!prev || rank[m.level] > rank[prev.level]) best.set(m.id, m);
+    }
+  }
+  const stored = toStoredSurvey(ctx.survey, [...best.values()]);
   await ctx.deps.store.addInputs(ctx.caseId, [{ revision: ctx.revision, kind: "observed_listings", text: JSON.stringify(stored) }]);
 }
 

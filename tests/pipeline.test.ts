@@ -13,8 +13,8 @@ const capture = {
   imageUrls: ["https://img.example.com/1.jpg", "https://img.example.com/2.jpg", "https://img.example.com/missing.jpg"],
 };
 
-async function investigate(deps: ReturnType<typeof makeDeps>, over: Partial<typeof capture> = {}) {
-  const { caseId, done } = await createCase(deps, { capture: { ...capture, ...over }, profile: PROFILE, screenshots: [] });
+async function investigate(deps: ReturnType<typeof makeDeps>, over: Partial<typeof capture> = {}, opts: { pause?: boolean } = {}) {
+  const { caseId, done } = await createCase(deps, { capture: { ...capture, ...over }, profile: PROFILE, screenshots: [] }, opts);
   await done;
   return { caseId, events: deps.hub.events(caseId) };
 }
@@ -96,7 +96,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
 
   it("a low-confidence guess is still named (level possible), not withheld: not R1", async () => {
     const deps = makeDeps({ handlers: { identify: () => json({ catalogueModelId: "nike-pegasus-40", confidence: 0.6, reasons: "maybe", evidence: [] }) } });
-    const { caseId, events } = await investigate(deps);
+    const { caseId, events } = await investigate(deps, {}, { pause: false });
     const checks = checksFrom(events);
     expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "catalogue", level: "possible", modelName: "Nike Pegasus 40" } });
     expect((await deps.store.getCase(caseId))!.identify).toMatchObject({ confidenceLevel: "possible", bestGuess: { brand: "Nike", model: "Pegasus 40" } });
@@ -106,7 +106,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
 
   it("brand only: fit runs on the brand's size chart; price and comfort are unknown; not R1", async () => {
     const deps = makeDeps({ handlers: { identify: () => json({ brand: "nike", brandConfidence: 0.95, modelName: null, catalogueModelId: null, confidence: 0, reasons: "Swoosh visible", evidence: [] }) } });
-    const { caseId, events } = await investigate(deps);
+    const { caseId, events } = await investigate(deps, {}, { pause: false });
     const checks = checksFrom(events);
     expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "brand", brand: "Nike", modelName: "Nike" } });
     expect(checks.fit).toMatchObject({ status: "pass", details: { match: "exact" } });

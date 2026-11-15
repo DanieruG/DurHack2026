@@ -332,7 +332,7 @@ export const IdentifyResultSchema = z.object({
   /** Google Lens: how many photos were searched, how many of those calls were live (spent quota), and whether it changed the best guess. */
   lens: z.object({ photos: z.number().int(), live: z.number().int(), changedAnswer: z.boolean() }).optional(),
   /** Set when the user confirmed or corrected the identification. */
-  userChoice: z.object({ choice: z.enum(["best_guess", "alternative", "custom", "skip"]), at: z.string() }).optional(),
+  userChoice: z.object({ choice: z.enum(["best_guess", "alternative", "custom", "skip"]), at: z.string(), warning: z.string().optional() }).optional(),
   /** Recognised brand (catalogue casing when the brand is in the catalogue), or null. */
   brand: z.string().nullable().default(null),
   /** Probability that `brand` is right. */
@@ -476,6 +476,10 @@ export const CaseDiffSchema = z.object({
 });
 export type CaseDiff = z.infer<typeof CaseDiffSchema>;
 
+/** awaiting_confirmation: identification is only a possible or best guess and the buyer hasn't confirmed it yet (no searches run). */
+export const CaseStatusSchema = z.enum(["open", "investigating", "awaiting_confirmation", "closed", "error"]);
+export type CaseStatus = z.infer<typeof CaseStatusSchema>;
+
 export const CaseSummarySchema = z.object({
   id: z.string(),
   revision: z.number().int(),
@@ -486,14 +490,12 @@ export const CaseSummarySchema = z.object({
   thumbnailUrl: z.string().optional(),
   /** The listing the case was opened from ("View listing"). */
   pageUrl: z.string().nullable().default(null),
-  status: z.enum(["open", "investigating", "closed", "error"]).default("closed"),
+  status: CaseStatusSchema.default("closed"),
   createdAt: z.string().optional(),
   updatedAt: z.string(),
 });
 export type CaseSummary = z.infer<typeof CaseSummarySchema>;
 
-export const CaseStatusSchema = z.enum(["open", "investigating", "closed", "error"]);
-export type CaseStatus = z.infer<typeof CaseStatusSchema>;
 
 // ---------- check details (section 7.6) ----------
 

@@ -157,16 +157,16 @@ export function brandKnown(result: IdentifyResult | null | undefined, catalogue:
   return subjectOf(result, catalogue).tier !== "none";
 }
 
-const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+export const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 
 /** Exact (normalised) brand + name/alias match against the catalogue, for when the model named a listed model but left the id null. */
-function matchCatalogue(brand: string | null, modelName: string | null, catalogue: CatalogueModel[]): CatalogueModel | null {
+export function matchCatalogue(brand: string | null, modelName: string | null, catalogue: CatalogueModel[]): CatalogueModel | null {
   if (!brand || !modelName) return null;
   const want = norm(modelName);
   return catalogue.find((m) => norm(m.brand) === norm(brand) && [m.name, ...m.aliases].some((n) => norm(n) === want)) ?? null;
 }
 
-function cleanModelName(brand: string | null, modelName: string | null | undefined): string | null {
+export function cleanModelName(brand: string | null, modelName: string | null | undefined): string | null {
   let name = modelName?.replace(/\s+/g, " ").trim() ?? "";
   // "adidas Dropset 3" -> "Dropset 3"
   const words = name.split(" ");
@@ -355,6 +355,7 @@ export function identifyCheck(result: IdentifyResult, args: { catalogue: Catalog
       reasons: r.reasons,
       alternatives: r.alternatives ?? [],
       ...(r.brandOnlyReason ? { brandOnlyReason: r.brandOnlyReason } : {}),
+      ...(r.userChoice ? { userChoice: r.userChoice.choice, ...(r.userChoice.warning ? { warning: r.userChoice.warning } : {}) } : {}),
     },
   };
 }

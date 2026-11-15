@@ -48,7 +48,7 @@ async function investigate(deps: ReturnType<typeof makeDeps>, capture: Record<st
     capture: { pageUrl: PAGE_URL, pageText: PAGE_TEXT, imageUrls: ["https://img.example.com/1.jpg"], ...capture },
     profile: PROFILE,
     screenshots: [],
-  });
+  }, { pause: false }); // these tests are about the checks on a best guess, not the pause
   await done;
   return { caseId, checks: checksFrom(deps.hub.events(caseId)) };
 }

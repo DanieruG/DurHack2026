@@ -35,7 +35,7 @@ describe("version check: pipeline", () => {
   });
   const run = async (pro: Handler, config = {}) => {
     const deps = makeDeps({ handlers: handlers(pro), config, webSearch: {} });
-    const { caseId, done } = await createCase(deps, { capture: { pageText: PAGE, imageUrls: ["https://img.example.com/1.jpg", "https://img.example.com/2.jpg"] }, profile: PROFILE, screenshots: [] });
+    const { caseId, done } = await createCase(deps, { capture: { pageText: PAGE, imageUrls: ["https://img.example.com/1.jpg", "https://img.example.com/2.jpg"] }, profile: PROFILE, screenshots: [] }, { pause: false });
     await done;
     const events = deps.hub.events(caseId);
     const c = (await deps.store.getCase(caseId))!;

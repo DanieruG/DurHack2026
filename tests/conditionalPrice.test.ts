@@ -26,7 +26,7 @@ const identifyAt = (confidence: number): Handler => () =>
 
 async function run(identify: Handler, shopping: Record<string, RawShoppingResult[]>) {
   const deps = makeDeps({ handlers: { identify }, shopping, webSearch: {} });
-  const { caseId, done } = await createCase(deps, { capture: { pageText: PAGE_TEXT, imageUrls: ["https://img.example.com/1.jpg"] }, profile: PROFILE, screenshots: [] });
+  const { caseId, done } = await createCase(deps, { capture: { pageText: PAGE_TEXT, imageUrls: ["https://img.example.com/1.jpg"] }, profile: PROFILE, screenshots: [] }, { pause: false });
   await done;
   const events = deps.hub.events(caseId);
   return { deps, events, checks: checksFrom(events), c: (await deps.store.getCase(caseId))! };

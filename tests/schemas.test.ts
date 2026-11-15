@@ -43,6 +43,14 @@ describe("schemas round-trip fixtures", () => {
       stage_started: { stage: "identify", geminiFeatures: ["vision"] },
       stage_done: { stage: "identify" },
       capture_warning: { message: "Only 1 photo could be loaded" },
+      identity_check_needed: {
+        level: "possible",
+        headline: "Possibly Nike Pegasus 40 or Nike Pegasus 41",
+        bestGuess: { brand: "Nike", model: "Pegasus 40", version: null, colourway: null, label: "Nike Pegasus 40", confidence: 0.6, evidence: ["Title names the model"] },
+        alternatives: [{ brand: "Nike", model: "Pegasus 41", version: null, colourway: null, label: "Nike Pegasus 41", confidence: 0.4, evidence: [] }],
+        lensMatches: [{ title: "Nike Pegasus 41", source: "Shop A", url: "https://a.example.com/1" }],
+        waiting: ["price", "comfort"],
+      },
       check_done: check,
       new_offers: {
         offers: [{ retailer: "Decathlon UK", title: "Nike Pegasus 40", priceGBP: 79.99, url: "https://www.decathlon.co.uk/p/1", differenceGBP: 37.99, isLowest: true }],

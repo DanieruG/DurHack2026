@@ -47,7 +47,7 @@ export type CasePatch = Partial<Omit<CaseRow, "id" | "createdAt" | "updatedAt">>
  * listing_data: the extension's structured fields for this listing, redacted (ListingData JSON in `text`, each field
  * with its source).
  */
-export type InputKind = "image" | "screenshot" | "page_text" | "seller_reply" | "observed_listings" | "listing_data";
+export type InputKind = "image" | "screenshot" | "page_text" | "seller_reply" | "observed_listings" | "listing_data" | "pause_state";
 
 export type CaseInputRow = {
   id: string;

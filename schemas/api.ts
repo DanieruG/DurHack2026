@@ -104,6 +104,19 @@ export const StageNameSchema = z.enum([
 ]);
 export type StageName = z.infer<typeof StageNameSchema>;
 
+/** One candidate offered to the buyer: its name, how sure Sleuth is, and a short summary of the evidence for it. */
+export const IdentityOptionSchema = z.object({
+  brand: z.string().nullable(),
+  model: z.string().nullable(),
+  version: z.string().nullable(),
+  colourway: z.string().nullable(),
+  /** "Nike Air Max 95 Essential". */
+  label: z.string(),
+  confidence: z.number().min(0).max(1),
+  evidence: z.array(z.string()),
+});
+export type IdentityOption = z.infer<typeof IdentityOptionSchema>;
+
 export const SseEventSchemas = {
   investigation_started: z.object({ caseId: z.string(), revision: z.number().int() }),
   stage_started: z.object({ stage: StageNameSchema, geminiFeatures: z.array(GeminiFeatureSchema).optional() }),
@@ -115,6 +128,20 @@ export const SseEventSchemas = {
     cachedCalls: z.number().int().optional(),
   }),
   capture_warning: z.object({ message: z.string() }),
+  /**
+   * Identification is only a possible or best guess: the investigation pauses before every model-dependent step until the
+   * buyer answers POST /api/cases/:id/confirm-identity. Condition and fit keep streaming meanwhile.
+   */
+  identity_check_needed: z.object({
+    level: z.enum(["possible", "best_guess"]),
+    /** The identify line, e.g. "Possibly Nike Air Max 95 Essential or OG". */
+    headline: z.string(),
+    bestGuess: IdentityOptionSchema,
+    alternatives: z.array(IdentityOptionSchema).max(2),
+    lensMatches: z.array(z.object({ title: z.string(), source: z.string().nullable(), url: z.string().optional() })),
+    /** Checks held back until the buyer answers. */
+    waiting: z.array(CheckNameSchema),
+  }),
   check_done: CheckResultSchema,
   /** Sent as soon as the price check's Shopping lookup completes (live or cached), before the check itself finishes. */
   new_offers: NewOffersSchema,
