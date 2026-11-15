@@ -14,6 +14,7 @@ import { guardSearchHint } from "./identify";
 import { prepareSurvey, sanitiseQuery, type Survey } from "@/lib/observed";
 import { applyVersionCheck, modelFromPhotosOnly, runVersionCheck } from "./versionCheck";
 import { factsFromPageOnly, mergeListingFacts, redactListingData } from "./listingData";
+import { determineListingColour } from "./listingColour";
 import type { ListingData } from "@/schemas/domain";
 
 export { reopenCase, startReopen, ReopenConflictError } from "./reopen";
@@ -100,7 +101,10 @@ export async function runInvestigation(
     ]);
     if (!examined) emit("error", { stage: "extract", message: "I couldn't read the listing details, so some checks may be unknown." });
     // The page's own data first; Gemini fills only what it doesn't give.
-    const facts: ListingFacts = examined ? mergeListingFacts(examined.facts, opts.listing) : opts.listing ? factsFromPageOnly(c.platform, images.length, opts.listing) : emptyFacts(c.platform, images.length);
+    const merged: ListingFacts = examined ? mergeListingFacts(examined.facts, opts.listing) : opts.listing ? factsFromPageOnly(c.platform, images.length, opts.listing) : emptyFacts(c.platform, images.length);
+    // The listing's colour (style code, colour field, title words, then the main photo) targets the new-price search.
+    const listingColour = await determineListingColour({ facts: merged, mainPhoto: images[0] }).catch(() => undefined);
+    const facts: ListingFacts = listingColour ? { ...merged, listingColour } : merged;
 
     const ctx = buildCtx({ deps, caseId, revision: c.revision, emit, ref, images, pageText, facts, needs, identify: null, survey: opts.survey ?? null, searchQuery: opts.searchQuery ?? null });
     // The search hint never decides on its own: a model only the search names (no text, no photo) stays below the gate.

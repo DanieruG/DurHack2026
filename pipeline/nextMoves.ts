@@ -217,15 +217,18 @@ function signalMoves(args: { checks: CheckResult[]; signals: WarningSignal[]; pl
  */
 export function buyNewMove(checks: CheckResult[]): NextMove | null {
   const d = checks.find((c) => c.check === "price")?.details as Details;
-  const offers = (d?.newOffers as { offers?: { priceGBP: number }[] } | undefined)?.offers ?? [];
+  const offers = (d?.newOffers as { offers?: { priceGBP: number; colourMatch?: string }[] } | undefined)?.offers ?? [];
   if (d?.position !== "at_or_above_new" || !offers.length) return null;
-  const lowest = Math.min(...offers.map((o) => o.priceGBP));
-  return {
-    id: BUY_NEW_MOVE_ID,
-    kind: "before_you_pay",
-    text: `Consider buying new: ${offers.length} UK retailer${offers.length === 1 ? "" : "s"} sell this model new, from ${gbp(lowest)}.`,
-    relatesTo: ["price"],
-  };
+  const from = (xs: { priceGBP: number }[]) => gbp(Math.min(...xs.map((o) => o.priceGBP)));
+  const colourChecked = offers.some((o) => o.colourMatch === "same" || o.colourMatch === "different");
+  const same = offers.filter((o) => o.colourMatch === "same");
+  const different = offers.filter((o) => o.colourMatch === "different");
+  const base = { id: BUY_NEW_MOVE_ID, kind: "before_you_pay" as const, relatesTo: ["price" as const] };
+  // Only a same-colour offer is suggested as this item; a different colour is never presented as the same pair.
+  if (!colourChecked) return { ...base, text: `Consider buying new: ${offers.length} UK retailer${offers.length === 1 ? "" : "s"} sell this model new, from ${from(offers)}. The offers don't show their colour, so check it matches.` };
+  if (same.length) return { ...base, text: `Consider buying new: ${same.length} UK retailer${same.length === 1 ? "" : "s"} sell this model new in the same colour, from ${from(same)}.` };
+  if (different.length === offers.length) return { ...base, text: `Available new in a different colour from ${from(different)}.` };
+  return { ...base, text: `Available new in a different colour from ${from(different)}; other offers don't show their colour.` };
 }
 
 const PhrasingWireSchema = z.object({

@@ -13,7 +13,8 @@ import type {
 } from "@/schemas/domain";
 import type { PriceSample } from "@/schemas/seed";
 import { sampleEvidenceLabel, sampleStats } from "@/lib/priceSample";
-import { toNewOffers, type NewPrices, type ShoppingOffer } from "@/lib/newPrices";
+import { summariseOffers, toNewOffers, type NewPrices, type ShoppingOffer } from "@/lib/newPrices";
+import { colourBasis } from "../offerColour";
 import {
   baseComparison,
   observedConfidence,
@@ -53,11 +54,18 @@ export const NO_NEW_PRICE = "I couldn't find enough current UK retailer prices f
 export type PricedModel = { id: string | null; brand: string; name: string };
 
 /** Source B: current new price = median of at least 3 UK retailer offers from Google Shopping (lib/newPrices.ts). */
-export type NewPrice = { gbp: number; lowestGBP: number; offers: ShoppingOffer[]; observedOn: string };
+export type NewPrice = {
+  gbp: number;
+  lowestGBP: number;
+  offers: ShoppingOffer[];
+  observedOn: string;
+  /** Same-colour offers only (3 or more), or every matching-model offer ("Colours vary"). */
+  colourBasis?: "same_colour" | "all_colours";
+};
 
-export function toNewPrice(r: NewPrices): NewPrice | null {
+export function toNewPrice(r: NewPrices, basis?: "same_colour" | "all_colours"): NewPrice | null {
   return r.available && r.medianGBP !== null && r.lowestGBP !== null
-    ? { gbp: r.medianGBP, lowestGBP: r.lowestGBP, offers: r.offers, observedOn: r.checkedOn }
+    ? { gbp: r.medianGBP, lowestGBP: r.lowestGBP, offers: r.offers, observedOn: r.checkedOn, ...(basis ? { colourBasis: basis } : {}) }
     : null;
 }
 
@@ -65,7 +73,8 @@ const shortDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateStri
 
 /** "New price £75, median of 4 UK retailers, checked 14 Nov" */
 export function newPriceLabel(n: NewPrice): string {
-  return `New price ${gbp(n.gbp)}, median of ${n.offers.length} UK retailers, checked ${shortDate(n.observedOn)}`;
+  const colour = n.colourBasis === "same_colour" ? " in the same colour" : n.colourBasis === "all_colours" ? " (colours vary: includes other colourways)" : "";
+  return `New price ${gbp(n.gbp)}, median of ${n.offers.length} UK retailers${colour}, checked ${shortDate(n.observedOn)}`;
 }
 
 // ---------- status table (pure) ----------
@@ -128,6 +137,8 @@ export type PriceCheckArgs = {
   /** deeper_price_comparison lead: restrict Source A to this grade and force Source B. */
   condition?: ConditionGrade;
   forceSourceB?: boolean;
+  /** Marks each offer's colour match against the listing's colour (title words, else thumbnail). */
+  assessOfferColours?: (offers: ShoppingOffer[]) => Promise<ShoppingOffer[]>;
   /** Called as soon as the Shopping lookup returns (live or cached), before the check finishes: the new_offers event. */
   onNewOffers?: (offers: NewOffers) => void;
   /** The user's survey of a search on this platform, matched to this model (Source C). */
@@ -164,12 +175,17 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
   if (args.forceSourceB || observed || shouldRunSourceB(price, sample)) {
     ranB = true;
     try {
-      const r = await args.lookupNewPrices();
-      offersSeen = r.offers.length;
-      shoppingLive = !r.fromCache;
-      newOffers = toNewOffers(r, totalPrice);
+      const looked = await args.lookupNewPrices();
+      offersSeen = looked.offers.length;
+      shoppingLive = !looked.fromCache;
+      const coloured = args.assessOfferColours ? await args.assessOfferColours(looked.offers).catch(() => looked.offers) : looked.offers;
+      const r = { ...looked, offers: coloured };
+      // The new-price figure: same-colour offers when there are at least 3, otherwise all ("Colours vary").
+      const basis = args.assessOfferColours ? colourBasis(coloured) : null;
+      newOffers = toNewOffers(r, totalPrice, { colourNote: basis?.note });
       args.onNewOffers?.(newOffers);
-      newPrice = toNewPrice(r);
+      const priced = basis ? summariseOffers(basis.offers, { checkedOn: r.checkedOn, query: r.query, rawResults: r.rawResults }) : r;
+      newPrice = toNewPrice(priced, basis?.basis);
     } catch (err) {
       if ((err as Error)?.name === "StageTimeoutError") throw err;
       newPrice = null;
@@ -239,7 +255,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       listingTotalGBP: totalPrice,
       ...(paid.line ? { priceBasis: paid.line } : {}),
       ...(sample ? { sample } : {}),
-      ...(newPrice ? { newPrice: { gbp: newPrice.gbp, lowestGBP: newPrice.lowestGBP, sources: newPrice.offers.length, observedOn: newPrice.observedOn } } : {}),
+      ...(newPrice ? { newPrice: { gbp: newPrice.gbp, lowestGBP: newPrice.lowestGBP, sources: newPrice.offers.length, observedOn: newPrice.observedOn, ...(newPrice.colourBasis ? { colourBasis: newPrice.colourBasis } : {}) } } : {}),
       position: decision.position,
       overBudget: decision.overBudget,
       budgetGBP: args.needs.budgetGBP,
@@ -271,7 +287,9 @@ function priceSummary(a: {
   // New-price comparisons use what the buyer pays and say so ("£31.18 including protection and postage").
   const pNew = a.paid?.line ? (a.paid.includes.length ? a.paid.line : `${p} (${a.paid.line.toLowerCase()})`) : p;
   const sampled = a.sample ? a.sampleLabel.replace(/^Compared with/, "compared with") : "";
-  const newBit = a.newPrice ? `new it's about ${gbp(a.newPrice.gbp)} (median of ${a.newPrice.offers.length} UK retailers, checked ${shortDate(a.newPrice.observedOn)})` : "";
+  const colourBit = a.newPrice?.colourBasis === "same_colour" ? " in the same colour" : "";
+  const varyBit = a.newPrice?.colourBasis === "all_colours" ? "; colours vary, so this includes other colourways" : "";
+  const newBit = a.newPrice ? `new it's about ${gbp(a.newPrice.gbp)} (median of ${a.newPrice.offers.length} UK retailers${colourBit}, checked ${shortDate(a.newPrice.observedOn)}${varyBit})` : "";
   let s: string;
   switch (a.decision.position) {
     case null:

@@ -4,7 +4,7 @@ import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { OfferCards, OffersSlot } from "@/extension/src/panel/offers";
 import { CaseFile } from "@/extension/src/panel/screens/CaseFile";
-import { differenceText, offerLabel, BUY_NEW_MOVE_ID as PANEL_BUY_NEW_ID } from "@/extension/src/lib/offers";
+import { differenceText, offerLabel, openableOffers, BUY_NEW_MOVE_ID as PANEL_BUY_NEW_ID } from "@/extension/src/lib/offers";
 import { applyEvent, newInvestigation, offersSlot, type IncomingEvent } from "@/extension/src/lib/progress";
 import { CASE_FILE, NEW_OFFERS } from "@/extension/src/preview/fixtures";
 import { BUY_NEW_MOVE_ID } from "@/pipeline/nextMoves";
@@ -55,7 +55,7 @@ describe("offer cards", () => {
       expect(a.querySelectorAll("a")).toHaveLength(0); // no nested links
     }
     expect(cards(el)[0].getAttribute("href")).toBe("https://www.decathlon.co.uk/");
-    expect(cards(el)[1].getAttribute("aria-label")).toBe("Nike Pegasus 40 Running Shoes Mens at Sports Direct, £79.99, +£37.99 vs this listing, opens in a new tab");
+    expect(cards(el)[1].getAttribute("aria-label")).toBe("Nike Pegasus 40 Running Shoes Mens at Sports Direct, £79.99, +£37.99 vs this listing, same colour, opens in a new tab");
     expect(cards(el)[0].getAttribute("aria-label")).toMatch(/, lowest price, opens in a new tab$/);
   });
 
@@ -101,8 +101,19 @@ describe("offer cards", () => {
     expect(differenceText(-3.5)).toBe("£3.50 cheaper than this listing");
     expect(differenceText(0)).toBe("Same price as this listing");
     expect(offerLabel({ ...three.offers[0], title: "Nike Pegasus 40", retailer: "Retailer", priceGBP: 45, differenceGBP: 3, isLowest: false })).toBe(
-      "Nike Pegasus 40 at Retailer, £45, +£3 vs this listing, opens in a new tab",
+      "Nike Pegasus 40 at Retailer, £45, +£3 vs this listing, same colour, opens in a new tab",
     );
+  });
+
+  it("labels each card's colour, puts the listing's colour first, and shows the colours-vary note", () => {
+    const el = render(h(OfferCards, { data: { ...NEW_OFFERS, colourNote: "Colours vary: price includes other colourways" } }));
+    act(() => [...el.querySelectorAll("button")].find((b) => /Show all/.test(b.textContent ?? ""))!.click());
+    expect(cards(el).map((a) => a.querySelector(".offer-colour")!.textContent)).toEqual(["Same colour", "Same colour", "Colour unclear", "Different colour"]);
+    expect(cards(el)[0].querySelector(".offer-colour")!.getAttribute("title")).toBe("Thumbnail looks black 71%, white 22%");
+    expect(el.textContent).toContain("Colours vary: price includes other colourways.");
+    // The panel keeps same-colour offers first even if the server's order were cheapest-first.
+    const shuffled = { ...NEW_OFFERS, offers: [...NEW_OFFERS.offers].sort((a, b) => b.priceGBP - a.priceGBP) };
+    expect(openableOffers(shuffled).map((o) => o.colourMatch)).toEqual(["same", "same", "unknown", "different"]);
   });
 });
 

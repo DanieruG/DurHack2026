@@ -2,6 +2,7 @@ import { sha256 } from "./hash";
 import type { CacheMode } from "./cache";
 import type { Store } from "./store";
 import type { NewOffer, NewOffers } from "@/schemas/domain";
+import { hasStyleCode } from "./colourWords";
 
 /**
  * Current new retail prices from Google Shopping (SerpApi), UK results in GBP.
@@ -15,7 +16,17 @@ export const SHOPPING_TIMEOUT_MS = 8_000;
 export const SHOPPING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const MIN_OFFERS = 3;
 
-export type ShoppingOffer = { retailer: string; priceGBP: number; url: string; title: string; thumbnailUrl?: string };
+export type ColourMatch = "same" | "different" | "unknown";
+export type ShoppingOffer = {
+  retailer: string;
+  priceGBP: number;
+  url: string;
+  title: string;
+  thumbnailUrl?: string;
+  /** Set by the price check once the listing's colour is known (pipeline/offerColour.ts). */
+  colourMatch?: ColourMatch;
+  colourEvidence?: string;
+};
 
 export type NewPrices = {
   offers: ShoppingOffer[];
@@ -25,6 +36,8 @@ export type NewPrices = {
   checkedOn: string;
   available: boolean;
   query: string;
+  /** Every Shopping query run, in order (style code or colour first, then the plain model query if needed). */
+  queries?: string[];
   rawResults: number;
   /** True when served from the 24-hour cache (no SerpApi call). */
   fromCache?: boolean;
@@ -104,12 +117,15 @@ export function parseGBP(r: RawShoppingResult): number | null {
 export type FilterReason = "marketplace" | "used" | "model" | "accessory" | "kids" | "price";
 
 /** Why a raw result is rejected, or null to keep it. */
-export function rejectReason(r: RawShoppingResult, args: { brand: string; modelName: string; kids?: boolean }): FilterReason | null {
+export type FilterArgs = { brand: string; modelName: string; kids?: boolean; styleCode?: string };
+
+export function rejectReason(r: RawShoppingResult, args: FilterArgs): FilterReason | null {
   const title = r.title ?? "";
   const seller = r.source ?? "";
   if (!seller || MARKETPLACE.test(seller)) return "marketplace";
   if (r.second_hand_condition || USED.test(title) || USED.test(r.tag ?? "") || (r.extensions ?? []).some((e) => USED.test(e))) return "used";
-  if (!titleMatchesModel(title, args.brand, args.modelName)) return "model";
+  // The exact model, or the listing's style code (which names the exact colourway).
+  if (!titleMatchesModel(title, args.brand, args.modelName) && !hasStyleCode(title, args.styleCode)) return "model";
   if (ACCESSORY.test(title)) return "accessory";
   if (!args.kids && KIDS.test(title)) return "kids";
   if (parseGBP(r) === null) return "price";
@@ -165,28 +181,49 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  * listing price (negative = cheaper than the listing). Offers without an http(s) link are left out (nothing to open).
  * enoughForComparison mirrors the price rule (at least MIN_OFFERS kept); it never changes the verdict.
  */
-export function toNewOffers(r: Pick<NewPrices, "offers" | "checkedOn">, listingPriceGBP: number): NewOffers {
-  const sorted = r.offers
-    .filter((o) => httpUrl(o.url))
+const COLOUR_ORDER: Record<ColourMatch, number> = { same: 0, unknown: 1, different: 2 };
+
+export function toNewOffers(
+  r: Pick<NewPrices, "offers" | "checkedOn" | "queries">,
+  listingPriceGBP: number,
+  extra: { colourNote?: string | null } = {},
+): NewOffers {
+  const openable = r.offers.filter((o) => httpUrl(o.url));
+  const lowest = Math.min(...openable.map((o) => o.priceGBP));
+  // The listing's colour first, then by price.
+  const sorted = openable
     .map((o, i) => ({ o, i }))
-    .sort((a, b) => a.o.priceGBP - b.o.priceGBP || a.i - b.i)
+    .sort((a, b) => COLOUR_ORDER[a.o.colourMatch ?? "unknown"] - COLOUR_ORDER[b.o.colourMatch ?? "unknown"] || a.o.priceGBP - b.o.priceGBP || a.i - b.i)
     .map(({ o }) => o);
-  const offers: NewOffer[] = sorted.map((o, i) => ({
-    retailer: o.retailer,
-    title: o.title,
-    priceGBP: o.priceGBP,
-    url: o.url,
-    ...(offerThumbnail(o.thumbnailUrl) ? { thumbnailUrl: offerThumbnail(o.thumbnailUrl) } : {}),
-    differenceGBP: round2(o.priceGBP - listingPriceGBP),
-    isLowest: i === 0,
-  }));
-  return { offers, checkedOn: r.checkedOn, enoughForComparison: r.offers.length >= MIN_OFFERS };
+  let lowestMarked = false;
+  const offers: NewOffer[] = sorted.map((o) => {
+    const isLowest = !lowestMarked && o.priceGBP === lowest;
+    if (isLowest) lowestMarked = true;
+    return {
+      retailer: o.retailer,
+      title: o.title,
+      priceGBP: o.priceGBP,
+      url: o.url,
+      ...(offerThumbnail(o.thumbnailUrl) ? { thumbnailUrl: offerThumbnail(o.thumbnailUrl) } : {}),
+      differenceGBP: round2(o.priceGBP - listingPriceGBP),
+      isLowest,
+      colourMatch: o.colourMatch ?? "unknown",
+      ...(o.colourEvidence ? { colourEvidence: o.colourEvidence } : {}),
+    };
+  });
+  return {
+    offers,
+    checkedOn: r.checkedOn,
+    enoughForComparison: r.offers.length >= MIN_OFFERS,
+    ...(extra.colourNote ? { colourNote: extra.colourNote } : {}),
+    ...(r.queries?.length ? { queries: r.queries } : {}),
+  };
 }
 
 const retailerKey = (s: string) => s.toLowerCase().replace(/\b(uk|ire|ie|com|co uk|online|store|shop)\b/g, "").replace(/[^a-z0-9]+/g, "");
 
 /** Keep retailer offers for exactly this model; one per retailer (its lowest price), cheapest first. */
-export function filterOffers(results: RawShoppingResult[], args: { brand: string; modelName: string; kids?: boolean }): ShoppingOffer[] {
+export function filterOffers(results: RawShoppingResult[], args: FilterArgs): ShoppingOffer[] {
   const best = new Map<string, ShoppingOffer>();
   for (const r of results) {
     if (rejectReason(r, args)) continue;
@@ -206,7 +243,7 @@ export function median(values: number[]): number {
   return s.length % 2 ? s[mid] : Math.round(((s[mid - 1] + s[mid]) / 2) * 100) / 100;
 }
 
-export function summariseOffers(offers: ShoppingOffer[], meta: { checkedOn: string; query: string; rawResults: number }): NewPrices {
+export function summariseOffers(offers: ShoppingOffer[], meta: { checkedOn: string; query: string; rawResults: number; queries?: string[] }): NewPrices {
   const available = offers.length >= MIN_OFFERS;
   return {
     offers,
@@ -234,9 +271,24 @@ export type NewPriceClientOptions = {
 
 type CachedResponse = { fetchedAt: string; results: RawShoppingResult[] };
 
-export type NewPriceClient = {
-  getNewPrices(modelName: string, brand: string, opts?: { kids?: boolean }): Promise<NewPrices>;
+export type NewPriceOptions = {
+  kids?: boolean;
+  /** The listing's main colour name, added to the query when there is no style code. */
+  colour?: string;
+  /** The listing's style code: searched first, as it targets the exact colourway. */
+  styleCode?: string;
 };
+
+export type NewPriceClient = {
+  getNewPrices(modelName: string, brand: string, opts?: NewPriceOptions): Promise<NewPrices>;
+};
+
+/** The queries to try, in order: style code, else model plus main colour; then the plain model query as a fallback. */
+export function shoppingQueries(brand: string, modelName: string, opts: NewPriceOptions = {}): string[] {
+  const plain = shoppingQuery(brand, modelName);
+  const first = opts.styleCode ? `${brand} ${opts.styleCode}`.replace(/\s+/g, " ").trim() : opts.colour ? `${plain} ${opts.colour}` : plain;
+  return first === plain ? [plain] : [first, plain];
+}
 
 export function shoppingQuery(brand: string, modelName: string): string {
   return `${brand} ${modelName}`.replace(/\s+/g, " ").trim();
@@ -284,38 +336,62 @@ export function createNewPriceClient(opts: NewPriceClientOptions): NewPriceClien
     }
   }
 
+  /** One query, through the 24-hour cache (served from it without a call in replay mode). */
+  async function fetchQuery(query: string, filterArgs: FilterArgs, checkedOn: string): Promise<{ results: RawShoppingResult[]; fromCache: boolean; fetchedOn: string }> {
+    const key = shoppingCacheKey(query);
+    let cached: CachedResponse | undefined;
+    try {
+      cached = (await opts.store?.cacheGet(key)) as CachedResponse | undefined;
+    } catch {
+      cached = undefined;
+    }
+    const fresh = cached && now().getTime() - Date.parse(cached.fetchedAt) < SHOPPING_CACHE_TTL_MS;
+    if (cached && (fresh || opts.mode === "replay")) return { results: cached.results, fromCache: true, fetchedOn: cached.fetchedAt.slice(0, 10) };
+    if (opts.mode === "replay") throw new ShoppingError(`replay mode: no cached Shopping response for "${query}"`);
+    const started = Date.now();
+    const results = await live(query);
+    log(`[shopping] provider=${SHOPPING_PROVIDER} q="${query}" gl=${SHOPPING_GL} raw=${results.length} kept=${filterOffers(results, filterArgs).length} ${Date.now() - started}ms`);
+    try {
+      await opts.store?.cacheSet(key, { fetchedAt: now().toISOString(), results } satisfies CachedResponse);
+    } catch {
+      /* cache is best effort */
+    }
+    return { results, fromCache: false, fetchedOn: checkedOn };
+  }
+
   return {
     async getNewPrices(modelName, brand, extra = {}) {
-      const query = shoppingQuery(brand, modelName);
-      const key = shoppingCacheKey(query);
+      const filterArgs = { brand, modelName, kids: extra.kids, styleCode: extra.styleCode };
+      const queries = shoppingQueries(brand, modelName, extra);
       const checkedOn = now().toISOString().slice(0, 10);
-      let cached: CachedResponse | undefined;
-      try {
-        cached = (await opts.store?.cacheGet(key)) as CachedResponse | undefined;
-      } catch {
-        cached = undefined;
-      }
-      const fresh = cached && now().getTime() - Date.parse(cached.fetchedAt) < SHOPPING_CACHE_TTL_MS;
-      let results: RawShoppingResult[];
+      const ran: string[] = [];
+      const raw: RawShoppingResult[] = [];
       let fetchedOn = checkedOn;
-      if (cached && (fresh || opts.mode === "replay")) {
-        results = cached.results;
-        fetchedOn = cached.fetchedAt.slice(0, 10);
-      } else if (opts.mode === "replay") {
-        throw new ShoppingError(`replay mode: no cached Shopping response for "${query}"`);
-      } else {
-        const started = Date.now();
-        results = await live(query);
-        const offers = filterOffers(results, { brand, modelName, ...extra });
-        log(`[shopping] provider=${SHOPPING_PROVIDER} q="${query}" gl=${SHOPPING_GL} raw=${results.length} kept=${offers.length} ${Date.now() - started}ms`);
+      let allCached = true;
+      for (const query of queries) {
+        // The fallback (plain model query) runs only when the targeted one kept too few offers.
+        if (raw.length && filterOffers(raw, filterArgs).length >= MIN_OFFERS) break;
+        let r: Awaited<ReturnType<typeof fetchQuery>>;
         try {
-          await opts.store?.cacheSet(key, { fetchedAt: now().toISOString(), results } satisfies CachedResponse);
-        } catch {
-          /* cache is best effort */
+          r = await fetchQuery(query, filterArgs, checkedOn);
+        } catch (err) {
+          // A failed targeted query (style code / colour) still leaves the plain model query to try.
+          if (query === queries.at(-1)) throw err;
+          continue;
         }
+        ran.push(query);
+        raw.push(...r.results);
+        if (!r.fromCache) allCached = false;
+        if (r.fetchedOn < fetchedOn) fetchedOn = r.fetchedOn;
       }
-      const fromCache = !!cached && (fresh || opts.mode === "replay");
-      return { ...summariseOffers(filterOffers(results, { brand, modelName, ...extra }), { checkedOn: fetchedOn, query, rawResults: results.length }), fromCache };
+      const seen = new Set<string>();
+      const results = raw.filter((x) => {
+        const k = `${x.source}|${x.title}|${x.price}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      return { ...summariseOffers(filterOffers(results, filterArgs), { checkedOn: fetchedOn, query: ran[0], queries: ran, rawResults: results.length }), fromCache: allCached };
     },
   };
 }
@@ -326,6 +402,6 @@ function pick(r: RawShoppingResult): RawShoppingResult {
 }
 
 /** Convenience wrapper with the spec's signature; pass the client the app built (see pipeline/deps.ts). */
-export function getNewPrices(modelName: string, brand: string, client: NewPriceClient, opts?: { kids?: boolean }): Promise<NewPrices> {
+export function getNewPrices(modelName: string, brand: string, client: NewPriceClient, opts?: NewPriceOptions): Promise<NewPrices> {
   return client.getNewPrices(modelName, brand, opts);
 }

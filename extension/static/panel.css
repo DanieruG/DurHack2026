@@ -361,6 +361,10 @@ a.offer:hover .offer-title { text-decoration: underline; text-decoration-color: 
 .offer-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .offer-price { font-size: 16px; font-weight: 600; }
 .offer-lowest { color: var(--text); box-shadow: inset 0 0 0 1px var(--mid); }
+.offer-side { gap: 4px; }
+.offer-colour { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.offer-colour-same { color: var(--text); }
+.offer-colour-different { color: var(--muted); font-style: italic; }
 .offers-more { margin-top: 6px; }
 .offers-note { font-size: 13px; margin-top: 10px; }
 /* Live: label + 3 cards + "Show all" + a two-line note, reserved from the moment the price check starts. */

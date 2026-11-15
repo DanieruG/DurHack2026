@@ -164,6 +164,7 @@ export function factsFromListing(listing: ListingData | undefined): { facts: Ext
     ev(`Style code ${listing.styleCode.value}`, listing.styleCode.value, listing.styleCode.source);
   }
   if (listing.verificationAvailable !== undefined) facts.verificationAvailable = listing.verificationAvailable;
+  if (listing.dominantColourHint) facts.dominantColourHint = listing.dominantColourHint;
   if (listing.photos) facts.photosShown = listing.photos.shown;
   if (listing.notes?.length) {
     facts.notes = listing.notes;
@@ -216,6 +217,7 @@ export function mergeListingFacts(gemini: ListingFacts, listing: ListingData | u
   for (const f of Object.keys(LABEL) as CoreField[]) {
     if (!sources[f] && geminiValue[f] !== undefined && !(f === "size" && multiSize)) sources[f] = "gemini";
   }
+  if (!sources.styleCode && gemini.styleCode) sources.styleCode = "gemini";
 
   // Size system: the page data, else Gemini only when it read it from a photo (text was already searched in code).
   let sizeSystem = page.facts.sizeSystem;

@@ -226,6 +226,24 @@ export type WarningSignal = z.infer<typeof WarningSignalSchema>;
 
 // ---------- pipeline results ----------
 
+export const BroadColourSchema = z.enum(["black", "white", "grey", "navy", "blue", "red", "green", "brown", "beige", "pink", "purple", "orange", "yellow"]);
+
+/**
+ * The clicked listing's colour, from the strongest source available: a style code (exact colourway), the listing's
+ * colour field (unless generic, e.g. "Multicoloured"), colour words in the title, then photo analysis (weak).
+ */
+export const ListingColourSchema = z.object({
+  names: z.array(BroadColourSchema),
+  source: z.enum(["style_code", "colour_field", "title", "photo"]),
+  confidence: z.number().min(0).max(1),
+  styleCode: z.string().optional(),
+  /** Every source consulted, strongest first, with what it said (for evidence). */
+  evidence: z.array(z.object({ source: z.enum(["style_code", "colour_field", "title", "photo", "photo_hint"]), names: z.array(BroadColourSchema), note: z.string() })),
+  /** Sources that disagreed with the one kept. */
+  conflicts: z.array(z.object({ source: z.string(), names: z.array(BroadColourSchema) })),
+});
+export type ListingColour = z.infer<typeof ListingColourSchema>;
+
 export const ListingFactsSchema = z.object({
   title: z.string().optional(),
   brandText: z.string().optional(),
@@ -256,6 +274,11 @@ export const ListingFactsSchema = z.object({
   verificationAvailable: z.boolean().optional(),
   photosShown: z.number().int().nonnegative().nullable().optional(),
   notes: z.array(z.string()).optional(),
+  /** The whole shoe (or pair) in photo 0, box2d 0-1000, for colour analysis. */
+  shoeBox: Box2dSchema.optional(),
+  /** Vinted's dominant colour of the main photo (mostly the backdrop: a weak hint only). */
+  dominantColourHint: z.string().optional(),
+  listingColour: ListingColourSchema.optional(),
 });
 export type ListingFacts = z.infer<typeof ListingFactsSchema>;
 
@@ -465,6 +488,10 @@ export const NewOfferSchema = z.object({
   /** Offer price minus listing price; negative means cheaper than the listing. */
   differenceGBP: z.number(),
   isLowest: z.boolean(),
+  /** Whether this offer is the listing's colour: style code or title words, else the thumbnail's colours. */
+  colourMatch: z.enum(["same", "different", "unknown"]).default("unknown"),
+  /** What the colour match rests on ("Title says Black/White", "Thumbnail looks grey (62%)"). */
+  colourEvidence: z.string().optional(),
 });
 export type NewOffer = z.infer<typeof NewOfferSchema>;
 
@@ -473,6 +500,10 @@ export const NewOffersSchema = z.object({
   offers: z.array(NewOfferSchema),
   checkedOn: z.string(),
   enoughForComparison: z.boolean(),
+  /** "Colours vary: price includes other colourways" when fewer than 3 offers are the listing's colour. */
+  colourNote: z.string().optional(),
+  /** The Shopping queries run, in order. */
+  queries: z.array(z.string()).optional(),
 });
 export type NewOffers = z.infer<typeof NewOffersSchema>;
 

@@ -85,15 +85,15 @@ const comfort: CheckResult = {
   geminiFeatures: ["search_grounding"],
 };
 
-/** Retailer offers as the server sends them (cheapest first, one isLowest). Thumbnails left out: the preview is offline. */
+/** Retailer offers as the server sends them (same colour first, then cheapest; one isLowest). Thumbnails left out: the preview is offline. */
 export const NEW_OFFERS: NewOffers = {
   checkedOn: "2026-11-14",
   enoughForComparison: true,
   offers: [
-    { retailer: "Decathlon UK", title: "Nike Air Zoom Pegasus 40 Men's Road Running Shoes", priceGBP: 75.23, url: "https://www.decathlon.co.uk/", differenceGBP: 33.23, isLowest: true },
-    { retailer: "Sports Direct", title: "Nike Pegasus 40 Running Shoes Mens", priceGBP: 79.99, url: "https://www.sportsdirect.com/", differenceGBP: 37.99, isLowest: false },
-    { retailer: "JD Sports", title: "Nike Air Zoom Pegasus 40", priceGBP: 89.99, url: "https://www.jdsports.co.uk/", differenceGBP: 47.99, isLowest: false },
-    { retailer: "FARFETCH", title: "Nike Air Zoom Pegasus 40 low-top sneakers", priceGBP: 104, url: "https://www.farfetch.com/uk/", differenceGBP: 62, isLowest: false },
+    { retailer: "Decathlon UK", title: "Nike Air Zoom Pegasus 40 Men's Road Running Shoes", priceGBP: 75.23, url: "https://www.decathlon.co.uk/", differenceGBP: 33.23, isLowest: true, colourMatch: "same", colourEvidence: "Thumbnail looks black 71%, white 22%" },
+    { retailer: "Sports Direct", title: "Nike Pegasus 40 Running Shoes Mens", priceGBP: 79.99, url: "https://www.sportsdirect.com/", differenceGBP: 37.99, isLowest: false, colourMatch: "same", colourEvidence: "Thumbnail looks black 64%, white 30%" },
+    { retailer: "JD Sports", title: "Nike Air Zoom Pegasus 40", priceGBP: 89.99, url: "https://www.jdsports.co.uk/", differenceGBP: 47.99, isLowest: false, colourMatch: "unknown" },
+    { retailer: "FARFETCH", title: "Nike Air Zoom Pegasus 40 low-top sneakers", priceGBP: 104, url: "https://www.farfetch.com/uk/", differenceGBP: 62, isLowest: false, colourMatch: "different", colourEvidence: "Thumbnail looks white 82%" },
   ],
 };
 

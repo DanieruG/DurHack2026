@@ -10,6 +10,7 @@ import {
   offerUrl,
   shoppingCacheKey,
   shoppingQuery,
+  shoppingQueries,
   summariseOffers,
   toNewOffers,
   type RawShoppingResult,
@@ -61,7 +62,7 @@ describe("new offers: card data", () => {
     expect(r.offers.map((o) => o.retailer)).toEqual(["Schuh", "Odd"]);
     expect(r.offers[0].thumbnailUrl).toBe(THUMB);
     expect(r.offers[1]).not.toHaveProperty("thumbnailUrl");
-    for (const o of r.offers) expect(Object.keys(o).sort()).toEqual(["differenceGBP", "isLowest", "priceGBP", "retailer", "title", "url", ...(o.thumbnailUrl ? ["thumbnailUrl"] : [])].sort());
+    for (const o of r.offers) expect(Object.keys(o).sort()).toEqual(["colourMatch", "differenceGBP", "isLowest", "priceGBP", "retailer", "title", "url", ...(o.thumbnailUrl ? ["thumbnailUrl"] : [])].sort());
   });
 });
 
@@ -174,7 +175,10 @@ describe("new offers: stream and case detail", () => {
   it("sends new_offers before the price check finishes when the Shopping result comes from the cache", async () => {
     const deps = makeDeps({ handlers });
     // Seed the 24-hour cache, then make any network call fail.
-    await deps.store.cacheSet(shoppingCacheKey(shoppingQuery("Nike", "Pegasus 39")), { fetchedAt: "2026-11-14T08:00:00.000Z", results: pegasus39 });
+    // The test photos read as red, so the colour query runs first; both are cached.
+    for (const q of shoppingQueries("Nike", "Pegasus 39", { colour: "red" })) {
+      await deps.store.cacheSet(shoppingCacheKey(q), { fetchedAt: "2026-11-14T08:00:00.000Z", results: pegasus39 });
+    }
     let network = 0;
     deps.newPrices = createNewPriceClient({
       apiKey: "k",
@@ -232,7 +236,7 @@ describe("new offers: Consider buying new", () => {
     expect(buyNewMove([price("at_or_above_new", offers)])).toEqual({
       id: BUY_NEW_MOVE_ID,
       kind: "before_you_pay",
-      text: "Consider buying new: 3 UK retailers sell this model new, from £79.99.",
+      text: "Consider buying new: 3 UK retailers sell this model new, from £79.99. The offers don't show their colour, so check it matches.",
       relatesTo: ["price"],
     });
     expect(buyNewMove([price("typical", offers)])).toBeNull();

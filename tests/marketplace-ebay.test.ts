@@ -147,6 +147,8 @@ describe("eBay: page data first, Gemini for the gaps", () => {
     expect(hinted.c.identify?.modelName).toBe("Revolution 6 Next Nature");
     expect(hinted.c.identify?.confidence).toBe(plain.c.identify?.confidence); // the hint never raises confidence
     expect(hinted.c.listingFacts?.modelText).toBe("Nike Revolution 6 Next Na");
+    // "Multicoloured" in the item specifics is too generic: the colour comes from the title.
+    expect(hinted.c.listingFacts?.listingColour).toMatchObject({ names: ["black", "white"], source: "title" });
 
     // Even if Gemini followed the search, a model named only by the search stays below the identify gate.
     const followed = await run("nike revolution 8", "Revolution 8", 0.9);

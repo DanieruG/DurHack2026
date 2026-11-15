@@ -15,9 +15,14 @@ export function differenceText(differenceGBP: number): string {
   return differenceGBP > 0 ? `+${money(differenceGBP)} vs this listing` : `${money(differenceGBP)} cheaper than this listing`;
 }
 
-/** The card's accessible name: "Nike Pegasus 40 at Decathlon UK, £45, £4 cheaper than this listing, lowest price, opens in a new tab". */
+/** The card's colour label: "Same colour", "Different colour" or "Colour unclear". */
+export function colourLabel(o: Pick<NewOffer, "colourMatch">): string {
+  return o.colourMatch === "same" ? "Same colour" : o.colourMatch === "different" ? "Different colour" : "Colour unclear";
+}
+
+/** The card's accessible name: "Nike Pegasus 40 at Decathlon UK, £45, £4 cheaper than this listing, same colour, lowest price, opens in a new tab". */
 export function offerLabel(o: NewOffer): string {
-  return [`${o.title} at ${o.retailer}`, gbp(o.priceGBP), differenceText(o.differenceGBP), o.isLowest ? "lowest price" : null, "opens in a new tab"]
+  return [`${o.title} at ${o.retailer}`, gbp(o.priceGBP), differenceText(o.differenceGBP), colourLabel(o).toLowerCase(), o.isLowest ? "lowest price" : null, "opens in a new tab"]
     .filter(Boolean)
     .join(", ");
 }
@@ -53,7 +58,11 @@ export function notEnoughLine(data: NewOffers): string | null {
   return `Only ${n} retailer${n === 1 ? "" : "s"} found, so this isn't used for the price verdict.`;
 }
 
-/** Offers that can be opened, cheapest first (the server sorts; this keeps the panel honest if it ever doesn't). */
+const COLOUR_ORDER = { same: 0, unknown: 1, different: 2 } as const;
+
+/** Offers that can be opened: the listing's colour first, then cheapest (the server sorts; this keeps the panel honest). */
 export function openableOffers(data: NewOffers): NewOffer[] {
-  return data.offers.filter((o) => safeHref(o.url)).sort((a, b) => a.priceGBP - b.priceGBP);
+  return data.offers
+    .filter((o) => safeHref(o.url))
+    .sort((a, b) => COLOUR_ORDER[a.colourMatch ?? "unknown"] - COLOUR_ORDER[b.colourMatch ?? "unknown"] || a.priceGBP - b.priceGBP);
 }

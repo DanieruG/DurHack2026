@@ -15,6 +15,19 @@ import { checkCondition } from "./checks/condition";
 import { plainError, runStage, today, unknownCheck, type StageStats } from "./util";
 import { familyComparison, FAMILY_CONFIDENCE_CAP, matchSurvey, modelUnknownComparison, userSizeUK, type MatchedListing, type Survey } from "@/lib/observed";
 import { catalogueTokens, deriveTokens, type ModelTokens } from "@/lib/titleMatch";
+import { matchOfferColours } from "./offerColour";
+
+const THUMBNAIL_TIMEOUT_MS = 4000;
+
+/** An offer thumbnail's bytes (downloaded here: the browser can't read pixels from other sites), or null. */
+async function fetchThumbnail(ctx: RunCtx, url: string): Promise<Uint8Array | null> {
+  try {
+    const img = await Promise.race([ctx.deps.fetchImage(url), new Promise<null>((r) => setTimeout(() => r(null), THUMBNAIL_TIMEOUT_MS))]);
+    return img ? img.bytes : null;
+  } catch {
+    return null;
+  }
+}
 
 export type DownstreamCheck = Exclude<CheckName, "identify">;
 export const DOWNSTREAM: DownstreamCheck[] = ["fit", "price", "comfort", "condition"];
@@ -49,11 +62,14 @@ const priceKey = (modelName: string, brand: string) => `${brand} ${modelName}`.t
 
 export function buildCtx(base: Omit<RunCtx, "executors" | "today" | "newPrices" | "newPricesViaTool">): RunCtx {
   const memo = new Map<string, Promise<NewPrices>>();
+  // The listing's colour targets the Shopping query: its style code first, else its main colour name.
+  const colourOpts = () => ({ styleCode: ctx.facts.styleCode, colour: ctx.facts.listingColour?.names[0] });
   const newPrices = (modelName: string, brand: string) => {
-    const k = priceKey(modelName, brand);
+    const o = colourOpts();
+    const k = `${priceKey(modelName, brand)}|${o.styleCode ?? ""}|${o.colour ?? ""}`;
     let p = memo.get(k);
     if (!p) {
-      p = base.deps.newPrices.getNewPrices(modelName, brand);
+      p = base.deps.newPrices.getNewPrices(modelName, brand, { ...(o.styleCode ? { styleCode: o.styleCode } : {}), ...(o.colour ? { colour: o.colour } : {}) });
       p.catch(() => memo.delete(k)); // a failed lookup may be retried by a later lead
       memo.set(k, p);
     }
@@ -64,7 +80,8 @@ export function buildCtx(base: Omit<RunCtx, "executors" | "today" | "newPrices" 
     newPricesViaTool.add(priceKey(modelName, brand));
     return newPrices(modelName, brand);
   });
-  return { ...base, executors, newPrices, newPricesViaTool, today: today(base.deps.now()) };
+  const ctx: RunCtx = { ...base, executors, newPrices, newPricesViaTool, today: today(base.deps.now()) };
+  return ctx;
 }
 
 /** What identify established, by tier (brand / model name / catalogue match). */
@@ -148,6 +165,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             condition: opts.priceCondition,
             forceSourceB: opts.forceSourceB,
             onNewOffers: (offers) => ctx.emit("new_offers", offers),
+            assessOfferColours: (offers) => matchOfferColours(offers, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
             observed: observedFor(ctx, subject),
           });
         case "comfort":

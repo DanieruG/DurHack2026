@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { NewOffer, NewOffers } from "@/schemas/domain";
 import { gbp } from "../lib/format";
-import { differenceText, notEnoughLine, offerLabel, offersFootnote, OFFERS_SHOWN, openableOffers, safeHref, safeThumbnail } from "../lib/offers";
+import { colourLabel, differenceText, notEnoughLine, offerLabel, offersFootnote, OFFERS_SHOWN, openableOffers, safeHref, safeThumbnail } from "../lib/offers";
 
 /** Product thumbnail, or a plain block when there is none or it fails to load. */
 function OfferThumb({ url }: { url?: string }) {
@@ -27,6 +27,9 @@ function OfferCard({ offer: o }: { offer: NewOffer }) {
       </span>
       <span className="offer-side">
         <span className="offer-price">{gbp(o.priceGBP)}</span>
+        <span className={`offer-colour offer-colour-${o.colourMatch ?? "unknown"}`} title={o.colourEvidence}>
+          {colourLabel(o)}
+        </span>
         {o.isLowest && <span className="tag offer-lowest">Lowest</span>}
       </span>
     </a>
@@ -55,6 +58,7 @@ export function OfferCards({ data }: { data: NewOffers }) {
         </button>
       )}
       {notEnough && <p className="offers-note">{notEnough}</p>}
+      {data.colourNote && <p className="offers-note">{data.colourNote}.</p>}
       <p className="offers-note dim">{offersFootnote(data.checkedOn)}</p>
     </div>
   );

@@ -6,7 +6,7 @@ import { redact } from "@/lib/redact";
 import type { CaseImage } from "./intake";
 import { evidenceIds, textContains } from "./util";
 
-const FIELDS = ["title", "brand", "model", "size", "price", "condition"] as const;
+const FIELDS = ["title", "brand", "model", "size", "price", "condition", "style"] as const;
 
 /** Gemini-friendly wire schema (nullable fields, flat arrays); mapped to ListingFacts in code. */
 export const ExtractWireSchema = z.object({
@@ -18,6 +18,10 @@ export const ExtractWireSchema = z.object({
   price: z.number().nonnegative().nullish(),
   currency: z.string().nullish(),
   conditionClaims: z.array(z.string()).default([]),
+  /** The manufacturer's style code (e.g. "DC3728-003"), only when written in the listing or printed on a label in a photo. */
+  styleCode: z.string().nullish(),
+  /** The whole shoe (or pair) in photo 0: box2d [ymin, xmin, ymax, xmax] 0-1000. */
+  shoeBox: z.array(z.number()).length(4).nullish(),
   evidence: z
     .array(
       z.object({
@@ -41,7 +45,10 @@ Rules:
 - For every field you fill, add one evidence entry: kind "quote" with the exact text copied from the listing,
   or kind "photo_region" with photoIndex and box2d [ymin, xmin, ymax, xmax] normalised 0-1000 for something read from a photo (e.g. a size label).
 - price: the asking price as a number; currency as an ISO code (GBP, EUR, USD). Exclude postage and buyer-protection fees.
-- sizeSystem: UK, US or EU only if stated or printed; otherwise "unknown".`;
+- sizeSystem: UK, US or EU only if stated or printed; otherwise "unknown". Never assume UK.
+- styleCode: the manufacturer's style/product code (e.g. "DC3728-003", "GZ8851") only if written in the listing or printed on a
+  label in a photo; add a "style" evidence entry. Otherwise null.
+- shoeBox: box2d [ymin, xmin, ymax, xmax] 0-1000 around the whole shoe or pair in photo 0 (null if photo 0 doesn't show it).`;
 
 export function extractParts(pageText: string, images: CaseImage[], platform: Platform): Part[] {
   const parts: Part[] = [
@@ -61,6 +68,7 @@ const FIELD_LABEL: Record<(typeof FIELDS)[number], string> = {
   size: "Listed size",
   price: "Asking price",
   condition: "Seller's condition description",
+  style: "Style code",
 };
 
 /** Map wire output to ListingFacts: verify quotes against the page text, drop seller identity, keep GBP only. */
@@ -83,6 +91,7 @@ export function toListingFacts(
       case "size": return clean(wire.sizeText);
       case "price": return isGbp && wire.price != null ? wire.price : undefined;
       case "condition": return wire.conditionClaims[0];
+      case "style": return clean(wire.styleCode);
     }
   };
 
@@ -108,7 +117,14 @@ export function toListingFacts(
   }
 
   const sizeSystem = wire.sizeSystem ?? undefined;
+  // A style code needs its own evidence: a verified quote or a photo region (an unverifiable one is dropped).
+  const styleCode = evidence.some((e) => e.label.startsWith("Style code") && (e.kind === "quote" || e.kind === "photo_region")) ? clean(wire.styleCode) : undefined;
+  const styleFiltered = styleCode ? evidence : evidence.filter((e) => !e.label.startsWith("Style code"));
+  const box = wire.shoeBox && ctx.photoCount > 0 ? (wire.shoeBox.map((n) => Math.max(0, Math.min(1000, Math.round(n)))) as [number, number, number, number]) : undefined;
+  const shoeBox = box && box[2] - box[0] >= 50 && box[3] - box[1] >= 50 ? box : undefined;
   return {
+    ...(styleCode && /^[A-Z0-9][A-Z0-9 -]{3,18}[A-Z0-9]$/i.test(styleCode) ? { styleCode } : {}),
+    ...(shoeBox ? { shoeBox } : {}),
     title: clean(wire.title),
     brandText: clean(wire.brandText),
     modelText: clean(wire.modelText),
@@ -118,7 +134,7 @@ export function toListingFacts(
     platform: ctx.platform,
     conditionClaims: wire.conditionClaims.map((c) => clean(c)).filter((c): c is string => !!c).slice(0, 10),
     photoCount: ctx.photoCount,
-    evidence,
+    evidence: styleFiltered,
   };
 }
 

@@ -136,7 +136,8 @@ describe("investigation pipeline (mocked Gemini)", () => {
     expect(checks.price.details).not.toHaveProperty("sample");
     expect(checks.comfort.status).not.toBe("unknown");
     expect(checks.price.details).toMatchObject({ newPrice: { gbp: 100, sources: 3 } });
-    expect(deps.shoppingRequests).toEqual(["Nike Pegasus 39"]); // Shopping query "{brand} {modelName}"
+    // "{brand} {modelName} {main colour}" first (the test photos read as red), then the plain model query for 3+ offers.
+    expect(deps.shoppingRequests).toEqual(["Nike Pegasus 39 red", "Nike Pegasus 39"]);
     expect(stageCalls(deps, "price")).toBe(0); // no Gemini call for price any more
     expect(deps.webSearchRequests).toEqual(["Nike Pegasus 39 review comfort"]); // SerpApi query "{brand} {model} review comfort"
     expect(deps.calls.filter((c) => c.stage === "comfort").map(promptText).join("\n")).toContain("Nike Pegasus 39");
@@ -279,7 +280,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     // Gemini called getNewPrices while proposing leads -> function_calling; the tool and the check shared one request
     expect((priceEvents[0].data as CheckResult).geminiFeatures).toEqual([]);
     expect((priceEvents[1].data as CheckResult).geminiFeatures).toEqual(["function_calling"]);
-    expect(deps.shoppingRequests).toEqual(["Nike Pegasus 40"]);
+    expect(deps.shoppingRequests).toEqual(["Nike Pegasus 40 red", "Nike Pegasus 40"]);
     expect(stageCalls(deps, "identify")).toBe(0); // identified inside the merged extract call; the recheck lead (3rd) wasn't executed
     expect((await deps.store.getLeads(caseId, 1))).toHaveLength(2);
     // Persisted and returned by GET /api/cases/:id, with the per-revision report.
