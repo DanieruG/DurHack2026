@@ -267,7 +267,42 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
     }
     case "comfort": {
       const refs = sourceRefs(check);
-      return refs.length ? <SourceList refs={refs} /> : <p className="note">No sources.</p>;
+      // What reviewers like and dislike, both: the buyer's priorities and anything else reviewers raised.
+      const d = (check.details ?? {}) as { priorities?: { priority: string; assessment: string; summary?: string }[]; general?: { topic: string; assessment: string; summary?: string }[] };
+      const points = [...(d.priorities ?? []).map((p) => ({ topic: p.priority, assessment: p.assessment, summary: p.summary })), ...(d.general ?? []).map((g) => ({ topic: g.topic, assessment: g.assessment, summary: g.summary }))];
+      const liked = points.filter((p) => p.assessment === "positive");
+      const criticised = points.filter((p) => p.assessment === "negative" || p.assessment === "mixed");
+      return (
+        <>
+          {criticised.length > 0 && (
+            <div className="note problem">
+              <strong>Reviewers criticise:</strong>
+              <ul className="plain">
+                {criticised.map((p) => (
+                  <li key={p.topic}>
+                    {p.topic}
+                    {p.summary ? `: ${p.summary}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {liked.length > 0 && (
+            <div className="note">
+              <strong>Reviewers like:</strong>
+              <ul className="plain">
+                {liked.map((p) => (
+                  <li key={p.topic}>
+                    {p.topic}
+                    {p.summary ? `: ${p.summary}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {refs.length ? <SourceList refs={refs} /> : <p className="note">No sources.</p>}
+        </>
+      );
     }
     case "price": {
       const v = priceView(check);

@@ -143,7 +143,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     // "{brand} {modelName} {main colour}" first (the test photos read as red), then the plain model query for 3+ offers.
     expect(deps.shoppingRequests).toEqual(["Nike Pegasus 39 red", "Nike Pegasus 39"]);
     expect(stageCalls(deps, "price")).toBe(0); // no Gemini call for price any more
-    expect(deps.webSearchRequests).toEqual(["Nike Pegasus 39 review comfort"]); // SerpApi query "{brand} {model} review comfort"
+    expect(deps.webSearchRequests).toEqual(["Nike Pegasus 39 review comfort", "Nike Pegasus 39 problems complaints cons"]); // reviews, then a search for problems so the picture is balanced
     expect(deps.calls.filter((c) => c.stage === "comfort").map(promptText).join("\n")).toContain("Nike Pegasus 39");
     expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
   });

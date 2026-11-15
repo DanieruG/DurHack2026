@@ -79,6 +79,11 @@ export function comfortQuery(brand: string, modelName: string): string {
   return `${brand} ${modelName} review comfort`.replace(/\s+/g, " ").trim();
 }
 
+/** The second comfort search: what reviewers dislike. One search for "review comfort" mostly finds praise and shop pages. */
+export function problemsQuery(brand: string, modelName: string): string {
+  return `${brand} ${modelName} problems complaints cons`.replace(/\s+/g, " ").trim();
+}
+
 export function webSearchCacheKey(query: string, gl = WEB_SEARCH_GL): string {
   return `websearch:${WEB_SEARCH_PROVIDER}:${gl}:${sha256(query.toLowerCase())}`;
 }
