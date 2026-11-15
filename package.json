@@ -16,6 +16,8 @@
     "seed": "tsx scripts/seed.ts",
     "seed:reviews": "tsx scripts/seed-reviews.ts",
     "eval": "tsx eval/run.ts",
+    "eval:slide": "tsx eval/slide.ts",
+    "eval:labels": "tsx eval/check-labels.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate",

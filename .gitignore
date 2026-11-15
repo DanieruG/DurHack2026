@@ -7,6 +7,5 @@ generated/
 !.env.example
 *.tsbuildinfo
 coverage/
-eval/report.md
 .neon
 extension/dist/

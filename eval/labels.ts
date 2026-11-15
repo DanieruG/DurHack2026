@@ -1,0 +1,102 @@
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
+import { BroadColourSchema, ConditionGradeSchema, DefectLabelSchema, VerdictLabelSchema } from "../schemas/domain";
+
+/**
+ * label.json: what a person found by looking at the listing (photos and text), written before running the pipeline.
+ * null means "not labelled yet" and the case is left out of that metric. Never fill a label from Sleuth's output.
+ * How to label: eval/LABELLING.md.
+ */
+
+const Box = z.tuple([z.number().min(0).max(1000), z.number().min(0).max(1000), z.number().min(0).max(1000), z.number().min(0).max(1000)]);
+
+export const LabelSchema = z.object({
+  /** Could a person tell the exact model (and version) from this listing? false: Sleuth should refuse to name one. */
+  identifiable: z.boolean().nullable().default(null),
+  brand: z.string().min(1).nullable().default(null),
+  /** Model name without the version: "Pegasus", "Air Max", "Samba OG", "P-6000". */
+  model: z.string().min(1).nullable().default(null),
+  /** "40", "95", "7"; "none" when the model has no versions. */
+  version: z.string().min(1).nullable().default(null),
+  /** The style code when known ("FV6603-101", "JP9997"), and whether it can be read in the listing's photos or text. */
+  styleCode: z.object({ value: z.string().min(1).nullable(), visible: z.boolean() }).nullable().default(null),
+  /** Broad colours of the shoe, main colour first. */
+  colourway: z.array(BroadColourSchema).min(1).nullable().default(null),
+  /** The size as the listing states it. "multiple": a multi-size listing. System "unknown" when the listing doesn't say. */
+  size: z
+    .object({ value: z.union([z.number().positive(), z.literal("multiple")]), system: z.enum(["UK", "US", "EU", "unknown"]) })
+    .nullable()
+    .default(null),
+  conditionGrade: ConditionGradeSchema.nullable().default(null),
+  /**
+   * Hand-marked defects, by photo number (photo-01 is "1"). Only photos you checked appear; [] means checked, no
+   * defects. Boxes are [ymin, xmin, ymax, xmax] on a 0-1000 scale.
+   */
+  defects: z.record(z.string().regex(/^\d+$/), z.array(z.object({ label: DefectLabelSchema, box2d: Box }))).nullable().default(null),
+  /** Optional: new-price offers whose colour you checked by eye against the listing, matched by URL. */
+  offerColours: z.array(z.object({ url: z.string().url(), colourMatch: z.enum(["same", "different"]) })).nullable().default(null),
+  /** Optional: the verdict you'd expect. */
+  expectedVerdict: VerdictLabelSchema.nullable().default(null),
+  notes: z.string().optional(),
+});
+export type Label = z.infer<typeof LabelSchema>;
+
+export const EMPTY_LABEL: Label = LabelSchema.parse({});
+
+/** Fields every case needs (offer colours and the expected verdict are optional; defects are counted across the set). */
+export const REQUIRED_FIELDS = ["identifiable", "brand", "model", "version", "styleCode", "colourway", "size", "conditionGrade"] as const;
+/** Hand-marked defect boxes are needed on at least this many photos across the whole set. */
+export const MIN_DEFECT_PHOTOS = 10;
+
+/** Required fields still empty. An unidentifiable listing doesn't need model or version. */
+export function missingFields(l: Label): string[] {
+  return REQUIRED_FIELDS.filter((f) => l[f] === null && !(l.identifiable === false && (f === "model" || f === "version")));
+}
+
+export const defectPhotoCount = (l: Label) => (l.defects ? Object.keys(l.defects).length : 0);
+
+export type CaseLabels = { id: string; label: Label; photos: number; error?: string };
+
+export function listingDirs(dir: string): string[] {
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((d) => !d.startsWith("_") && fs.statSync(path.join(dir, d)).isDirectory()).sort() : [];
+}
+
+export function readLabels(dir: string): CaseLabels[] {
+  return listingDirs(dir).map((id) => {
+    const photos = fs.readdirSync(path.join(dir, id)).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).length;
+    try {
+      return { id, photos, label: LabelSchema.parse(JSON.parse(fs.readFileSync(path.join(dir, id, "label.json"), "utf8"))) };
+    } catch (err) {
+      return { id, photos, label: EMPTY_LABEL, error: err instanceof Error ? err.message.split("\n")[0] : String(err) };
+    }
+  });
+}
+
+/** The "Cases with missing labels" section of LABELLING.md. */
+export function missingLabelsMarkdown(cases: CaseLabels[]): string {
+  const marked = cases.reduce((n, c) => n + defectPhotoCount(c.label), 0);
+  const lines = [
+    `Defect boxes: marked on ${marked} of the ${MIN_DEFECT_PHOTOS} photos needed${marked >= MIN_DEFECT_PHOTOS ? " (done)" : ""}.`,
+    "",
+    "| Case | Photos | Missing | Defect photos marked |",
+    "| --- | --- | --- | --- |",
+  ];
+  for (const c of cases) {
+    const missing = c.error ? `label.json doesn't parse: ${c.error}` : missingFields(c.label).join(", ") || "none";
+    lines.push(`| ${c.id} | ${c.photos} | ${missing} | ${defectPhotoCount(c.label)} |`);
+  }
+  return lines.join("\n");
+}
+
+const START = "<!-- missing-labels:start -->";
+const END = "<!-- missing-labels:end -->";
+
+/** Rewrite the list between the markers in LABELLING.md (npm run eval:labels). */
+export function updateLabellingDoc(docPath: string, cases: CaseLabels[]): void {
+  const doc = fs.readFileSync(docPath, "utf8");
+  const a = doc.indexOf(START);
+  const b = doc.indexOf(END);
+  if (a < 0 || b < a) throw new Error(`${docPath} has no ${START} ... ${END} section`);
+  fs.writeFileSync(docPath, `${doc.slice(0, a + START.length)}\n${missingLabelsMarkdown(cases)}\n${doc.slice(b)}`);
+}

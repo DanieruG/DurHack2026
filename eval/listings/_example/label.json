@@ -1,1 +1,14 @@
-{ "catalogueModelId": "nike-pegasus-40", "sizeUK": 9, "priceGBP": 38, "conditionGrade": "like_new", "expectedVerdict": "hidden_gem" }
+{
+  "identifiable": true,
+  "brand": "Nike",
+  "model": "Pegasus",
+  "version": "40",
+  "styleCode": { "value": null, "visible": false },
+  "colourway": ["grey", "white"],
+  "size": { "value": 9, "system": "UK" },
+  "conditionGrade": "like_new",
+  "defects": { "1": [] },
+  "offerColours": null,
+  "expectedVerdict": "hidden_gem",
+  "notes": "An example of the format only: this folder is skipped."
+}
