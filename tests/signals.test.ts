@@ -103,6 +103,14 @@ describe("warning signals", () => {
     expect(mismatch.map((s) => s.id)).toContain("title_photo_mismatch");
   });
 
+  it("does not call an incomplete stock-photo response all photos", () => {
+    const result = signals({
+      facts: facts({ photoCount: 2 }),
+      checks: baseChecks({}, { photos: [{ photoIndex: 1, stockPhotoLikely: true, confidence: 0.9, showsSizeLabel: true, showsInsole: true }] }),
+    });
+    expect(result.map((s) => s.id)).not.toContain("stock_photos");
+  });
+
   it("only emits the mild missing-photo signal alongside another signal", () => {
     expect(signals({ checks: baseChecks({}, { notVisible: ["size label", "insole"] }) }).map((s) => s.id)).not.toContain("expected_photos_missing");
     expect(signals({ pageText: "WhatsApp me", checks: baseChecks({}, { notVisible: ["size label", "insole"] }) }).map((s) => s.id)).toContain("expected_photos_missing");

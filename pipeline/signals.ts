@@ -78,7 +78,7 @@ function titleModel(facts: ListingFacts, identify: IdentifyResult): string | nul
   return null;
 }
 
-function conditionPhotoEvidence(facts: ListingFacts, condition: CheckResult | undefined): { photos: { photoIndex: number; stockPhotoLikely: boolean; confidence: number; showsSizeLabel: boolean; showsInsole: boolean }[]; notVisible: string[] } {
+function conditionPhotoEvidence(condition: CheckResult | undefined): { photos: { photoIndex: number; stockPhotoLikely: boolean; confidence: number; showsSizeLabel: boolean; showsInsole: boolean }[]; notVisible: string[] } {
   const d = details(condition);
   const photos = Array.isArray(d.photos) ? d.photos : [];
   return {
@@ -112,9 +112,10 @@ export function detectWarningSignals(args: WarningSignalInput): WarningSignal[] 
   }
 
   const condition = check(args.checks, "condition");
-  const photoInfo = conditionPhotoEvidence(args.facts, condition);
+  const photoInfo = conditionPhotoEvidence(condition);
   const mainStock = photoInfo.photos.find((p) => p.photoIndex === 0);
-  const allStock = photoInfo.photos.length > 0 && photoInfo.photos.every((p) => p.stockPhotoLikely && p.confidence >= 0.7);
+  const allPhotosRepresented = args.facts.photoCount > 0 && new Set(photoInfo.photos.map((p) => p.photoIndex)).size >= args.facts.photoCount;
+  const allStock = allPhotosRepresented && photoInfo.photos.every((p) => p.stockPhotoLikely && p.confidence >= 0.7);
   if ((mainStock?.stockPhotoLikely && mainStock.confidence >= 0.7) || allStock) {
     out.push({ id: "stock_photos", strength: "medium", text: "The photos look stock-like rather than clearly showing the actual pair.", evidence: [signalEvidence("ev_signal_stock_photos_1", "Stock-looking photo evidence")], confidence: 0.8, relatesTo: ["condition"] });
   }
