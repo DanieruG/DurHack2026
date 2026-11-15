@@ -152,7 +152,20 @@ export type PriceCheckArgs = {
   assessListingColours?: (candidates: AlternativeCandidate[]) => Promise<(AlternativeCandidate & { colourMatch: "same" | "different" | "unknown" })[]>;
   /** Called as soon as the survey has been evaluated, before the check finishes: the observed_alternatives event. */
   onAlternatives?: (alternatives: ObservedAlternatives) => void;
+  /**
+   * The identification is only a "possible" or "best_guess": price is reported as conditional on the best guess
+   * (candidates[0], whose lookup is `lookupNewPrices`), and is known only if every candidate's new price agrees within 15%.
+   */
+  conditional?: { candidates: { name: string; lookup: () => Promise<NewPrices> }[] };
 };
+
+/** Candidates' new prices count as agreeing when the dearest is within 15% of the cheapest. */
+export const CANDIDATE_PRICE_TOLERANCE = 0.15;
+export function candidatesAgree(newPrices: number[]): boolean {
+  return newPrices.length > 0 && Math.max(...newPrices) <= Math.min(...newPrices) * (1 + CANDIDATE_PRICE_TOLERANCE) + 1e-9;
+}
+/** Cap on the confidence of a price known only through candidates that agree. */
+export const CONDITIONAL_CONFIDENCE_CAP = 0.4;
 
 /** "Worth looking at": cheaper listings from the user's survey, colour checked. Never throws (empty instead). */
 export async function findAlternatives(args: Pick<PriceCheckArgs, "facts" | "observed" | "assessListingColours">): Promise<ObservedAlternatives> {
@@ -174,6 +187,7 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       details: { position: null, observedAlternatives: none },
     });
   }
+  if (args.conditional) return conditionalPrice(args, price, priceEv);
   // Evaluated alongside the Shopping lookup; sent as soon as it's ready.
   const alternativesP = findAlternatives(args)
     .catch(() => noAlternatives(args.observed?.survey))
@@ -298,6 +312,116 @@ export async function checkPrice(args: PriceCheckArgs): Promise<CheckResult> {
       ...(observedComparison ? { observedComparison } : {}),
       observedAlternatives,
       inCatalogue,
+    },
+  };
+}
+
+/** One candidate's new price (colour-matched like the normal lookup), or null when the lookup failed or found too few offers. */
+async function candidateNewPrice(
+  args: PriceCheckArgs,
+  lookup: () => Promise<NewPrices>,
+  totalPrice: number,
+  emit: boolean,
+): Promise<{ newPrice: NewPrice | null; newOffers?: NewOffers; offersSeen: number; live?: boolean }> {
+  try {
+    const looked = await lookup();
+    const coloured = args.assessOfferColours ? await args.assessOfferColours(looked.offers).catch(() => looked.offers) : looked.offers;
+    const r = { ...looked, offers: coloured };
+    const basis = args.assessOfferColours ? colourBasis(coloured) : null;
+    const newOffers = toNewOffers(r, totalPrice, { colourNote: basis?.note });
+    if (emit) args.onNewOffers?.(newOffers);
+    const priced = basis ? summariseOffers(basis.offers, { checkedOn: r.checkedOn, query: r.query, rawResults: r.rawResults }) : r;
+    return { newPrice: toNewPrice(priced, basis?.basis), newOffers, offersSeen: looked.offers.length, live: !looked.fromCache };
+  } catch (err) {
+    if ((err as Error)?.name === "StageTimeoutError") throw err;
+    return { newPrice: null, offersSeen: 0 };
+  }
+}
+
+const median = (xs: number[]) => {
+  const v = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : round2((v[m - 1] + v[m]) / 2);
+};
+
+/**
+ * Price when the model is only a best guess: the best guess's new price, reported as conditional ("If this is the X, it's
+ * £Y new."). No sampled or observed listings are used (they'd price the wrong model if the guess is wrong). The status is
+ * known only if every candidate's new price is within 15% of the others; then it uses their range, with confidence <= 0.4.
+ */
+async function conditionalPrice(args: PriceCheckArgs, price: number, priceEv: Evidence[]): Promise<CheckResult> {
+  const candidates = args.conditional!.candidates;
+  const paid = listingTotal(args.facts)!;
+  const none = noAlternatives(args.observed?.survey);
+  args.onAlternatives?.(none); // an uncertain model can't call any listing "the same pair"
+  const looked = await Promise.all(candidates.map((c, i) => candidateNewPrice(args, c.lookup, paid.total, i === 0)));
+  const prices = looked.map((l) => l.newPrice);
+  const best = prices[0];
+  const priced = prices.filter((p): p is NewPrice => !!p);
+  const agree = priced.length === candidates.length && candidatesAgree(priced.map((p) => p.gbp));
+  const nextId = evidenceIds("price");
+  const evidence: Evidence[] = [...priceEv];
+  priced.forEach((p) => {
+    const name = candidates[prices.indexOf(p)].name;
+    evidence.push({ id: nextId(), kind: "data_point", label: `If this is the ${name}: ${newPriceLabel(p).replace(/^N/, "n")}`, value: p.gbp, sourceType: "retailer", observedOn: p.observedOn });
+  });
+  if (best) {
+    for (const o of best.offers) {
+      evidence.push({ id: nextId(), kind: "source", label: `Retailer: ${o.retailer}, ${gbp(o.priceGBP)}`, value: o.priceGBP, url: o.url, title: o.title, sourceType: "retailer", observedOn: best.observedOn });
+    }
+  }
+  const range = agree ? { low: Math.min(...priced.map((p) => p.gbp)), high: Math.max(...priced.map((p) => p.gbp)) } : null;
+  const names = candidates.map((c) => c.name);
+  const conditionLine = best
+    ? agree && priced.length > 1
+      ? `If this is the ${names.join(" or the ")}, it's ${gbp(range!.low)}–${gbp(range!.high)} new.`
+      : `If this is the ${names[0]}, it's ${gbp(best.gbp)} new.`
+    : "";
+  let status: CheckStatus = "unknown";
+  let position: PricePosition | null = null;
+  let overBudget = false;
+  let summary: string;
+  if (agree && best) {
+    // Judged against the middle of their range.
+    const mid: NewPrice = { ...best, gbp: median(priced.map((p) => p.gbp)) };
+    const decision = decidePrice({ price, sample: null, newPrice: mid, budgetGBP: args.needs.budgetGBP, totalPrice: paid.total });
+    status = decision.status;
+    position = decision.position;
+    overBudget = decision.overBudget;
+    summary = `${conditionLine} ${priceSummary({ price, sample: null, sampleLabel: "", newPrice: mid, decision, paid })}`;
+  } else if (best) {
+    summary = `${conditionLine} I'm not sure which model this is and the candidates' new prices differ, so I can't judge this price yet.`;
+  } else {
+    summary = `${NO_NEW_PRICE} I'm also not sure which model this is.`;
+  }
+  const bestOffers = best?.offers.length ?? 0;
+  const confidence = status === "unknown" ? 0 : Math.min(CONDITIONAL_CONFIDENCE_CAP, bestOffers >= NEW_PRICE_CONFIDENCE.manyFrom ? NEW_PRICE_CONFIDENCE.many : NEW_PRICE_CONFIDENCE.few);
+  return {
+    check: "price",
+    status,
+    summary: summary.trim(),
+    evidence,
+    confidence,
+    geminiFeatures: args.calledViaTool?.() ? ["function_calling"] : [],
+    details: {
+      listingPriceGBP: price,
+      listingTotalGBP: paid.total,
+      ...(paid.line ? { priceBasis: paid.line } : {}),
+      ...(best ? { newPrice: { gbp: best.gbp, lowestGBP: best.lowestGBP, sources: best.offers.length, observedOn: best.observedOn, ...(best.colourBasis ? { colourBasis: best.colourBasis } : {}) } } : {}),
+      position,
+      overBudget,
+      budgetGBP: args.needs.budgetGBP,
+      conditionGrade: null,
+      sourceBRun: true,
+      retailerOffers: looked[0].offersSeen,
+      searchFailed: !best,
+      ...(looked[0].live !== undefined ? { shoppingLive: looked[0].live } : {}),
+      ...(looked[0].newOffers ? { newOffers: looked[0].newOffers } : {}),
+      observedAlternatives: none,
+      inCatalogue: false,
+      conditional: true,
+      conditionalOn: candidates.map((c, i) => ({ model: c.name, newGBP: prices[i]?.gbp ?? null })),
+      ...(range ? { candidateRange: range } : {}),
     },
   };
 }

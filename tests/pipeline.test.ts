@@ -100,7 +100,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     const checks = checksFrom(events);
     expect(checks.identify).toMatchObject({ status: "warn", details: { tier: "catalogue", level: "possible", modelName: "Nike Pegasus 40" } });
     expect((await deps.store.getCase(caseId))!.identify).toMatchObject({ confidenceLevel: "possible", bestGuess: { brand: "Nike", model: "Pegasus 40" } });
-    expect(checks.price.status).not.toBe("unknown"); // runs on the best guess (Phase 2 makes it conditional)
+    expect(checks.price.details).toMatchObject({ conditional: true }); // runs on the best guess, reported as conditional
     expect((events.find((e) => e.event === "verdict")!.data as Verdict).label).not.toBe("not_enough_evidence");
   });
 

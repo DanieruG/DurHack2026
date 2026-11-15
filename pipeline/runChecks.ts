@@ -7,6 +7,8 @@ import type { Deps } from "./deps";
 import type { Emit } from "./events";
 import type { CaseImage } from "./intake";
 import { identifyCheck, identifyProduct, subjectOf, type Subject } from "./identify";
+import { normaliseIdentify } from "./identifyLevel";
+import { candidateName, fullModelName } from "@/lib/identifyLabel";
 import { applyReviewSizingNote, checkFit, type SizingAdvice } from "./checks/fit";
 import { checkPrice } from "./checks/price";
 import type { NewPrices } from "@/lib/newPrices";
@@ -111,6 +113,23 @@ export async function runIdentify(ctx: RunCtx, opts: { onlyPhotoIndex?: number; 
   }
 }
 
+/** The identification is only a "possible" or "best_guess": model-dependent checks run on it, but say so. */
+export function isUncertain(ctx: RunCtx): boolean {
+  const level = normaliseIdentify(ctx.identify)?.confidenceLevel;
+  return level === "possible" || level === "best_guess";
+}
+
+/** The best guess first, then its alternatives, each as something to look up. */
+function priceCandidates(ctx: RunCtx, subject: Subject): { name: string; lookup: () => ReturnType<RunCtx["newPrices"]> }[] {
+  const first = { name: subject.displayName!, lookup: () => ctx.newPrices(subject.modelName!, subject.brand!) };
+  const rest = (ctx.identify?.alternatives ?? []).flatMap((a) => {
+    const model = fullModelName(a.model, a.version);
+    const brand = a.brand ?? subject.brand;
+    return model && brand ? [{ name: candidateName(a)!, lookup: () => ctx.newPrices(model, brand) }] : [];
+  });
+  return [first, ...rest];
+}
+
 export type CheckOpts = { priceCondition?: ConditionGrade; forceSourceB?: boolean };
 
 export function toIdentifyCheck(ctx: RunCtx, result: IdentifyResult): CheckResult {
@@ -131,6 +150,7 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
     return unknownCheck(name, `I couldn't tell the exact model from this listing, so I can't ${what}.`, observed);
   }
   const { deps } = ctx;
+  const uncertain = isUncertain(ctx);
   const timeoutMs = deps.config.stageTimeoutMs;
   const features = {
     fit: [],
@@ -156,7 +176,8 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
             forceSourceB: opts.forceSourceB,
             onNewOffers: (offers) => ctx.emit("new_offers", offers),
             assessOfferColours: (offers) => matchOfferColours(offers, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
-            observed: observedFor(ctx, subject),
+            observed: uncertain ? undefined : observedFor(ctx, subject),
+            conditional: uncertain ? { candidates: priceCandidates(ctx, subject) } : undefined,
             assessListingColours: (candidates) => matchOfferColours(candidates, ctx.facts.listingColour, { fetchThumbnail: (url) => fetchThumbnail(ctx, url) }),
             onAlternatives: (alternatives) => ctx.emit("observed_alternatives", alternatives),
           });
@@ -176,12 +197,23 @@ export async function runCheck(ctx: RunCtx, name: DownstreamCheck, opts: CheckOp
           return checkCondition({ gemini: deps.gemini, images: ctx.images, facts: ctx.facts, needs: ctx.needs });
       }
     });
-    return withUsage(result, stats);
+    return withUsage(uncertain ? labelAsGuess(ctx, name, result, subject) : result, stats);
   } catch (err) {
     ctx.emit("error", { stage: name, message: plainError(name, err) });
     const searchFailed = name === "price" || name === "comfort";
     return unknownCheck(name, plainError(name, err), searchFailed ? { details: { searchFailed: true } } : {});
   }
+}
+
+/** Comfort is "based on our best guess"; price is already conditional, but the survey comparison can't be made. */
+function labelAsGuess(ctx: RunCtx, name: DownstreamCheck, result: CheckResult, subject: Subject): CheckResult {
+  if (name === "comfort") {
+    return { ...result, summary: `Based on our best guess: ${subject.displayName}. ${result.summary}`, details: { ...(result.details ?? {}), basedOnBestGuess: true } };
+  }
+  if (name === "price" && ctx.survey) {
+    return { ...result, details: { ...(result.details ?? {}), observedComparison: { ...modelUnknownComparison(ctx.survey), note: "Couldn't compare: the exact model isn't confirmed." } } };
+  }
+  return result;
 }
 
 /** No alternatives (no survey, or nothing to compare against), sent as the observed_alternatives event too. */

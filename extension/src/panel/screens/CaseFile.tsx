@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { CaseDetail } from "@/schemas/api";
-import type { CheckName, CheckResult } from "@/schemas/domain";
+import type { CheckName, CheckResult, IdentifyCandidate } from "@/schemas/domain";
+import { candidateName } from "@/lib/identifyLabel";
 import { CHECK_NAMES, gbp, PLATFORM_NAMES } from "../../lib/format";
 import { caseLabel } from "../../lib/history";
 import { conditionView, evidenceLines, leadsView, observedView, priceView, sourceRefs, type ConditionView, type ObservedView, type SourceRef } from "../../lib/evidence";
@@ -46,7 +47,9 @@ export function CaseFile(props: {
 
   const byName = new Map(detail.checks.map((c) => [c.check, c]));
   const identify = byName.get("identify");
-  const rows = [...(identify && identify.status !== "pass" ? [identify] : []), ...ORDER.map((n) => byName.get(n)).filter((c): c is CheckResult => !!c)];
+  // The identify row appears unless the model is confirmed (by the label, the listing or the buyer): then it's just the first log line.
+  const identifyShown = identify && (identify.status !== "pass" || ["likely", "user_confirmed"].includes((identify.details as { level?: string } | undefined)?.level ?? ""));
+  const rows = [...(identifyShown ? [identify] : []), ...ORDER.map((n) => byName.get(n)).filter((c): c is CheckResult => !!c)];
   const questions = detail.nextMoves.filter((m) => m.kind === "ask_seller");
   const buyNew = detail.nextMoves.find((m) => m.id === BUY_NEW_MOVE_ID);
   const beforePay = detail.nextMoves.filter((m) => m.kind === "before_you_pay" && m !== buyNew);
@@ -233,6 +236,11 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
               </div>
             </div>
           )}
+          {(check.details as { conditional?: boolean } | undefined)?.conditional && (
+            <p className="note conditional">
+              <strong>Conditional.</strong> Sleuth isn&rsquo;t sure which model this is, so this price depends on the best guess being right.
+            </p>
+          )}
           {v.lines.map((l) => (
             <p className="note" key={l}>
               {l}
@@ -245,9 +253,11 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
         </>
       );
     }
-    default:
+    default: {
+      const alts = check.check === "identify" ? ((check.details as { alternatives?: IdentifyCandidate[] } | undefined)?.alternatives ?? []).map(candidateName).filter(Boolean) : [];
       return (
         <>
+          {alts.length > 0 && <p className="note">Could also be: {alts.join(", ")}</p>}
           {evidenceLines(check).map((l) => (
             <p className="note" key={l}>
               {l}
@@ -255,6 +265,7 @@ function CheckBody({ check, detail, onInvestigateListing }: { check: CheckResult
           ))}
         </>
       );
+    }
   }
 }
 
