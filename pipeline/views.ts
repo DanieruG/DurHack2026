@@ -59,6 +59,7 @@ export async function caseDetail(deps: Deps, c: CaseRow, origin: string): Promis
     nextMoves: c.nextMoves ?? [],
     newOffers: newOffersOf(checks),
     observedComparison: observedComparisonOf(checks),
+    warningSignals: entry?.warningSignals ?? [],
     evidenceIndex: indexEvidence(c.listingFacts?.evidence, c.identify?.evidence, ...checks.map((x) => x.evidence)),
     imageUrls: images.map((_, i) => imageUrl(origin, c.id, i)),
     history: c.history,
@@ -101,6 +102,8 @@ export async function synthesizeEvents(deps: Deps, c: CaseRow): Promise<SseEvent
   for (const l of leads) push("lead_done", l);
   const skipped = c.history.find((h) => h.revision === revision)?.leads?.skipped;
   if (skipped) push("leads_skipped", { reason: skipped });
+  const warningSignals = c.history.find((h) => h.revision === revision)?.warningSignals ?? [];
+  push("warning_signals", warningSignals);
   if (c.verdict) push("verdict", c.verdict);
   push("next_moves", c.nextMoves ?? []);
   if (c.status === "error") push("error", { message: "The investigation hit an unexpected problem and stopped." });

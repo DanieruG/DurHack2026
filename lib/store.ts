@@ -12,11 +12,12 @@ import type {
   UserNeeds,
   Verdict,
   VerdictLabel,
+  WarningSignal,
 } from "@/schemas/domain";
 import type { ReferenceData } from "./seedData";
 
 /** `run`: the investigation's totals (as in investigation_done), so a case file opened later can show them. */
-export type HistoryEntry = { revision: number; verdictLabel: VerdictLabel; at: string; leads?: LeadsReport; run?: RunTotals };
+export type HistoryEntry = { revision: number; verdictLabel: VerdictLabel; at: string; leads?: LeadsReport; run?: RunTotals; warningSignals?: WarningSignal[] };
 export type RunTotals = { durationMs: number; geminiCalls: number; cachedCalls: number };
 
 export type CaseRow = {

@@ -19,6 +19,7 @@ import {
   UserNeedsSchema,
   VerdictLabelSchema,
   VerdictSchema,
+  WarningSignalSchema,
 } from "./domain";
 import { FeedItemSchema } from "./seed";
 
@@ -68,6 +69,7 @@ export const CaseDetailSchema = z.object({
   newOffers: NewOffersSchema.nullable().default(null),
   /** The shown revision's comparison with the user's search survey (price details.observedComparison); null without a survey. */
   observedComparison: ObservedComparisonSchema.nullable().default(null),
+  warningSignals: z.array(WarningSignalSchema).default([]),
   evidenceIndex: z.record(z.string(), EvidenceSchema),
   imageUrls: z.array(z.string()),
   history: z.array(
@@ -117,6 +119,7 @@ export const SseEventSchemas = {
   leads_skipped: z.object({ reason: z.string() }),
   verdict: VerdictSchema,
   next_moves: z.array(NextMoveSchema),
+  warning_signals: z.array(WarningSignalSchema),
   case_reopened: z.object({ caseId: z.string(), revision: z.number().int() }),
   diff: CaseDiffSchema,
   investigation_done: z.object({

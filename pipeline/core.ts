@@ -9,6 +9,7 @@ import { generateNextMoves } from "./nextMoves";
 import type { RunCtx } from "./runChecks";
 import { decideAndWordVerdict } from "./verdict/wording";
 import { decideVerdict } from "./verdict/rules";
+import { detectWarningSignals } from "./signals";
 import { runStage } from "./util";
 import { fromStoredSurvey, matchSurvey, toStoredSurvey, type StoredSurvey, type Survey } from "@/lib/observed";
 import { chartFor, subjectFor, tokensFor } from "./runChecks";
@@ -100,16 +101,18 @@ export async function finalise(
   const { deps, emit, caseId, revision } = ctx;
   const timeoutMs = deps.config.stageTimeoutMs;
   const identifyPassed = brandKnown(ctx.identify, deps.config.identifyConfidenceMin, ctx.ref.catalogue);
+  const sellerReplies = (await deps.store.getInputs(caseId, { kinds: ["seller_reply"], withData: false })).map((r) => r.text ?? "").filter(Boolean);
+  const warningSignals = detectWarningSignals({ checks: args.checks, facts: ctx.facts, identify: ctx.identify, pageText: ctx.pageText, sellerReplies, platform: ctx.facts.platform });
 
   // The label is decided by code rules, so wording the verdict and phrasing next moves can run at the same time.
-  const label = decideVerdict(args.checks, identifyPassed).label;
-  const movesArgs = { checks: args.checks, leads: args.leads, label, answered: args.answered };
+  const label = decideVerdict(args.checks, identifyPassed, warningSignals).label;
+  const movesArgs = { checks: args.checks, leads: args.leads, label, answered: args.answered, signals: warningSignals, platform: ctx.facts.platform };
   const [{ verdict }, nextMoves] = await Promise.all([
     runStage("verdict", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () =>
-      decideAndWordVerdict(deps.gemini, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence }),
-    ).catch(() => decideAndWordVerdict(null, { checks: args.checks, identifyPassed, extraEvidence: ctx.facts.evidence })),
+      decideAndWordVerdict(deps.gemini, { checks: args.checks, identifyPassed, signals: warningSignals, extraEvidence: ctx.facts.evidence }),
+    ).catch(() => decideAndWordVerdict(null, { checks: args.checks, identifyPassed, signals: warningSignals, extraEvidence: ctx.facts.evidence })),
     runStage("next_moves", { emit, timeoutMs, geminiFeatures: ["structured_output"] }, () => generateNextMoves(deps.gemini, movesArgs)).catch(() =>
-      generateNextMoves(null, movesArgs),
+    generateNextMoves(null, movesArgs),
     ),
   ]);
 
@@ -123,11 +126,12 @@ export async function finalise(
     identify,
     verdict,
     nextMoves,
-    history: [...args.row.history.filter((h) => h.revision !== revision), { revision, verdictLabel: verdict.label, at: deps.now().toISOString(), leads: args.leadsReport ?? { considered: args.leads.length > 0 } }],
+    history: [...args.row.history.filter((h) => h.revision !== revision), { revision, verdictLabel: verdict.label, at: deps.now().toISOString(), leads: args.leadsReport ?? { considered: args.leads.length > 0 }, warningSignals }],
     inputHash: inputHashFor(args.inputHashImages, ctx.pageText, ctx.needs, deps.config.pipelineVersion),
     ...(args.answered ? { answered: args.answered } : {}),
   });
 
+  emit("warning_signals", warningSignals);
   emit("verdict", verdict);
   emit("next_moves", nextMoves);
   args.beforeDone?.(verdict);

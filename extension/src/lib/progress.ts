@@ -1,5 +1,5 @@
 import { SseEventSchemas, type SseEventData, type SseEventName } from "@/schemas/api";
-import { NewOffersSchema, type CaseDiff, type CheckName, type CheckResult, type Lead, type NewOffers, type NextMove, type Verdict } from "@/schemas/domain";
+import { NewOffersSchema, type CaseDiff, type CheckName, type CheckResult, type Lead, type NewOffers, type NextMove, type Verdict, type WarningSignal } from "@/schemas/domain";
 import { openableOffers } from "./offers";
 import { checkTags, stepTags } from "./tags";
 
@@ -26,6 +26,7 @@ export type Investigation = {
   leadsSkipped: string | null;
   verdict: Verdict | null;
   nextMoves: NextMove[];
+  warningSignals: WarningSignal[];
   /** New-price offers: from new_offers as soon as the Shopping lookup finishes, then from the price check itself. */
   newOffers: NewOffers | null;
   /** The price check has started and not reported yet: the offers slot is reserved. */
@@ -52,6 +53,7 @@ export function newInvestigation(revision: number, at: number): Investigation {
     leadsSkipped: null,
     verdict: null,
     nextMoves: [],
+    warningSignals: [],
     newOffers: null,
     priceRunning: false,
     diff: null,
@@ -241,6 +243,8 @@ export function applyEvent(s: Investigation, e: IncomingEvent): Investigation {
       return { ...s, newOffers: e.data as NewOffers };
     case "verdict":
       return { ...s, verdict: e.data as Verdict };
+    case "warning_signals":
+      return { ...s, warningSignals: e.data as WarningSignal[] };
     case "next_moves":
       return { ...s, nextMoves: e.data as NextMove[] };
     case "diff":

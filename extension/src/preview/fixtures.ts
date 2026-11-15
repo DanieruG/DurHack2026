@@ -161,6 +161,7 @@ export const CASE_FILE: CaseDetail = {
   leadsReport: { considered: true },
   newOffers: NEW_OFFERS,
   observedComparison: OBSERVED,
+  warningSignals: [],
   run: { durationMs: 11400, geminiCalls: 7, cachedCalls: 0 },
   verdict: {
     label: "proceed_with_caution",

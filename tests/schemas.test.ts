@@ -54,6 +54,7 @@ describe("schemas round-trip fixtures", () => {
       leads_skipped: { reason: "Skipped: the review search was unavailable." },
       verdict,
       next_moves: [],
+      warning_signals: [],
       case_reopened: { caseId: "c1", revision: 2 },
       diff: { fromRevision: 1, toRevision: 2, checks: [], verdict: { before: "worth_a_look", after: "hidden_gem" } },
       investigation_done: { caseId: "c1", revision: 1, durationMs: 10, geminiCalls: 4 },

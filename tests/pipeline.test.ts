@@ -52,7 +52,7 @@ describe("investigation pipeline (mocked Gemini)", () => {
     const stored = (await deps.store.getCase(caseId))!;
     expect(stored).toMatchObject({ status: "closed", platform: "vinted", pageUrl: "https://www.vinted.co.uk/items/123-nike-pegasus", revision: 1 });
     expect(stored.history).toEqual([
-      { revision: 1, verdictLabel: "hidden_gem", at: "2026-11-14T12:00:00.000Z", leads: { considered: false }, run: { durationMs: expect.any(Number), geminiCalls: expect.any(Number), cachedCalls: 0 } },
+      { revision: 1, verdictLabel: "hidden_gem", at: "2026-11-14T12:00:00.000Z", leads: { considered: false }, warningSignals: [], run: { durationMs: expect.any(Number), geminiCalls: expect.any(Number), cachedCalls: 0 } },
     ]);
     const doneEv = events.find((e) => e.event === "investigation_done")!.data as { geminiCalls: number };
     expect(stored.history[0].run?.geminiCalls).toBe(doneEv.geminiCalls);
@@ -66,6 +66,17 @@ describe("investigation pipeline (mocked Gemini)", () => {
     for (const s of [text.text!, ...deps.calls.map(promptText)]) {
       expect(s).not.toMatch(/jane_doe_99|Member since|120 reviews/);
     }
+  });
+
+  it("emits, persists and returns warning signals from redacted listing text", async () => {
+    const deps = makeDeps();
+    const { caseId, events } = await investigate(deps, { pageText: `${PAGE_TEXT}\nPay by bank transfer or WhatsApp me.` });
+    const warning = events.find((e) => e.event === "warning_signals");
+    expect(warning?.data).toMatchObject([{ id: "off_platform", strength: "strong" }]);
+    expect(events.findIndex((e) => e.event === "warning_signals")).toBeLessThan(events.findIndex((e) => e.event === "verdict"));
+    const detail = await caseDetail(deps, (await deps.store.getCase(caseId))!, "http://x.test");
+    expect(detail.warningSignals.map((s) => s.id)).toContain("off_platform");
+    expect((await deps.store.getCase(caseId))!.history[0].warningSignals?.map((s) => s.id)).toContain("off_platform");
   });
 
   it("no brand: R1, but condition still runs on the photos; fit/price/comfort are unknown without any calls", async () => {
