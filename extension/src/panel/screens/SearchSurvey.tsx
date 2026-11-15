@@ -1,8 +1,11 @@
 import type { SearchPage } from "../../lib/survey";
 import { PLATFORM_NAMES } from "../../lib/format";
-import type { TopResult } from "../../lib/topResults";
+import { explainResults, type ResultCounts, type TopResult } from "../../lib/topResults";
 import { TopResultsList } from "../offers";
 import { Button, Notice } from "../ui";
+
+/** Results shown per page on the search screen ("Show next 8"). */
+export const RESULTS_PAGE = 8;
 
 export const SURVEY_STORAGE_NOTE = "Your surveys are stored on this device";
 
@@ -21,6 +24,8 @@ export function SearchSurvey(props: {
   onSurvey: () => void;
   /** The best-value results from the survey so far (lib/topResults.ts). */
   top?: TopResult[];
+  /** What was read and what was left out, for the line under the heading (never silent). */
+  counts?: ResultCounts | null;
   onInvestigate?: (url: string) => void;
 }) {
   const { page } = props;
@@ -42,9 +47,21 @@ export function SearchSurvey(props: {
       )}
 
       {props.top && props.top.length > 0 ? (
-        <TopResultsList results={props.top} platformName={PLATFORM_NAMES[page.platform]} heading="Top results from this search" onInvestigate={props.onInvestigate} footnote="Best value first, from the listings Sleuth saw. None has been investigated." />
+        <TopResultsList
+          results={props.top}
+          platformName={PLATFORM_NAMES[page.platform]}
+          heading="Top results from this search"
+          pageSize={RESULTS_PAGE}
+          onInvestigate={props.onInvestigate}
+          footnote="Best value first, from the listings Sleuth saw. None has been investigated."
+        />
       ) : (
         !props.summary && <p className="note dim">Reading the results on this page…</p>
+      )}
+      {props.counts && props.counts.read > 0 && (
+        <p className="note dim results-explain" aria-live="polite">
+          {explainResults(props.counts)}
+        </p>
       )}
 
       <div className="foot">

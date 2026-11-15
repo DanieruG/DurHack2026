@@ -44,36 +44,75 @@ export function wishColours(wish: string | undefined): { wanted: string[]; avoid
 
 const words = (s: string) => normaliseTitle(s).split(" ").filter((w) => w.length > 1);
 
-export function topResults(
-  cards: SurveyCard[],
-  opts: {
-    profile: Profile | null;
-    /** The search the cards came from ("nike pegasus 40"). */
-    query?: string;
-    /** The listing being investigated, never offered back. */
-    excludeId?: string | null;
-    /** The buyer's "Colour or look" for this pair. */
-    colourWish?: string;
-    limit?: number;
-  },
-): TopResult[] {
-  const eligible = cards.filter(
-    (c) => !c.sponsored && c.buyingFormat !== "auction" && c.price !== null && c.price > 0 && (c.currency === null || c.currency === "GBP") && c.id !== opts.excludeId && /^https:\/\//.test(c.url),
-  );
-  if (!eligible.length) return [];
-  const typical = median(eligible.map((c) => c.price!));
-  const hasSizes = !!(opts.profile?.sizes.length || opts.profile?.defaultSize);
+/** What was read and what was left out, for the line that explains the list (and an empty one). */
+export type ResultCounts = {
+  read: number;
+  /** Results ranked (before paging). */
+  ranked: number;
+  sponsored: number;
+  auctions: number;
+  /** No single price: a price range, or none. */
+  unpriced: number;
+  otherCurrency: number;
+  /** The listing being investigated. */
+  self: number;
+  aboveTypical: number;
+  otherSize: number;
+  typicalGBP: number | null;
+};
+
+type Opts = {
+  profile: Profile | null;
+  /** The search the cards came from ("nike pegasus 40"). */
+  query?: string;
+  /** The listing being investigated, never offered back. */
+  excludeId?: string | null;
+  /** The buyer's "Colour or look" for this pair. */
+  colourWish?: string;
+  limit?: number;
+};
+
+const queryOverlap = (queryWords: string[], title: string) => {
+  const t = new Set(words(title));
+  return queryWords.length ? queryWords.filter((w) => t.has(w)).length / queryWords.length : 1;
+};
+
+/** Every card scored and sorted, plus the counts behind what was left out. */
+export function analyseResults(cards: SurveyCard[], opts: Opts): { ranked: TopResult[]; counts: ResultCounts } {
+  const counts: ResultCounts = { read: cards.length, ranked: 0, sponsored: 0, auctions: 0, unpriced: 0, otherCurrency: 0, self: 0, aboveTypical: 0, otherSize: 0, typicalGBP: null };
+  const eligible: SurveyCard[] = [];
+  for (const c of cards) {
+    if (c.id === opts.excludeId) counts.self++;
+    else if (!/^https:\/\//.test(c.url)) continue;
+    else if (c.sponsored) counts.sponsored++;
+    else if (c.buyingFormat === "auction") counts.auctions++;
+    else if (c.price === null || c.price <= 0) counts.unpriced++;
+    else if (c.currency !== null && c.currency !== "GBP") counts.otherCurrency++;
+    else eligible.push(c);
+  }
+  if (!eligible.length) return { ranked: [], counts };
   const queryWords = words(opts.query ?? "");
+  // "Typical" is the price of listings that are about the search, not of whatever else sits on the page.
+  const onTopic = queryWords.length >= 2 ? eligible.filter((c) => queryOverlap(queryWords, c.title) > 0) : eligible;
+  const typical = median((onTopic.length ? onTopic : eligible).map((c) => c.price!));
+  counts.typicalGBP = Math.round(typical * 100) / 100;
+  const hasSizes = !!(opts.profile?.sizes.length || opts.profile?.defaultSize);
   const { wanted, avoided } = wishColours(opts.colourWish);
 
   const scored: TopResult[] = [];
   for (const c of eligible) {
     const price = c.price!;
     // Only at or under the typical price is "high potential" (with a handful of cards there is little to compare).
-    if (eligible.length >= 4 && price > typical) continue;
+    if (eligible.length >= 4 && price > typical) {
+      counts.aboveTypical++;
+      continue;
+    }
     const fit = cardSizeFit(c, opts.profile);
     // A size we can read that isn't the buyer's is no use to them.
-    if (hasSizes && fit.cardUK !== null && fit.mineUK !== null && !fit.fits) continue;
+    if (hasSizes && fit.cardUK !== null && fit.mineUK !== null && !fit.fits) {
+      counts.otherSize++;
+      continue;
+    }
 
     const parts: string[] = [];
     let score = 0;
@@ -88,10 +127,7 @@ export function topResults(
     } else if (hasSizes) score += 4; // unknown size: worth asking, but less than a known match
     parts.push(sizeLabel);
 
-    if (queryWords.length) {
-      const title = new Set(words(c.title));
-      score += (queryWords.filter((w) => title.has(w)).length / queryWords.length) * 15;
-    }
+    if (queryWords.length) score += queryOverlap(queryWords, c.title) * 15;
     if (wanted.length || avoided.length) {
       const inTitle = colourWordsIn(c.title);
       if (avoided.some((a) => inTitle.includes(a as never))) {
@@ -103,7 +139,32 @@ export function topResults(
       } else if (wanted.length && inTitle.length) score -= 8;
     }
     if (c.thumbnailUrl) score += 3;
-    scored.push({ card: c, score: Math.round(score * 10) / 10, reason: parts.join(" · "), sizeLabel, typicalGBP: Math.round(typical * 100) / 100 });
+    scored.push({ card: c, score: Math.round(score * 10) / 10, reason: parts.join(" · "), sizeLabel, typicalGBP: counts.typicalGBP });
   }
-  return scored.sort((a, b) => b.score - a.score || a.card.price! - b.card.price! || a.card.id.localeCompare(b.card.id)).slice(0, opts.limit ?? TOP_RESULTS);
+  const ranked = scored.sort((a, b) => b.score - a.score || a.card.price! - b.card.price! || a.card.id.localeCompare(b.card.id));
+  counts.ranked = ranked.length;
+  return { ranked, counts };
+}
+
+export function topResults(cards: SurveyCard[], opts: Opts): TopResult[] {
+  return analyseResults(cards, opts).ranked.slice(0, opts.limit ?? TOP_RESULTS);
+}
+
+/** How many ranked results the search screen keeps to page through ("Show next 8"). */
+export const RANKED_MAX = 40;
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** "Read 58 listings. 12 look like good value; left out: 20 not in your size, 9 auctions or sponsored, ..." Never silent. */
+export function explainResults(c: ResultCounts): string {
+  if (!c.read) return "No listings read from this page yet.";
+  const left: string[] = [];
+  if (c.otherSize) left.push(`${c.otherSize} not in your size`);
+  if (c.aboveTypical) left.push(`${c.aboveTypical} above the typical ${c.typicalGBP !== null ? gbp(Math.round(c.typicalGBP)) : "price"}`);
+  const noFixedPrice = c.auctions + c.sponsored;
+  if (noFixedPrice) left.push(`${noFixedPrice} ${noFixedPrice === 1 ? "auction or sponsored" : "auctions or sponsored"}`);
+  if (c.unpriced) left.push(`${c.unpriced} with no single price`);
+  if (c.otherCurrency) left.push(`${c.otherCurrency} not priced in £`);
+  const head = `Read ${plural(c.read, "listing")}. ${c.ranked ? `${c.ranked} look like good value` : "None stood out as good value"}`;
+  return left.length ? `${head}; left out: ${left.join(", ")}.` : `${head}.`;
 }

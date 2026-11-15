@@ -93,3 +93,46 @@ describe("wishColours", () => {
     expect(wishColours(undefined)).toEqual({ wanted: [], avoided: [] });
   });
 });
+
+import { analyseResults, explainResults, RANKED_MAX } from "@/extension/src/lib/topResults";
+
+describe("analyseResults: what was left out, and why", () => {
+  const cards = [
+    card({ id: "a", price: 20 }),
+    card({ id: "b", price: 25 }),
+    card({ id: "c", price: 60 }),
+    card({ id: "d", price: 70 }),
+    card({ id: "ten", price: 22, sizeText: "UK 10" }),
+    card({ id: "sp", sponsored: true }),
+    card({ id: "au", buyingFormat: "auction" }),
+    card({ id: "range", price: null }),
+    card({ id: "usd", currency: "USD", price: 30 }),
+    card({ id: "me", price: 15 }),
+  ];
+  it("counts every reason a card was not ranked", () => {
+    const { ranked, counts } = analyseResults(cards, { profile, excludeId: "me" });
+    expect(counts).toMatchObject({ read: 10, sponsored: 1, auctions: 1, unpriced: 1, otherCurrency: 1, self: 1, otherSize: 1, aboveTypical: 2 });
+    expect(counts.ranked).toBe(ranked.length);
+    expect(ranked.map((r) => r.card.id)).toEqual(["a", "b"]);
+    // Every card is somewhere: ranked, or in exactly one reason.
+    const c = counts;
+    expect(c.ranked + c.sponsored + c.auctions + c.unpriced + c.otherCurrency + c.self + c.otherSize + c.aboveTypical).toBe(c.read);
+  });
+  it("explains in plain words, and never says nothing", () => {
+    const { counts } = analyseResults(cards, { profile, excludeId: "me" });
+    expect(explainResults(counts)).toBe("Read 10 listings. 2 look like good value; left out: 1 not in your size, 2 above the typical £25, 2 auctions or sponsored, 1 with no single price, 1 not priced in £.");
+    expect(explainResults({ ...counts, ranked: 0, otherSize: 0, aboveTypical: 0, auctions: 0, sponsored: 0, unpriced: 0, otherCurrency: 0 })).toBe("Read 10 listings. None stood out as good value.");
+    expect(explainResults(analyseResults([], { profile }).counts)).toBe("No listings read from this page yet.");
+    expect(explainResults(analyseResults([card({ id: "x", sizeText: "UK 10" })], { profile }).counts)).toMatch(/^Read 1 listing\. None stood out as good value; left out: 1 not in your size\.$/);
+  });
+  it("'typical' comes from listings about the search, not whatever else is on the page", () => {
+    const mixed = [card({ id: "on1", price: 30 }), card({ id: "on2", price: 32 }), card({ id: "on3", price: 34 }), ...Array.from({ length: 6 }, (_, i) => card({ id: `off${i}`, price: 200, title: "Adidas Samba OG" }))];
+    expect(analyseResults(mixed, { profile, query: "nike pegasus 40" }).counts.typicalGBP).toBe(32);
+    expect(analyseResults(mixed, { profile }).counts.typicalGBP).toBe(200);
+  });
+  it("keeps the whole ranked list for paging, capped only by the caller", () => {
+    const many = Array.from({ length: 30 }, (_, i) => card({ id: `p${String(i).padStart(2, "0")}`, price: 20 + (i % 3) }));
+    expect(analyseResults(many, { profile }).ranked.length).toBeGreaterThan(TOP_RESULTS);
+    expect(RANKED_MAX).toBe(40);
+  });
+});

@@ -175,17 +175,23 @@ export function TopResultsList({
   heading,
   onInvestigate,
   footnote,
+  pageSize,
 }: {
   results: TopResult[];
   platformName: string;
   heading: string;
   onInvestigate?: (url: string) => void;
   footnote?: string | null;
+  /** Page through the results ("Show next 8") instead of "Show all". */
+  pageSize?: number;
 }) {
   const [all, setAll] = useState(false);
+  const [page, setPage] = useState(0);
   const usable = results.filter((r) => safeHref(r.card.url));
   if (!usable.length) return null;
-  const shown = all ? usable : usable.slice(0, TOP_SHOWN);
+  const pages = pageSize ? Math.ceil(usable.length / pageSize) : 1;
+  const here = Math.min(page, pages - 1);
+  const shown = pageSize ? usable.slice(here * pageSize, (here + 1) * pageSize) : all ? usable : usable.slice(0, TOP_SHOWN);
   return (
     <section className="alts top-results" aria-label={heading}>
       <Label>{heading}</Label>
@@ -213,7 +219,22 @@ export function TopResultsList({
             );
           })}
         </ul>
-        {usable.length > TOP_SHOWN && (
+        {pageSize && pages > 1 && (
+          <div className="offers-pager">
+            {here < pages - 1 && (
+              <button type="button" className="btn btn-text offers-more" onClick={() => setPage(here + 1)}>
+                {`Show next ${Math.min(pageSize, usable.length - (here + 1) * pageSize)}`}
+              </button>
+            )}
+            {here > 0 && (
+              <button type="button" className="btn btn-text offers-more" onClick={() => setPage(0)}>
+                Back to top
+              </button>
+            )}
+            <span className="dim mono pager-count">{`${here * pageSize + 1}-${Math.min((here + 1) * pageSize, usable.length)} of ${usable.length}`}</span>
+          </div>
+        )}
+        {!pageSize && usable.length > TOP_SHOWN && (
           <button type="button" className="btn btn-text offers-more" aria-expanded={all} onClick={() => setAll((x) => !x)}>
             {all ? "Show fewer" : `Show all ${usable.length}`}
           </button>

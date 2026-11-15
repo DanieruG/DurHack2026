@@ -6,7 +6,7 @@ import { DEFAULT_API_BASE, forgetCase, loadHistory, loadProfile, loadSettings, l
 import { caseForUrl, historyRows, keepFound, type HistoryEntry } from "../lib/history";
 import { activeTabUrl, captureActiveTab, onActiveListingChange, openListingTab, requestSiteAccess, surveyActiveTab } from "../chrome/tab";
 import { cardsFromCapture, scanUrlOf, searchPageOf, summariseSurvey, summaryLine, surveyForCase, topResultsForCase, type SearchPage, type SurveyRecord } from "../lib/survey";
-import { topResults } from "../lib/topResults";
+import { analyseResults, RANKED_MAX } from "../lib/topResults";
 import { listingItemId } from "@/lib/listingScope";
 import { detectPlatform } from "@/lib/platform";
 import { SearchSurvey } from "./screens/SearchSurvey";
@@ -88,6 +88,16 @@ export function App() {
         : null,
     [surveys, active, profile],
   );
+
+  /** The ranked results for the search page on screen (all of them, up to RANKED_MAX; the screen pages through them). */
+  const searchPage = ready.kind === "search" ? ready.page : null;
+  const searchAnalysis = useMemo(() => {
+    if (!searchPage) return null;
+    const record = surveys.find((x) => x.key === searchPage.key);
+    if (!record) return null;
+    const a = analyseResults(record.cards, { profile, query: searchPage.query });
+    return { ...a, ranked: a.ranked.slice(0, RANKED_MAX) };
+  }, [searchPage, surveys, profile]);
 
   const api = useMemo(() => createApi(apiBase), [apiBase]);
   const loadEvalSummary = useCallback(() => api.getEvalSummary(), [api]);
@@ -447,7 +457,8 @@ export function App() {
           busy={survey.busy}
           error={survey.error}
           onSurvey={() => void surveyNow(ready.page)}
-          top={topResults(surveys.find((x) => x.key === ready.page.key)?.cards ?? [], { profile, query: ready.page.query })}
+          top={searchAnalysis?.ranked}
+          counts={searchAnalysis?.counts}
           onInvestigate={(url) => void investigateListing(url, ready.page.key)}
         />
       ) : profile && (

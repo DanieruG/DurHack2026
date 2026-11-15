@@ -169,3 +169,35 @@ describe("the Colour row", () => {
     expect(el.textContent).not.toContain("You asked for");
   });
 });
+
+describe("Show next 8", () => {
+  const page = { platform: "vinted" as const, query: "nike pegasus 40", key: "vinted:nike pegasus 40" };
+  const many = Array.from({ length: 20 }, (_, i) => card({ id: `m${String(i).padStart(2, "0")}`, price: 20 + i * 0.5 }));
+  const ranked = topResults(many, { profile: PROFILE, query: "nike pegasus 40", limit: 40 });
+  const titlesShown = (el: HTMLElement) => [...el.querySelectorAll(".offer-list li a")].map((a) => a.getAttribute("href"));
+  const nextBtn = (el: HTMLElement) => [...el.querySelectorAll("button")].find((b) => /^Show next/.test(b.textContent ?? ""));
+
+  it("shows 8 at a time, pages forward and back, and says where you are", async () => {
+    expect(ranked.length).toBeGreaterThan(8);
+    const el = await render(h(SearchSurvey, { page, summary: "Surveyed 20 listings", added: null, busy: false, error: null, onSurvey: vi.fn(), top: ranked }));
+    const first = titlesShown(el);
+    expect(first).toHaveLength(8);
+    expect(el.textContent).toContain(`1-8 of ${ranked.length}`);
+    click(nextBtn(el)!);
+    const second = titlesShown(el);
+    expect(second.length).toBeGreaterThan(0);
+    expect(second.some((u) => first.includes(u))).toBe(false); // different listings
+    expect(el.textContent).toContain(`9-${Math.min(16, ranked.length)} of ${ranked.length}`);
+    click([...el.querySelectorAll("button")].find((b) => b.textContent === "Back to top")!);
+    expect(titlesShown(el)).toEqual(first);
+  });
+  it("no pager when everything fits on one page", async () => {
+    const el = await render(h(SearchSurvey, { page, summary: "x", added: null, busy: false, error: null, onSurvey: vi.fn(), top: ranked.slice(0, 5) }));
+    expect(nextBtn(el)).toBeUndefined();
+  });
+  it("always explains what was read, even when nothing ranks", async () => {
+    const counts = { read: 58, ranked: 0, sponsored: 4, auctions: 5, unpriced: 3, otherCurrency: 0, self: 0, aboveTypical: 20, otherSize: 26, typicalGBP: 44 };
+    const el = await render(h(SearchSurvey, { page, summary: "Surveyed 58 listings", added: null, busy: false, error: null, onSurvey: vi.fn(), top: [], counts }));
+    expect(el.querySelector(".results-explain")?.textContent).toBe("Read 58 listings. None stood out as good value; left out: 26 not in your size, 20 above the typical £44, 9 auctions or sponsored, 3 with no single price.");
+  });
+});

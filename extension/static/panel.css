@@ -473,3 +473,6 @@ a.offer:hover .offer-title { text-decoration: underline; text-decoration-color: 
 .field-hint { margin-top: 6px; font-size: 12.5px; }
 ul.plain { list-style: none; margin: 4px 0 0; padding: 0; }
 ul.plain li { margin-top: 3px; }
+.offers-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
+.pager-count { margin-left: auto; }
+.results-explain { margin-top: 10px; }
