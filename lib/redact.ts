@@ -1,7 +1,9 @@
 /**
  * Second-layer seller-identity redaction (the extension redacts first).
  * Removes profile / rating blocks and the line following a seller header (usually the username),
- * and masks @handles, emails and phone numbers anywhere in the text.
+ * and masks @handles, emails and phone numbers anywhere in the text. Contact details use distinct
+ * placeholders so downstream checks can notice that a listing asked to move off-platform without
+ * retaining the contact detail itself.
  */
 
 const DROP_LINE = [
@@ -43,7 +45,7 @@ const INLINE_SELLER = /^\s*(seller|sold by|listed by|posted by)\s*[:\-]?\s+\S+/i
 const INLINE_LABEL = /\b(seller|sold by|listed by|posted by|username|user)\s*[:\-]\s*[^\s,.;!?]+/gi;
 const HANDLE = /(^|[\s(])@[A-Za-z0-9_.-]{2,}/g;
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const PHONE = /(?:\+44\s?7\d{3}|\b07\d{3})\s?\d{3}\s?\d{3}\b|\+\d{1,3}[\s-]?\(?\d{2,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,4}\b/g;
+const PHONE = /(?:\+\d{1,3}[\s.-]?(?:\(0\)[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b|\b0\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b)/g;
 
 // eBay seller card: avatar initial, username, feedback count, then optional "Private"/"Business".
 const AVATAR = /^\s*[A-Za-z0-9]\s*$/;
@@ -117,10 +119,10 @@ export function redact(input: string | undefined | null): RedactResult {
   // Anywhere else the username appears (descriptions, replies, feedback), mask it.
   for (const name of usernames) joined = joined.replace(new RegExp(`(^|[^\\w])${escapeRe(name)}(?![\\w])`, "gi"), "$1[redacted]");
   const text = joined
-    .replace(EMAIL, "[redacted]")
+    .replace(EMAIL, "[email removed]")
     .replace(INLINE_LABEL, (_, label) => `${label}: [redacted]`)
     .replace(HANDLE, (_, pre) => `${pre}[redacted]`)
-    .replace(PHONE, "[redacted]")
+    .replace(PHONE, "[phone number removed]")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { text, removedLines: removed };

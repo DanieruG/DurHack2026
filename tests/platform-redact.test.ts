@@ -25,9 +25,23 @@ describe("redact", () => {
   it("removes seller identity blocks and handles", () => {
     const { text, removedLines } = redact(PAGE_TEXT + "\nMessage me @jane.doe or jane@example.com or 07700 900123");
     expect(text).not.toMatch(/jane_doe_99|Member since|★|120 reviews|jane\.doe|example\.com|07700/);
+    expect(text).toContain("[email removed]");
+    expect(text).toContain("[phone number removed]");
     expect(text).toContain("Size: UK 9");
     expect(text).toContain("£38.00");
     expect(removedLines).toBeGreaterThanOrEqual(3);
+  });
+  it.each([
+    "07700 900123",
+    "07700900123",
+    "+44 7700 900123",
+    "+44 (0)7700 900123",
+    "07700-900-123",
+    "020 7946 0958",
+  ])("masks UK phone format %s without retaining its digits", (phone) => {
+    const text = redact(`Message me on ${phone}`).text;
+    expect(text).toBe("Message me on [phone number removed]");
+    expect(text).not.toContain(phone.replace(/\D/g, ""));
   });
   it("drops the line after a seller header", () => {
     expect(redact("Seller\nsneakerqueen\nSize UK 8").text).toBe("Size UK 8");
